@@ -1,0 +1,5 @@
+flask==3.0.3
+anthropic==0.34.2
+supabase==2.7.4
+reportlab==4.2.2
+gunicorn==22.0.0
