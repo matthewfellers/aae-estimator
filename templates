@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAE Automation — Panel Estimator</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy:      #1F3864;
+  --blue:      #2E74B5;
+  --lightblue: #BDD7EE;
+  --paleblue:  #DEEAF1;
+  --orange:    #C55A11;
+  --orange-lt: #FCE4D6;
+  --green:     #70AD47;
+  --green-lt:  #E2EFDA;
+  --gray:      #F2F2F2;
+  --mid-gray:  #D9D9D9;
+  --dark:      #1a1a2e;
+  --white:     #ffffff;
+  --yellow:    #FFF2CC;
+  --text:      #1F3864;
+  --muted:     #6b7280;
+  --radius:    8px;
+  --shadow:    0 4px 24px rgba(31,56,100,0.12);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: #0f1e3d;
+  color: var(--white);
+  min-height: 100vh;
+}
+
+/* ── Top Nav ── */
+.topnav {
+  background: var(--navy);
+  border-bottom: 3px solid var(--orange);
+  padding: 0 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  position: sticky; top: 0; z-index: 100;
+}
+.topnav-brand {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.8rem;
+  letter-spacing: 2px;
+  color: var(--white);
+}
+.topnav-brand span { color: var(--orange); }
+.topnav-cert {
+  font-size: 0.72rem;
+  color: var(--lightblue);
+  font-weight: 300;
+  letter-spacing: 1px;
+}
+.topnav-tabs { display: flex; gap: 0.25rem; }
+.tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--lightblue);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.5rem 1.1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+.tab-btn:hover { background: rgba(255,255,255,0.08); color: var(--white); }
+.tab-btn.active { background: var(--orange); color: var(--white); }
+
+/* ── Layout ── */
+.container { max-width: 1280px; margin: 0 auto; padding: 2rem; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── Cards ── */
+.card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+  backdrop-filter: blur(8px);
+}
+.card-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.1rem;
+  letter-spacing: 2px;
+  color: var(--lightblue);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.card-title::before {
+  content: '';
+  display: block;
+  width: 3px;
+  height: 18px;
+  background: var(--orange);
+  border-radius: 2px;
+}
+
+/* ── Upload Zone ── */
+.upload-zone {
+  border: 2px dashed rgba(46,116,181,0.5);
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  background: rgba(46,116,181,0.04);
+  position: relative;
+}
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: var(--orange);
+  background: rgba(197,90,17,0.06);
+}
+.upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.upload-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.6; }
+.upload-text { font-size: 1.1rem; color: var(--lightblue); margin-bottom: 0.5rem; }
+.upload-sub { font-size: 0.82rem; color: var(--muted); }
+
+/* ── Forms ── */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+}
+.form-grid-2 { grid-template-columns: repeat(2, 1fr); }
+.form-grid-3 { grid-template-columns: repeat(3, 1fr); }
+.form-grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+.field { display: flex; flex-direction: column; gap: 0.35rem; }
+.field label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--lightblue);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.field input, .field select {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  color: var(--white);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.9rem;
+  padding: 0.55rem 0.75rem;
+  transition: border-color 0.2s;
+  width: 100%;
+}
+.field input:focus, .field select:focus {
+  outline: none;
+  border-color: var(--orange);
+}
+.field input.ai-filled {
+  border-color: var(--green);
+  background: rgba(112,173,71,0.1);
+}
+.field select option { background: var(--navy); }
+
+/* ── Section headers in form ── */
+.form-section-hdr {
+  background: rgba(46,116,181,0.2);
+  border-left: 4px solid var(--blue);
+  padding: 0.5rem 1rem;
+  border-radius: 0 6px 6px 0;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 2px;
+  color: var(--lightblue);
+  margin: 1.25rem 0 0.75rem;
+}
+
+/* ── Buttons ── */
+.btn {
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.65rem 1.4rem;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+.btn-primary { background: var(--orange); color: var(--white); }
+.btn-primary:hover { background: #a84a0e; transform: translateY(-1px); }
+.btn-secondary { background: var(--blue); color: var(--white); }
+.btn-secondary:hover { background: #255d8f; }
+.btn-ghost {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: var(--lightblue);
+}
+.btn-ghost:hover { border-color: var(--orange); color: var(--orange); }
+.btn-success { background: var(--green); color: var(--white); }
+.btn-lg { padding: 0.85rem 2rem; font-size: 1rem; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+
+.btn-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+  align-items: center;
+}
+
+/* ── Scan progress ── */
+.scan-status {
+  display: none;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: rgba(46,116,181,0.15);
+  border: 1px solid rgba(46,116,181,0.3);
+  border-radius: 8px;
+  margin-top: 1rem;
+}
+.scan-status.visible { display: flex; }
+.spinner {
+  width: 24px; height: 24px;
+  border: 3px solid rgba(255,255,255,0.1);
+  border-top-color: var(--orange);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.scan-text { font-size: 0.9rem; color: var(--lightblue); }
+
+/* ── AI confidence banner ── */
+.confidence-bar {
+  display: none;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.confidence-bar.visible { display: block; }
+.confidence-bar.high { background: rgba(112,173,71,0.15); border: 1px solid var(--green); color: #a3d977; }
+.confidence-bar.med  { background: rgba(255,193,7,0.1);  border: 1px solid #ffc107; color: #ffd54f; }
+.confidence-bar.low  { background: rgba(197,90,17,0.15); border: 1px solid var(--orange); color: #f4a26b; }
+
+/* ── Review flags ── */
+.review-flags { margin-top: 0.75rem; }
+.flag-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(197,90,17,0.1);
+  border-left: 3px solid var(--orange);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.82rem;
+  color: #f4a26b;
+  margin-bottom: 0.4rem;
+}
+
+/* ── Results / Quote Summary ── */
+.results-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+.result-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+.result-card.highlight {
+  background: linear-gradient(135deg, rgba(31,56,100,0.8), rgba(46,116,181,0.3));
+  border-color: var(--blue);
+}
+.result-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.35rem;
+}
+.result-value {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2rem;
+  letter-spacing: 1px;
+  color: var(--white);
+}
+.result-value.orange { color: var(--orange); }
+.result-value.green  { color: #8bc34a; }
+.result-sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+
+.price-total {
+  background: var(--navy);
+  border: 2px solid var(--orange);
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+  margin-top: 1.25rem;
+}
+.price-total-label {
+  font-size: 0.85rem;
+  color: var(--lightblue);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+.price-total-value {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 3.5rem;
+  color: var(--orange);
+  letter-spacing: 3px;
+}
+
+.breakdown-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+.breakdown-table tr { border-bottom: 1px solid rgba(255,255,255,0.06); }
+.breakdown-table tr:last-child { border-bottom: none; }
+.breakdown-table td {
+  padding: 0.55rem 0.5rem;
+  font-size: 0.88rem;
+}
+.breakdown-table td:first-child { color: var(--lightblue); font-weight: 500; }
+.breakdown-table td:last-child { text-align: right; font-family: 'DM Mono', monospace; }
+.breakdown-table .total-row td {
+  font-weight: 700;
+  color: var(--orange);
+  border-top: 2px solid rgba(197,90,17,0.4);
+  padding-top: 0.75rem;
+}
+
+/* ── Bid History ── */
+.bid-table { width: 100%; border-collapse: collapse; }
+.bid-table th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--lightblue);
+  border-bottom: 2px solid rgba(255,255,255,0.1);
+  font-weight: 600;
+}
+.bid-table td {
+  padding: 0.85rem 1rem;
+  font-size: 0.88rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.bid-table tr:hover td { background: rgba(255,255,255,0.03); }
+.bid-table .price-cell {
+  font-family: 'DM Mono', monospace;
+  font-weight: 600;
+  color: var(--orange);
+}
+
+/* ── Badges ── */
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.badge-blue { background: rgba(46,116,181,0.25); color: var(--lightblue); }
+.badge-green { background: rgba(112,173,71,0.2); color: #8bc34a; }
+.badge-orange { background: rgba(197,90,17,0.2); color: #f4a26b; }
+
+/* ── Multiplier display pills ── */
+.mult-pills { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.mult-pill {
+  background: rgba(46,116,181,0.2);
+  border: 1px solid rgba(46,116,181,0.4);
+  border-radius: 20px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.78rem;
+  color: var(--lightblue);
+  font-family: 'DM Mono', monospace;
+}
+
+/* ── Toast notifications ── */
+.toast-container { position: fixed; bottom: 2rem; right: 2rem; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem; }
+.toast {
+  background: var(--navy);
+  border: 1px solid var(--orange);
+  border-radius: 8px;
+  padding: 0.85rem 1.25rem;
+  font-size: 0.88rem;
+  color: var(--white);
+  box-shadow: var(--shadow);
+  animation: slideIn 0.3s ease;
+  max-width: 320px;
+}
+.toast.success { border-color: var(--green); }
+.toast.error   { border-color: #ef4444; }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ── Page header ── */
+.page-header { margin-bottom: 2rem; }
+.page-header h1 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2.2rem;
+  letter-spacing: 3px;
+  color: var(--white);
+}
+.page-header p { color: var(--muted); font-size: 0.9rem; margin-top: 0.25rem; }
+
+/* ── Divider ── */
+.divider { border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 1.5rem 0; }
+
+@media (max-width: 768px) {
+  .results-grid { grid-template-columns: 1fr; }
+  .form-grid-3, .form-grid-4 { grid-template-columns: repeat(2,1fr); }
+  .topnav-tabs { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Top Nav -->
+<nav class="topnav">
+  <div>
+    <div class="topnav-brand">AAE <span>AUTO</span>MATION</div>
+    <div class="topnav-cert">UL-NNNY · UL-508A · PANEL ESTIMATING SYSTEM</div>
+  </div>
+  <div class="topnav-tabs">
+    <button class="tab-btn active" onclick="showTab('new-bid')">➕ New Bid</button>
+    <button class="tab-btn" onclick="showTab('history')">📋 Bid History</button>
+  </div>
+</nav>
+
+<div class="container">
+
+<!-- ══ TAB: NEW BID ══ -->
+<div id="tab-new-bid" class="tab-panel active">
+  <div class="page-header">
+    <h1>NEW BID ESTIMATE</h1>
+    <p>Upload customer drawings for AI extraction, or fill in quantities manually.</p>
+  </div>
+
+  <!-- STEP 1: Drawing Upload -->
+  <div class="card">
+    <div class="card-title">STEP 1 — AI DRAWING SCAN</div>
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="drawingFile" accept=".pdf" onchange="handleFileSelect(this)">
+      <div class="upload-icon">📐</div>
+      <div class="upload-text" id="uploadText">Drop customer drawing PDF here</div>
+      <div class="upload-sub">or click to browse · PDF format · Multi-page supported</div>
+    </div>
+    <div class="scan-status" id="scanStatus">
+      <div class="spinner"></div>
+      <div class="scan-text" id="scanText">Analyzing drawing set — classifying pages...</div>
+    </div>
+    <div class="confidence-bar" id="confidenceBar"></div>
+    <div class="review-flags" id="reviewFlags"></div>
+  </div>
+
+  <!-- STEP 2: Project Info -->
+  <div class="card">
+    <div class="card-title">STEP 2 — PROJECT INFORMATION</div>
+    <div class="form-grid form-grid-3">
+      <div class="field">
+        <label>Customer Name</label>
+        <input type="text" id="customer_name" placeholder="Acme Industries">
+      </div>
+      <div class="field">
+        <label>Project / PO Number</label>
+        <input type="text" id="project_name" placeholder="PO-2024-001">
+      </div>
+      <div class="field">
+        <label>Estimator Name</label>
+        <input type="text" id="estimator_name" placeholder="Your name">
+      </div>
+      <div class="field">
+        <label>Panel Complexity</label>
+        <select id="complexity">
+          <option value="SIMPLE">Simple MCC / Single Motor</option>
+          <option value="STANDARD" selected>Standard Distribution</option>
+          <option value="MULTI">Multi-Motor Control</option>
+          <option value="PLC-MOD">PLC — Moderate I/O (≤64 pts)</option>
+          <option value="PLC-HIGH">PLC — High I/O (65–256 pts)</option>
+          <option value="PLC-DRIV">PLC + Drives</option>
+          <option value="SAFETY">Safety-Rated (SIL/PLe)</option>
+          <option value="CUSTOM">Custom / Complex</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Technician Level</label>
+        <select id="tech_level">
+          <option value="MASTER">Master / Lead (10+ yrs) — 0.85×</option>
+          <option value="JOURNEYMAN" selected>Journeyman (5–10 yrs) — 1.00×</option>
+          <option value="APPRENTICE">Apprentice / Entry Level — 1.30×</option>
+          <option value="MIXED">Mixed Crew — 1.10×</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Labor Rate Override ($/hr)</label>
+        <input type="number" id="labor_rate_override" value="0" min="0" step="5" placeholder="0 = shop default ($85)">
+      </div>
+    </div>
+    <div class="form-grid form-grid-4" style="margin-top:1rem">
+      <div class="field">
+        <label>UL Listing Required?</label>
+        <select id="ul_required">
+          <option value="Y" selected>Yes — NNNY / 508A</option>
+          <option value="N">No</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Witness Test?</label>
+        <select id="witness_test">
+          <option value="N" selected>No</option>
+          <option value="Y">Yes</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Expedite?</label>
+        <select id="expedite">
+          <option value="N" selected>No</option>
+          <option value="Y">Yes (+15%)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Engineering Included?</label>
+        <select id="engineering">
+          <option value="N" selected>No</option>
+          <option value="Y">Yes</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: Component Quantities -->
+  <div class="card">
+    <div class="card-title">STEP 3 — COMPONENT QUANTITIES</div>
+    <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem">
+      🟢 Green fields were auto-filled by AI scan. Review and adjust as needed.
+    </p>
+
+    <div class="form-section-hdr">ENCLOSURE & MECHANICAL</div>
+    <div class="form-grid form-grid-4">
+      <div class="field"><label>Qty Enclosures</label><input type="number" id="enc_qty" value="1" min="0"></div>
+      <div class="field"><label>DIN Rail Runs</label><input type="number" id="din_rail_runs" value="3" min="0"></div>
+      <div class="field"><label>Wire Duct Runs</label><input type="number" id="wire_duct_runs" value="4" min="0"></div>
+      <div class="field"><label>Enclosure Accessories</label><input type="number" id="enc_accessories" value="0" min="0"></div>
+    </div>
+
+    <div class="form-section-hdr">POWER DISTRIBUTION</div>
+    <div class="form-grid form-grid-4">
+      <div class="field"><label>Main Amperage</label><input type="number" id="main_amp" value="100" min="0"></div>
+      <div class="field"><label>Branch Breakers — 1P</label><input type="number" id="branch_1p" value="0" min="0"></div>
+      <div class="field"><label>Branch Breakers — 2P</label><input type="number" id="branch_2p" value="0" min="0"></div>
+      <div class="field"><label>Branch Breakers — 3P</label><input type="number" id="branch_3p" value="0" min="0"></div>
+      <div class="field"><label>Fused Disconnects</label><input type="number" id="fused_disconnects" value="0" min="0"></div>
+      <div class="field"><label>CPT Present?</label><select id="cpt_present"><option value="N">No</option><option value="Y">Yes</option></select></div>
+      <div class="field"><label>Power Dist. Blocks</label><input type="number" id="pdb_qty" value="0" min="0"></div>
+    </div>
+
+    <div class="form-section-hdr">MOTOR CONTROL</div>
+    <div class="form-grid form-grid-4">
+      <div class="field"><label>Contactors ≤40A</label><input type="number" id="contactor_small" value="0" min="0"></div>
+      <div class="field"><label>Contactors 41–100A</label><input type="number" id="contactor_large" value="0" min="0"></div>
+      <div class="field"><label>Overload Relays</label><input type="number" id="overload" value="0" min="0"></div>
+      <div class="field"><label>VFDs ≤5HP</label><input type="number" id="vfd_small" value="0" min="0"></div>
+      <div class="field"><label>VFDs 6–25HP</label><input type="number" id="vfd_med" value="0" min="0"></div>
+      <div class="field"><label>VFDs 26–100HP</label><input type="number" id="vfd_large" value="0" min="0"></div>
+      <div class="field"><label>Soft Starters ≤50A</label><input type="number" id="soft_starter_small" value="0" min="0"></div>
+      <div class="field"><label>Soft Starters >50A</label><input type="number" id="soft_starter_large" value="0" min="0"></div>
+    </div>
+
+    <div class="form-section-hdr">CONTROL DEVICES</div>
+    <div class="form-grid form-grid-4">
+      <div class="field"><label>Relays — Ice Cube</label><input type="number" id="relay_icecube" value="0" min="0"></div>
+      <div class="field"><label>Relays — DIN Mount</label><input type="number" id="relay_din" value="0" min="0"></div>
+      <div class="field"><label>SSRs</label><input type="number" id="ssrs" value="0" min="0"></div>
+      <div class="field"><label>Timers</label><input type="number" id="timers" value="0" min="0"></div>
+      <div class="field"><label>Pilot Lights</label><input type="number" id="pilot_lights" value="0" min="0"></div>
+      <div class="field"><label>Selector Switches</label><input type="number" id="selectors" value="0" min="0"></div>
+      <div class="field"><label>Push Buttons</label><input type="number" id="push_buttons" value="0" min="0"></div>
+      <div class="field"><label>E-Stops</label><input type="number" id="estops" value="0" min="0"></div>
+    </div>
+
+    <div class="form-section-hdr">PLC / NETWORKING</div>
+    <div class="form-grid form-grid-4">
+      <div class="field"><label>PLC Present?</label><select id="plc_present"><option value="N">No</option><option value="Y">Yes</option></select></div>
+      <div class="field"><label>Digital Inputs (DI)</label><input type="number" id="plc_di" value="0" min="0"></div>
+      <div class="field"><label>Digital Outputs (DO)</label><input type="number" id="plc_do" value="0" min="0"></div>
+      <div class="field"><label>Analog Inputs (AI)</label><input type="number" id="plc_ai" value="0" min="0"></div>
+      <div class="field"><label>Analog Outputs (AO)</label><input type="number" id="plc_ao" value="0" min="0"></div>
+      <div class="field"><label>HMI Present?</label><select id="hmi_present"><option value="N">No</option><option value="Y">Yes</option></select></div>
+      <div class="field"><label>Safety Relay/Controller?</label><select id="safety_relay"><option value="N">No</option><option value="Y">Yes</option></select></div>
+      <div class="field"><label>Ethernet Switch?</label><select id="eth_switch"><option value="N">No</option><option value="Y">Yes</option></select></div>
+      <div class="field"><label>Internal Ethernet Cables</label><input type="number" id="eth_cables" value="0" min="0"></div>
+    </div>
+
+    <div class="form-section-hdr">TERMINAL BLOCKS & WIRING</div>
+    <div class="form-grid form-grid-4">
+      <div class="field"><label>Standard TBs</label><input type="number" id="tb_standard" value="0" min="0"></div>
+      <div class="field"><label>Ground TBs</label><input type="number" id="tb_ground" value="0" min="0"></div>
+      <div class="field"><label>Fused TBs</label><input type="number" id="tb_fused" value="0" min="0"></div>
+      <div class="field"><label>Disconnect TBs</label><input type="number" id="tb_disconnect" value="0" min="0"></div>
+      <div class="field"><label>Terminal Markers?</label><select id="terminal_markers"><option value="Y" selected>Yes</option><option value="N">No</option></select></div>
+      <div class="field"><label>Ferrules?</label><select id="ferrules"><option value="Y" selected>Yes</option><option value="N">No</option></select></div>
+      <div class="field"><label>Wire Count (total)</label><input type="number" id="wire_count" value="0" min="0" placeholder="0 = auto-estimate"></div>
+      <div class="field"><label>Avg Wire Length (in)</label><input type="number" id="wire_avg_len" value="24" min="6"></div>
+      <div class="field"><label>Heat Shrink Labels?</label><select id="heat_shrink"><option value="Y" selected>Yes — Both Ends</option><option value="N">No</option></select></div>
+    </div>
+
+    <div class="form-section-hdr">ADDITIONAL HOURS</div>
+    <div class="form-grid form-grid-3">
+      <div class="field"><label>Engineering Hours</label><input type="number" id="eng_hours" value="0" min="0" step="0.5"></div>
+      <div class="field"><label>Programming Hours</label><input type="number" id="prog_hours" value="0" min="0" step="0.5"></div>
+      <div class="field"><label>FAT / Witness Hours</label><input type="number" id="fat_hours" value="0" min="0" step="0.5"></div>
+    </div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="btn-row">
+    <button class="btn btn-primary btn-lg" onclick="calculateBid()">⚡ CALCULATE BID</button>
+    <button class="btn btn-ghost" onclick="clearForm()">↺ Clear Form</button>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="resultsSection" style="display:none;margin-top:2rem">
+    <div class="card">
+      <div class="card-title">QUOTE RESULTS</div>
+
+      <div class="results-grid">
+        <div class="result-card highlight">
+          <div class="result-label">Total Billable Hours</div>
+          <div class="result-value" id="r_hours">—</div>
+          <div class="mult-pills" id="r_mult_pills"></div>
+        </div>
+        <div class="result-card highlight">
+          <div class="result-label">Labor Cost</div>
+          <div class="result-value orange" id="r_labor">—</div>
+          <div class="result-sub" id="r_labor_rate"></div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">Material Cost (w/ markup)</div>
+          <div class="result-value" id="r_material">—</div>
+          <div class="result-sub" id="r_material_sub"></div>
+        </div>
+        <div class="result-card">
+          <div class="result-label">Wire & Labels</div>
+          <div class="result-value green" id="r_wire">—</div>
+          <div class="result-sub" id="r_wire_sub"></div>
+        </div>
+      </div>
+
+      <div class="price-total">
+        <div class="price-total-label">Total Quoted Price</div>
+        <div class="price-total-value" id="r_total">$0.00</div>
+      </div>
+
+      <table class="breakdown-table" style="margin-top:1.5rem">
+        <tr><td>Raw Labor Hours</td><td id="b_raw_hrs">—</td></tr>
+        <tr><td>Complexity Multiplier</td><td id="b_comp_mult">—</td></tr>
+        <tr><td>Technician Multiplier</td><td id="b_tech_mult">—</td></tr>
+        <tr><td>Total Billable Hours</td><td id="b_total_hrs">—</td></tr>
+        <tr><td>Labor Cost</td><td id="b_labor">—</td></tr>
+        <tr><td>Material (raw)</td><td id="b_mat_raw">—</td></tr>
+        <tr><td>Material (w/ 30% markup)</td><td id="b_mat_markup">—</td></tr>
+        <tr><td>Overhead (12%)</td><td id="b_overhead">—</td></tr>
+        <tr><td>Expedite Surcharge</td><td id="b_expedite">—</td></tr>
+        <tr class="total-row"><td>TOTAL QUOTED PRICE</td><td id="b_total">—</td></tr>
+      </table>
+
+      <hr class="divider">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:1rem">
+        <div>
+          <div class="result-label">Price / Hour</div>
+          <div style="font-family:'DM Mono',monospace;font-size:1.1rem;color:var(--lightblue)" id="r_per_hr">—</div>
+        </div>
+        <div>
+          <div class="result-label">Heat Shrink Labels</div>
+          <div style="font-family:'DM Mono',monospace;font-size:1.1rem;color:var(--lightblue)" id="r_labels">—</div>
+        </div>
+        <div>
+          <div class="result-label">Wire Count</div>
+          <div style="font-family:'DM Mono',monospace;font-size:1.1rem;color:var(--lightblue)" id="r_wire_cnt">—</div>
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-top:1.5rem">
+        <button class="btn btn-primary" onclick="downloadPDF()">📄 Download Quote PDF</button>
+        <button class="btn btn-secondary" onclick="saveBid()">💾 Save Bid</button>
+      </div>
+    </div>
+  </div>
+</div><!-- end new-bid tab -->
+
+
+<!-- ══ TAB: HISTORY ══ -->
+<div id="tab-history" class="tab-panel">
+  <div class="page-header">
+    <h1>BID HISTORY</h1>
+    <p>All saved quotes — most recent first.</p>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <div class="card-title" style="margin:0">SAVED BIDS</div>
+      <button class="btn btn-ghost" onclick="loadHistory()">↺ Refresh</button>
+    </div>
+    <div id="historyContent">
+      <p style="color:var(--muted);font-size:0.88rem">Loading bid history...</p>
+    </div>
+  </div>
+</div>
+
+</div><!-- end container -->
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+let currentCalcResults = null;
+let currentBidData = null;
+
+// ── Tab switching ──────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'history') loadHistory();
+}
+
+// ── Toast notifications ────────────────────────────────────────────────────
+function toast(msg, type='info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ── Drawing upload & AI scan ───────────────────────────────────────────────
+function handleFileSelect(input) {
+  if (!input.files[0]) return;
+  const file = input.files[0];
+  document.getElementById('uploadText').textContent = `📄 ${file.name} — scanning...`;
+  startScan(file);
+}
+
+const zone = document.getElementById('uploadZone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type === 'application/pdf') {
+    document.getElementById('uploadText').textContent = `📄 ${file.name} — scanning...`;
+    startScan(file);
+  } else {
+    toast('Please drop a PDF file', 'error');
+  }
+});
+
+async function startScan(file) {
+  const status = document.getElementById('scanStatus');
+  const confBar = document.getElementById('confidenceBar');
+  const flagsDiv = document.getElementById('reviewFlags');
+  status.classList.add('visible');
+  confBar.className = 'confidence-bar';
+  flagsDiv.innerHTML = '';
+
+  const steps = [
+    'Classifying drawing pages...',
+    'Extracting components from BOM...',
+    'Reading schematic reference designators...',
+    'Processing terminal schedule...',
+    'Calculating accessories and wire...',
+    'Aggregating results...'
+  ];
+  let si = 0;
+  const interval = setInterval(() => {
+    if (si < steps.length) {
+      document.getElementById('scanText').textContent = steps[si++];
+    }
+  }, 2500);
+
+  try {
+    const form = new FormData();
+    form.append('drawing', file);
+    const res  = await fetch('/api/scan', { method: 'POST', body: form });
+    const data = await res.json();
+    clearInterval(interval);
+    status.classList.remove('visible');
+
+    if (data.error) { toast('Scan error: ' + data.error, 'error'); return; }
+
+    // Populate fields
+    const q = data.quantities || {};
+    const fields = ['enc_qty','din_rail_runs','wire_duct_runs','enc_accessories',
+      'main_amp','branch_1p','branch_2p','branch_3p','fused_disconnects',
+      'pdb_qty','relay_icecube','relay_din','contactor_small','contactor_large',
+      'overload','timers','ssrs','pilot_lights','selectors','push_buttons','estops',
+      'vfd_small','vfd_med','vfd_large','soft_starter_small','soft_starter_large',
+      'plc_di','plc_do','plc_ai','plc_ao','eth_cables',
+      'tb_standard','tb_ground','tb_fused','tb_disconnect','wire_count','wire_avg_len'];
+
+    const selectFields = {
+      'cpt_present': q.cpt_present, 'plc_present': q.plc_present,
+      'hmi_present': q.hmi_present, 'safety_relay': q.safety_relay,
+      'eth_switch':  q.eth_switch
+    };
+
+    fields.forEach(id => {
+      const el = document.getElementById(id);
+      if (el && q[id] !== undefined && q[id] !== null && q[id] !== 0 && q[id] !== '') {
+        el.value = q[id];
+        el.classList.add('ai-filled');
+      }
+    });
+    Object.entries(selectFields).forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (el && val) el.value = val;
+    });
+
+    // Confidence bar
+    const conf = data.extraction_summary?.confidence || 0;
+    const confClass = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'med' : 'low';
+    const confEmoji = conf >= 0.85 ? '✅' : conf >= 0.65 ? '⚠️' : '🔴';
+    confBar.className = `confidence-bar visible ${confClass}`;
+    confBar.innerHTML = `${confEmoji} <strong>AI Confidence: ${Math.round(conf*100)}%</strong> — 
+      ${(data.extraction_summary?.drawing_types_found || []).join(', ')} detected. 
+      Review green-highlighted fields before calculating.`;
+
+    // Review flags
+    const flags = [
+      ...(data.extraction_summary?.review_flags || []),
+      ...(data.extraction_summary?.scope_gap_flags || [])
+    ];
+    if (flags.length) {
+      flagsDiv.innerHTML = flags.map(f => `<div class="flag-item">⚠ ${f}</div>`).join('');
+    }
+
+    document.getElementById('uploadText').textContent = `✅ ${file.name} — scan complete`;
+    toast(`Drawing scanned — ${Math.round(conf*100)}% confidence`, conf >= 0.75 ? 'success' : 'info');
+
+  } catch (err) {
+    clearInterval(interval);
+    status.classList.remove('visible');
+    toast('Scan failed — check connection', 'error');
+  }
+}
+
+// ── Collect form data ──────────────────────────────────────────────────────
+function collectFormData() {
+  const get = id => {
+    const el = document.getElementById(id);
+    return el ? el.value : '';
+  };
+  return {
+    customer_name: get('customer_name'),
+    project_name: get('project_name'),
+    estimator_name: get('estimator_name'),
+    complexity: get('complexity'),
+    tech_level: get('tech_level'),
+    labor_rate_override: parseFloat(get('labor_rate_override')) || 0,
+    ul_required: get('ul_required'),
+    witness_test: get('witness_test'),
+    expedite: get('expedite'),
+    engineering: get('engineering'),
+    enc_qty: get('enc_qty'),
+    din_rail_runs: get('din_rail_runs'),
+    wire_duct_runs: get('wire_duct_runs'),
+    enc_accessories: get('enc_accessories'),
+    main_amp: get('main_amp'),
+    branch_1p: get('branch_1p'),
+    branch_2p: get('branch_2p'),
+    branch_3p: get('branch_3p'),
+    fused_disconnects: get('fused_disconnects'),
+    cpt_present: get('cpt_present'),
+    pdb_qty: get('pdb_qty'),
+    relay_icecube: get('relay_icecube'),
+    relay_din: get('relay_din'),
+    contactor_small: get('contactor_small'),
+    contactor_large: get('contactor_large'),
+    overload: get('overload'),
+    timers: get('timers'),
+    ssrs: get('ssrs'),
+    pilot_lights: get('pilot_lights'),
+    selectors: get('selectors'),
+    push_buttons: get('push_buttons'),
+    estops: get('estops'),
+    vfd_small: get('vfd_small'),
+    vfd_med: get('vfd_med'),
+    vfd_large: get('vfd_large'),
+    soft_starter_small: get('soft_starter_small'),
+    soft_starter_large: get('soft_starter_large'),
+    plc_present: get('plc_present'),
+    plc_di: get('plc_di'),
+    plc_do: get('plc_do'),
+    plc_ai: get('plc_ai'),
+    plc_ao: get('plc_ao'),
+    hmi_present: get('hmi_present'),
+    safety_relay: get('safety_relay'),
+    eth_switch: get('eth_switch'),
+    eth_cables: get('eth_cables'),
+    tb_standard: get('tb_standard'),
+    tb_ground: get('tb_ground'),
+    tb_fused: get('tb_fused'),
+    tb_disconnect: get('tb_disconnect'),
+    terminal_markers: get('terminal_markers'),
+    ferrules: get('ferrules'),
+    wire_count: get('wire_count'),
+    wire_avg_len: get('wire_avg_len'),
+    heat_shrink: get('heat_shrink'),
+    eng_hours: get('eng_hours'),
+    prog_hours: get('prog_hours'),
+    fat_hours: get('fat_hours'),
+    programming: get('prog_hours') > 0 ? 'Y' : 'N',
+  };
+}
+
+// ── Calculate ──────────────────────────────────────────────────────────────
+async function calculateBid() {
+  const data = collectFormData();
+  try {
+    const res  = await fetch('/api/calculate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    const calc = await res.json();
+    if (calc.error) { toast('Calculation error: ' + calc.error, 'error'); return; }
+
+    currentCalcResults = calc;
+    currentBidData = data;
+
+    const fmt = n => '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    const fmtN = n => n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+    document.getElementById('r_hours').textContent    = fmtN(calc.total_hours) + ' hrs';
+    document.getElementById('r_labor').textContent    = fmt(calc.labor_cost);
+    document.getElementById('r_labor_rate').textContent = `@ $${calc.labor_rate_used}/hr`;
+    document.getElementById('r_material').textContent = fmt(calc.mat_cost_markup);
+    document.getElementById('r_material_sub').textContent = `Raw: ${fmt(calc.mat_cost_raw)}`;
+    document.getElementById('r_wire').textContent     = fmt(calc.ctrl_wire_ft * 0.18 + calc.pwr_wire_ft * 0.28 + calc.hs_labels_qty * 0.08);
+    document.getElementById('r_wire_sub').textContent = `${calc.ctrl_wire_ft} ft ctrl · ${calc.pwr_wire_ft} ft pwr · ${calc.hs_labels_qty} labels`;
+    document.getElementById('r_total').textContent    = fmt(calc.total_price);
+
+    document.getElementById('r_mult_pills').innerHTML =
+      `<span class="mult-pill">Complexity: ${calc.complexity_mult}×</span>` +
+      `<span class="mult-pill">Tech: ${calc.tech_mult}×</span>`;
+
+    document.getElementById('b_raw_hrs').textContent  = fmtN(calc.raw_hours) + ' hrs';
+    document.getElementById('b_comp_mult').textContent= calc.complexity_mult + '×';
+    document.getElementById('b_tech_mult').textContent= calc.tech_mult + '×';
+    document.getElementById('b_total_hrs').textContent= fmtN(calc.total_hours) + ' hrs';
+    document.getElementById('b_labor').textContent    = fmt(calc.labor_cost);
+    document.getElementById('b_mat_raw').textContent  = fmt(calc.mat_cost_raw);
+    document.getElementById('b_mat_markup').textContent = fmt(calc.mat_cost_markup);
+    document.getElementById('b_overhead').textContent = fmt(calc.overhead_cost);
+    document.getElementById('b_expedite').textContent = fmt(calc.expedite_cost);
+    document.getElementById('b_total').textContent    = fmt(calc.total_price);
+
+    document.getElementById('r_per_hr').textContent   = fmt(calc.price_per_hour) + '/hr';
+    document.getElementById('r_labels').textContent   = calc.hs_labels_qty.toLocaleString() + ' labels';
+    document.getElementById('r_wire_cnt').textContent = calc.wire_count.toLocaleString() + ' wires';
+
+    document.getElementById('resultsSection').style.display = 'block';
+    document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth' });
+    toast('Bid calculated successfully!', 'success');
+
+  } catch (err) {
+    toast('Calculation failed', 'error');
+  }
+}
+
+// ── Download PDF ───────────────────────────────────────────────────────────
+async function downloadPDF() {
+  if (!currentCalcResults || !currentBidData) { toast('Calculate bid first', 'error'); return; }
+  try {
+    const res = await fetch('/api/quote_pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bid_data: currentBidData, calc: currentCalcResults })
+    });
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `AAE_Quote_${Date.now()}.pdf`;
+    a.click();
+    toast('Quote PDF downloaded!', 'success');
+  } catch (err) {
+    toast('PDF generation failed', 'error');
+  }
+}
+
+// ── Save Bid ───────────────────────────────────────────────────────────────
+async function saveBid() {
+  if (!currentCalcResults || !currentBidData) { toast('Calculate bid first', 'error'); return; }
+  try {
+    const res = await fetch('/api/save_bid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...currentBidData, calc: currentCalcResults })
+    });
+    const data = await res.json();
+    if (data.success) toast('Bid saved to history!', 'success');
+    else toast('Save failed: ' + data.error, 'error');
+  } catch (err) {
+    toast('Save failed', 'error');
+  }
+}
+
+// ── Bid History ────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const el = document.getElementById('historyContent');
+  el.innerHTML = '<p style="color:var(--muted)">Loading...</p>';
+  try {
+    const res  = await fetch('/api/bids');
+    const bids = await res.json();
+    if (!bids.length) {
+      el.innerHTML = '<p style="color:var(--muted);font-size:0.88rem">No bids saved yet. Calculate and save your first bid.</p>';
+      return;
+    }
+    el.innerHTML = `
+      <table class="bid-table">
+        <thead>
+          <tr>
+            <th>Date</th><th>Customer</th><th>Project</th>
+            <th>Complexity</th><th>Tech Level</th><th>Hours</th><th>Total Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${bids.map(b => `
+            <tr>
+              <td>${new Date(b.created_at).toLocaleDateString()}</td>
+              <td>${b.customer_name || '—'}</td>
+              <td>${b.project_name || '—'}</td>
+              <td><span class="badge badge-blue">${b.complexity || 'STANDARD'}</span></td>
+              <td><span class="badge badge-green">${b.tech_level || 'JOURNEYMAN'}</span></td>
+              <td style="font-family:'DM Mono',monospace">${(b.total_hours||0).toFixed(1)} hrs</td>
+              <td class="price-cell">$${(b.total_price||0).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`;
+  } catch(err) {
+    el.innerHTML = '<p style="color:#ef4444">Failed to load history.</p>';
+  }
+}
+
+// ── Clear form ─────────────────────────────────────────────────────────────
+function clearForm() {
+  document.querySelectorAll('input[type="number"]').forEach(el => {
+    el.value = el.defaultValue || 0;
+    el.classList.remove('ai-filled');
+  });
+  document.querySelectorAll('input[type="text"]').forEach(el => {
+    el.value = '';
+    el.classList.remove('ai-filled');
+  });
+  document.getElementById('resultsSection').style.display = 'none';
+  document.getElementById('confidenceBar').className = 'confidence-bar';
+  document.getElementById('reviewFlags').innerHTML = '';
+  document.getElementById('uploadText').textContent = 'Drop customer drawing PDF here';
+  currentCalcResults = null; currentBidData = null;
+  toast('Form cleared', 'info');
+}
+</script>
+</body>
+</html>
