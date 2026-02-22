@@ -1,10 +1,7 @@
-import os, json, base64, re
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
+import os, json, base64, re, hashlib
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, g, after_this_request
 from anthropic import Anthropic
-try:
-    from supabase import create_client
-except Exception:
-    create_client = None
+from supabase import create_client
 import io
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
@@ -14,17 +11,83 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
-app = Flask(__name__)
+# ── Security imports ──────────────────────────────────────────────────────────
+from security.auth import require_auth, require_admin, require_role, get_user_sb
 
-# Clients
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(32))
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=[],
+        storage_uri=os.environ.get("REDIS_URL", "memory://"),
+    )
+    _rate_limiting_available = True
+except Exception:
+    _rate_limiting_available = False
+    limiter = None
+
+# ── Security headers (applied to every response) ─────────────────────────────
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    # CSP: allow Supabase JS CDN, fonts, inline styles (needed for our SPA)
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self' https://*.supabase.co https://api.anthropic.com; "
+        "frame-ancestors 'none';"
+    )
+    response.headers["Content-Security-Policy"] = csp
+    return response
+
+# ── Clients ───────────────────────────────────────────────────────────────────
 claude_client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 _sb_url = os.environ.get("SUPABASE_URL", "")
 _sb_key = os.environ.get("SUPABASE_ANON_KEY", "")
-try:
-    supabase = create_client(_sb_url, _sb_key) if (create_client and _sb_url and _sb_key) else None
-except Exception as e:
-    print(f"Supabase init failed (continuing without DB): {e}")
-    supabase = None
+# IMPORTANT: This global client uses the ANON key and runs WITHOUT a user token.
+# It is intentionally used ONLY for the internal calculation helpers (get_labor_rates,
+# get_vendor_map) that read reference data, NOT for any user-facing route handlers.
+# All route handlers must use get_user_sb() so RLS evaluates as the actual user.
+supabase = create_client(_sb_url, _sb_key) if _sb_url and _sb_key else None
+
+# ── Audit logging ─────────────────────────────────────────────────────────────
+def audit_log(action: str, entity: str = None, entity_id: str = None, payload: dict = None):
+    """
+    Write an audit record using the USER-SCOPED Supabase client.
+    This is required for the RLS INSERT policy (auth.uid() = actor_user_id) to pass.
+    Non-blocking best-effort — never raises.
+    """
+    if not _sb_url or not _sb_key:
+        return
+    try:
+        user = getattr(g, "user", {})
+        record = {
+            "actor_user_id": user.get("id"),
+            "actor_email":   user.get("email"),
+            "org_id":        user.get("org_id"),   # required for org-scoped audit_log RLS
+            "action":        action,
+            "entity":        entity,
+            "entity_id":     str(entity_id) if entity_id is not None else None,
+            "payload":       payload,
+        }
+        # Must use user-scoped client so RLS passes auth.uid() = actor_user_id
+        sb = get_user_sb()
+        sb.table("audit_log").insert(record).execute()
+    except Exception as e:
+        print(f"[audit_log] write failed: {e}", flush=True)
 
 # ── Labor rates (minutes per unit) ────────────────────────────────────────
 # Labor rates in MINUTES per unit — calibrated against AAE actual job history
@@ -431,29 +494,10 @@ Rules:
                 }]
             )
             raw = response.content[0].text.strip()
-            # Strip markdown code fences
+            # Strip markdown if model wrapped it anyway
             raw = re.sub(r"^```json\s*", "", raw)
-            raw = re.sub(r"^```\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
-            raw = raw.strip()
-            # Extract just the JSON object if there's surrounding text
-            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
-            if json_match:
-                raw = json_match.group(0)
-            # Fix common AI JSON mistakes: trailing commas before } or ]
-            raw = re.sub(r',\s*([}\]])', r'\1', raw)
-            try:
-                result = json.loads(raw)
-            except json.JSONDecodeError as je:
-                print(f"JSON parse error: {je} — attempting repair")
-                start = raw.find('{')
-                end = raw.rfind('}')
-                if start != -1 and end != -1:
-                    raw = raw[start:end+1]
-                    raw = re.sub(r',\s*([}\]])', r'\1', raw)
-                    result = json.loads(raw)
-                else:
-                    raise
+            result = json.loads(raw)
             result["_model_used"] = model
             return result
 
@@ -691,6 +735,7 @@ def static_files(filename):
 
 
 @app.route("/api/test")
+@require_auth
 def api_test():
     """Quick health check — verifies Anthropic API key and model are working."""
     try:
@@ -709,29 +754,70 @@ def api_test():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        supabase_url=os.environ.get("SUPABASE_URL", ""),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", ""),
+    )
+
+@app.route("/api/me", methods=["GET"])
+@require_auth
+def me():
+    """Return current user's profile (role, display name). Used by frontend for role-gated UI."""
+    if not _sb_url:
+        return jsonify({"id": g.user["id"], "email": g.user["email"], "role": g.user.get("role","estimator"), "display_name": ""})
+    try:
+        sb = get_user_sb()
+        result = sb.table("profiles").select("role,display_name,username").eq("user_id", g.user["id"]).single().execute()
+        profile = result.data or {}
+        return jsonify({
+            "id": g.user["id"],
+            "email": g.user["email"],
+            "aal": g.user.get("aal"),
+            "role": profile.get("role", "estimator"),
+            "display_name": profile.get("display_name", ""),
+            "username": profile.get("username", ""),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+MAX_SCAN_SIZE = 25 * 1024 * 1024  # 25 MB
+PDF_MAGIC = b"%PDF"
 
 @app.route("/api/scan", methods=["POST"])
+@require_auth
 def scan():
     print("=== /api/scan called ===", flush=True)
     if "drawing" not in request.files:
-        print("ERROR: No file in request", flush=True)
         return jsonify({"error": "No file uploaded"}), 400
     f = request.files["drawing"]
-    print(f"File received: {f.filename}, size approx {len(f.read())} bytes", flush=True)
-    f.seek(0)  # reset after read
+
+    # Read once; enforce size
     pdf_bytes = f.read()
-    pdf_b64   = base64.standard_b64encode(pdf_bytes).decode("utf-8")
-    api_key   = os.environ.get("ANTHROPIC_API_KEY", "")
-    print(f"API key present: {bool(api_key)}, key prefix: {api_key[:8] if api_key else 'MISSING'}", flush=True)
-    print(f"PDF b64 length: {len(pdf_b64)}", flush=True)
-    result    = scan_drawing(pdf_b64, f.filename)
-    print(f"Scan result keys: {list(result.keys())}", flush=True)
+    if len(pdf_bytes) > MAX_SCAN_SIZE:
+        return jsonify({"error": f"File too large (max 25 MB)"}), 413
+
+    # Enforce PDF by magic bytes
+    if not pdf_bytes.startswith(PDF_MAGIC):
+        return jsonify({"error": "Only PDF files are accepted"}), 415
+
+    # Audit the upload
+    file_hash = hashlib.sha256(pdf_bytes).hexdigest()[:16]
+    audit_log("scan_upload", "drawing", file_hash, {
+        "filename": f.filename,
+        "size_bytes": len(pdf_bytes),
+    })
+
+    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    print(f"API key present: {bool(api_key)}", flush=True)
+    result = scan_drawing(pdf_b64, f.filename)
     if "error" in result:
         print(f"SCAN ERROR: {result['error']}", flush=True)
     return jsonify(result)
 
 @app.route("/api/calculate", methods=["POST"])
+@require_auth
 def calculate():
     import traceback
     try:
@@ -746,6 +832,7 @@ def calculate():
         return jsonify({"error": str(e), "detail": err}), 500
 
 @app.route("/api/save_bid", methods=["POST"])
+@require_auth
 def save_bid():
     data = request.get_json()
     try:
@@ -758,24 +845,35 @@ def save_bid():
             "total_hours":    data.get("calc",{}).get("total_hours",0),
             "total_price":    data.get("calc",{}).get("total_price",0),
             "bid_data":       json.dumps(data),
+            "created_by":     g.user["id"],
             "created_at":     datetime.now().isoformat(),
         }
-        if not supabase: return jsonify({"error": "Supabase not configured"}), 500
-        result = supabase.table("bids").insert(row).execute()
-        return jsonify({"success": True, "id": result.data[0]["id"]})
+        if not _sb_url: return jsonify({"error": "Supabase not configured"}), 500
+        sb = get_user_sb()
+        result = sb.table("bids").insert(row).execute()
+        bid_id = result.data[0]["id"]
+        audit_log("save_bid", "bid", bid_id, {
+            "customer": row["customer_name"],
+            "project": row["project_name"],
+            "total_price": row["total_price"],
+        })
+        return jsonify({"success": True, "id": bid_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/bids", methods=["GET"])
+@require_auth
 def get_bids():
     try:
-        if not supabase: return jsonify([])
-        result = supabase.table("bids").select("*").order("created_at", desc=True).limit(50).execute()
+        if not _sb_url: return jsonify([])
+        sb = get_user_sb()
+        result = sb.table("bids").select("*").order("created_at", desc=True).limit(50).execute()
         return jsonify(result.data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/quote_pdf", methods=["POST"])
+@require_auth
 def quote_pdf():
     data = request.get_json()
     bid_data  = data.get("bid_data", {})
@@ -787,6 +885,7 @@ def quote_pdf():
                      download_name=f"AAE_Quote_{quote_num}.pdf")
 
 @app.route("/api/bom_pdf", methods=["POST"])
+@require_auth
 def bom_pdf():
     """Generate a BOM PDF for download."""
     data      = request.get_json()
@@ -799,6 +898,7 @@ def bom_pdf():
 
 
 @app.route("/api/bom_excel", methods=["POST"])
+@require_auth
 def bom_excel():
     """Generate post-calculation BOM Excel using the same premium format as bom_from_scan.
     Builds BOM from calc data (includes wire + heat shrink). Uses vendor mapping.
@@ -997,11 +1097,13 @@ def bom_excel():
                      download_name=f"AAE_BOM_{project.replace(' ','_') or quote_num}.xlsx")
 
 @app.route("/api/bid_quote_pdf/<int:bid_id>", methods=["GET"])
+@require_auth
 def bid_quote_pdf(bid_id):
     """Download quote PDF for a saved bid by ID."""
     try:
-        if not supabase: return jsonify({"error": "Supabase not configured"}), 500
-        result = supabase.table("bids").select("*").eq("id", bid_id).single().execute()
+        if not _sb_url: return jsonify({"error": "Supabase not configured"}), 500
+        sb = get_user_sb()
+        result = sb.table("bids").select("*").eq("id", bid_id).single().execute()
         bid = result.data
         if not bid:
             return jsonify({"error": "Bid not found"}), 404
@@ -1190,6 +1292,7 @@ def generate_bom_pdf(bid_data, calc_results, quote_number):
 
 
 @app.route("/api/bom_from_scan", methods=["POST"])
+@require_auth
 def bom_from_scan():
     """Generate a formatted AAE BOM Excel from scanned line items."""
     import openpyxl
@@ -1394,14 +1497,14 @@ def bom_from_scan():
 # ═══════════════════════════════════════════════════════════════════
 # ADMIN API ROUTES
 # ═══════════════════════════════════════════════════════════════════
+# ADMIN API ROUTES — All require server-verified JWT auth
+# ═══════════════════════════════════════════════════════════════════
 
-# ── Auth: handled client-side (localStorage) ─────────────────────────────────
-
-# ── Labor Rates (admin only) ─────────────────────────────────────────
+# ── Labor Rates (admin write, authenticated read) ─────────────────────────────
 @app.route("/api/labor_rates", methods=["GET"])
+@require_auth
 def get_labor_rates_api():
     if not supabase:
-        # Return defaults formatted as list
         cats = {
             "enclosure_prep":"Enclosure","subpanel_mount":"Enclosure","panel_layout":"Enclosure",
             "din_rail":"Enclosure","wire_duct":"Enclosure","enc_accessory":"Enclosure","door_component":"Enclosure",
@@ -1423,10 +1526,10 @@ def get_labor_rates_api():
         return jsonify([{"rate_key":k,"rate_value":v,"category":cats.get(k,"Other"),"description":k.replace("_"," ").title()}
                         for k,v in LABOR_RATES.items()])
     try:
-        rows = supabase.table("aae_labor_rates").select("*").order("category").order("rate_key").execute()
+        sb = get_user_sb()
+        rows = sb.table("aae_labor_rates").select("*").order("category").order("rate_key").execute()
         return jsonify(rows.data)
     except Exception as e:
-        # Table doesn't exist yet or DB error — return hardcoded defaults so UI still works
         print(f"labor_rates DB error (returning defaults): {e}")
         cats = {
             "enclosure_prep":"Enclosure","subpanel_mount":"Enclosure","panel_layout":"Enclosure",
@@ -1450,88 +1553,105 @@ def get_labor_rates_api():
                         for k,v in LABOR_RATES.items()])
 
 @app.route("/api/labor_rates/<rate_key>", methods=["PUT"])
+@require_role("admin", "accounting", require_mfa=True)
 def update_labor_rate(rate_key):
     data = request.get_json()
     if not supabase: return jsonify({"error":"DB not configured"}), 500
     try:
-        updates = {"rate_value":float(data["rate_value"]),"updated_by":data.get("updated_by","mfellers"),"updated_at":datetime.now().isoformat()}
-        supabase.table("aae_labor_rates").update(updates).eq("rate_key",rate_key).execute()
-        return jsonify({"success":True})
+        new_val = float(data["rate_value"])
+        updates = {"rate_value": new_val, "updated_by": g.user["email"], "updated_at": datetime.now().isoformat()}
+        sb = get_user_sb()
+        sb.table("aae_labor_rates").update(updates).eq("rate_key", rate_key).execute()
+        audit_log("update_labor_rate", "aae_labor_rates", rate_key, {"rate_value": new_val})
+        return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"error":str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/labor_rates/bulk", methods=["POST"])
+@require_role("admin", "accounting", require_mfa=True)
 def bulk_update_labor_rates():
-    """Update multiple rates at once."""
+    """Update multiple rates at once — admin + MFA required."""
     data = request.get_json()
     updates = data.get("rates", {})
-    username = data.get("username", "mfellers")
     if not supabase:
-        return jsonify({"success": True, "updated": 0, "note": "DB not configured — saved to browser only"})
+        return jsonify({"success": True, "updated": 0, "note": "DB not configured"})
     try:
         now = datetime.now().isoformat()
         for key, val in updates.items():
-            supabase.table("aae_labor_rates").update(
-                {"rate_value": float(val), "updated_by": username, "updated_at": now}
+            sb = get_user_sb()
+            sb.table("aae_labor_rates").update(
+                {"rate_value": float(val), "updated_by": g.user["email"], "updated_at": now}
             ).eq("rate_key", key).execute()
-        return jsonify({"success":True,"updated":len(updates)})
+        audit_log("bulk_update_labor_rates", "aae_labor_rates", None, {"count": len(updates), "keys": list(updates.keys())})
+        return jsonify({"success": True, "updated": len(updates)})
     except Exception as e:
         print(f"bulk_update_labor_rates DB error: {e}")
-        return jsonify({"success": True, "updated": 0, "note": f"DB error (table may not exist yet): {e}"})
+        return jsonify({"error": str(e)}), 500
 
 # ── Vendors ───────────────────────────────────────────────────────────
 @app.route("/api/vendors", methods=["GET"])
+@require_auth
 def get_vendors():
     if not supabase:
         return jsonify([])
     try:
-        rows = supabase.table("aae_vendors").select("*").order("vendor_name").order("manufacturer").execute()
+        sb = get_user_sb()
+        rows = sb.table("aae_vendors").select("*").order("vendor_name").order("manufacturer").execute()
         return jsonify(rows.data)
     except Exception as e:
-        # Table doesn't exist yet — return empty list so UI uses its built-in defaults
         print(f"vendors DB error (returning empty): {e}")
         return jsonify([])
 
 @app.route("/api/vendors", methods=["POST"])
+@require_role("admin", "purchasing", "accounting", require_mfa=True)
 def create_vendor():
     data = request.get_json()
     if not supabase:
-        return jsonify({"success": True, "note": "DB not configured — saved to browser only"})
+        return jsonify({"error": "DB not configured"}), 503
     try:
-        result = supabase.table("aae_vendors").insert({
-            "vendor_name":data["vendor_name"],"manufacturer":data["manufacturer"],
-            "account_number":data.get("account_number",""),
-            "notes":data.get("notes",""),"updated_by":data.get("updated_by","mfellers")
+        sb = get_user_sb()
+        result = sb.table("aae_vendors").insert({
+            "vendor_name": data["vendor_name"], "manufacturer": data["manufacturer"],
+            "account_number": data.get("account_number", ""),
+            "notes": data.get("notes", ""), "updated_by": g.user["email"]
         }).execute()
-        return jsonify({"success":True,"vendor":result.data[0]})
+        new_id = result.data[0]["id"]
+        audit_log("create_vendor", "aae_vendors", new_id, {"manufacturer": data["manufacturer"], "vendor": data["vendor_name"]})
+        return jsonify({"success": True, "vendor": result.data[0]})
     except Exception as e:
-        print(f"create_vendor DB error: {e}")
-        return jsonify({"success": True, "note": f"Saved to browser only (DB error: {e})"})
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/vendors/<int:vid>", methods=["PUT"])
+@require_role("admin", "purchasing", "accounting", require_mfa=True)
 def update_vendor(vid):
     data = request.get_json()
-    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    if not supabase: return jsonify({"error": "DB not configured"}), 500
     try:
-        updates = {k:data[k] for k in ["vendor_name","manufacturer","account_number","notes","active"] if k in data}
+        updates = {k: data[k] for k in ["vendor_name","manufacturer","account_number","notes","active"] if k in data}
         updates["updated_at"] = datetime.now().isoformat()
-        updates["updated_by"] = data.get("updated_by","mfellers")
-        supabase.table("aae_vendors").update(updates).eq("id",vid).execute()
-        return jsonify({"success":True})
+        updates["updated_by"] = g.user["email"]
+        sb = get_user_sb()
+        sb.table("aae_vendors").update(updates).eq("id", vid).execute()
+        audit_log("update_vendor", "aae_vendors", vid, updates)
+        return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"error":str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/vendors/<int:vid>", methods=["DELETE"])
+@require_role("admin", "purchasing", "accounting", require_mfa=True)
 def delete_vendor(vid):
-    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    if not supabase: return jsonify({"error": "DB not configured"}), 500
     try:
-        supabase.table("aae_vendors").update({"active":False,"updated_at":datetime.now().isoformat()}).eq("id",vid).execute()
-        return jsonify({"success":True})
+        sb = get_user_sb()
+        sb.table("aae_vendors").update({"active": False, "updated_at": datetime.now().isoformat()}).eq("id", vid).execute()
+        audit_log("delete_vendor", "aae_vendors", vid)
+        return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"error":str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 # ── Hour Breakdown Report (Excel download) ────────────────────────────
 @app.route("/api/hours_report", methods=["POST"])
+@require_auth
 def hours_report():
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -1555,6 +1675,7 @@ def hours_report():
 
     def hdr(row, vals, bg, fg=WHITE, bold=True, sz=10):
         for ci, v in enumerate(vals, 1):
+
             c = ws.cell(row=row, column=ci, value=v)
             c.font = Font(name="Arial", bold=bold, color=fg, size=sz)
             if bg: c.fill = PatternFill("solid", fgColor=bg)
