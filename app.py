@@ -1,5 +1,5 @@
 import os, json, base64, re
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from anthropic import Anthropic
 from supabase import create_client
 import io
@@ -52,11 +52,27 @@ TECH_MULT = {
     "MASTER": 0.85, "JOURNEYMAN": 1.0, "APPRENTICE": 1.3, "MIXED": 1.1,
 }
 SHOP_RATES = {
-    "labor_rate": 85.0, "mat_markup": 0.30,
+    "labor_rate": 95.0, "mat_markup": 0.30,
     "overhead": 0.12, "profit": 0.18, "expedite": 0.15,
-    "wire_16_per_ft": 0.18, "wire_14_per_ft": 0.22,
-    "wire_12_per_ft": 0.28, "wire_10_per_ft": 0.38,
-    "heat_shrink_each": 0.08,
+    # Wire pricing per foot (AAE actual cost)
+    "wire_10awg_under": 0.40, "wire_8awg": 0.65,
+    "wire_6awg": 1.10, "wire_4awg": 1.75, "wire_2awg": 3.00,
+    "wire_1awg": 3.50, "wire_1_0": 5.25, "wire_2_0": 5.50,
+    "wire_3_0": 6.36, "wire_4_0": 7.50, "wire_250mcm": 13.00,
+    # Heat shrink: H075X044H1T — $275/roll, 1000 labels, ~850 usable (2 rows wasted)
+    "heat_shrink_roll_cost": 275.0,
+    "heat_shrink_per_roll": 850,   # usable labels per roll
+    # Legacy fallbacks
+    "wire_16_per_ft": 0.40, "wire_14_per_ft": 0.40,
+    "wire_12_per_ft": 0.40, "wire_10_per_ft": 0.40,
+    "heat_shrink_each": round(275.0 / 850, 4),
+}
+
+# Wire gauge cost lookup (value from select = cost per foot)
+WIRE_GAUGE_COSTS = {
+    "10_under": 0.40, "8": 0.65, "6": 1.10, "4": 1.75,
+    "2": 3.00, "1": 3.50, "1_0": 5.25, "2_0": 5.50,
+    "3_0": 6.36, "4_0": 7.50, "250mcm": 13.00,
 }
 
 # ── Calculation engine ─────────────────────────────────────────────────────
@@ -105,16 +121,22 @@ def calculate_bid(data):
     tb_total = tb_std + tb_gnd + tb_fsd + tb_dis
     markers  = str(data.get("terminal_markers","Y")).upper()=="Y"
     ferrules = str(data.get("ferrules","Y")).upper()=="Y"
-    wire_cnt = int(data.get("wire_count", 0))
-    wire_len = float(data.get("wire_avg_len", 24))
-    hs_yn    = str(data.get("heat_shrink","Y")).upper()=="Y"
-    fat_hrs  = float(data.get("fat_hours", 0))
-    eng_hrs  = float(data.get("eng_hours", 0))
-    prog_hrs = float(data.get("prog_hours", 0))
-    comp_key = data.get("complexity", "STANDARD")
-    tech_key = data.get("tech_level", "JOURNEYMAN")
-    expedite = str(data.get("expedite","N")).upper()=="Y"
-    lr_override = float(data.get("labor_rate_override", 0))
+    wire_cnt      = int(data.get("wire_count", 0))
+    wire_len      = float(data.get("wire_avg_len", 24))
+    wire_gauge_key= data.get("wire_gauge", "10_under")
+    hs_yn         = str(data.get("heat_shrink","Y")).upper()=="Y"
+    fat_hrs       = float(data.get("fat_hours", 0))
+    eng_hrs       = float(data.get("eng_hours", 0))
+    prog_hrs      = float(data.get("prog_hours", 0))
+    comp_key      = data.get("complexity", "STANDARD")
+    tech_key      = data.get("tech_level", "JOURNEYMAN")
+    expedite      = str(data.get("expedite","N")).upper()=="Y"
+    lr_override   = float(data.get("labor_rate_override", 0))
+    # Markup/margin: margin_type="margin"|"markup", margin_value=decimal e.g. 0.25
+    margin_type   = data.get("margin_type", "markup")
+    margin_value  = float(data.get("margin_value", SHOP_RATES["mat_markup"]))
+    # Calibration factor from frontend (learned from actual vs estimated hours)
+    calib_factor  = float(data.get("calib_factor", 1.0))
 
     # If wire count not provided, estimate it
     if wire_cnt == 0:
@@ -158,14 +180,23 @@ def calculate_bid(data):
     raw_min = enc_min+pwr_min+mc_min+cd_min+plc_min+tb_min+hs_min+ul_min
     raw_hrs = raw_min / 60.0
 
-    c_mult  = COMPLEXITY_MULT.get(comp_key, 1.0)
-    t_mult  = TECH_MULT.get(tech_key, 1.0)
-    total_hrs = raw_hrs * c_mult * t_mult + fat_hrs + eng_hrs + prog_hrs
+    c_mult    = COMPLEXITY_MULT.get(comp_key, 1.0)
+    t_mult    = TECH_MULT.get(tech_key, 1.0)
+    # Apply calibration factor to raw hours (learned from actual vs estimated)
+    total_hrs = raw_hrs * c_mult * t_mult * calib_factor + fat_hrs + eng_hrs + prog_hrs
 
-    # Material / BOM
+    # Wire cost using AAE per-gauge pricing
+    wire_cost_per_ft = WIRE_GAUGE_COSTS.get(wire_gauge_key, 0.40)
     ctrl_wire_ft  = int(wire_cnt * wire_len / 12 * 1.15)
     pwr_wire_ft   = int((br_1p + (br_2p+br_3p)*2) * 1.5)
-    hs_labels_qty = wire_cnt * 2 if hs_yn else 0
+    total_wire_ft = ctrl_wire_ft + pwr_wire_ft
+    wire_cost     = total_wire_ft * wire_cost_per_ft
+
+    # Heat shrink: H075X044H1T $275/roll, 1000 labels, 850 usable
+    hs_labels_qty  = wire_cnt * 2 if hs_yn else 0
+    hs_rolls_needed= max(0, -(-hs_labels_qty // int(SHOP_RATES["heat_shrink_per_roll"])))
+    hs_cost        = hs_rolls_needed * SHOP_RATES["heat_shrink_roll_cost"] if hs_yn else 0
+
     tb_marker_strips = max(0, int(tb_total*1.2/10)) if markers else 0
     ferrule_bags  = max(0, int(wire_cnt*2/500)+1) if ferrules else 0
     din_sticks    = din_runs
@@ -174,9 +205,8 @@ def calculate_bid(data):
     spare_tbs     = int(tb_std * 0.1)
 
     mat_cost = (
-        ctrl_wire_ft * SHOP_RATES["wire_16_per_ft"] +
-        pwr_wire_ft  * SHOP_RATES["wire_12_per_ft"] +
-        hs_labels_qty* SHOP_RATES["heat_shrink_each"] +
+        wire_cost +
+        hs_cost +
         tb_marker_strips * 2.50 +
         ferrule_bags * 28.00 +
         din_sticks   * 12.50 +
@@ -193,27 +223,39 @@ def calculate_bid(data):
     manual_total = sum(float(i.get("qty",0))*float(i.get("unit_cost",0)) for i in manual_items)
     mat_cost += manual_total
 
-    # Pricing
+    # Apply markup or margin per user selection
     eff_labor_rate = lr_override if lr_override > 0 else SHOP_RATES["labor_rate"]
     labor_cost = total_hrs * eff_labor_rate
-    mat_with_markup = mat_cost * (1 + SHOP_RATES["mat_markup"])
-    subtotal = labor_cost + mat_with_markup
+    if margin_type == "margin":
+        divisor = max(0.01, 1.0 - margin_value)
+        mat_with_markup = mat_cost / divisor
+    else:
+        mat_with_markup = mat_cost * (1 + margin_value)
+
+    subtotal      = labor_cost + mat_with_markup
     overhead_cost = subtotal * SHOP_RATES["overhead"]
-    pre_profit = subtotal + overhead_cost
-    exp_cost = pre_profit * SHOP_RATES["expedite"] if expedite else 0
-    total_price = pre_profit / (1 - SHOP_RATES["profit"]) + exp_cost
+    pre_profit    = subtotal + overhead_cost
+    exp_cost      = pre_profit * SHOP_RATES["expedite"] if expedite else 0
+    total_price   = pre_profit / (1 - SHOP_RATES["profit"]) + exp_cost
 
     return {
         "raw_hours": round(raw_hrs, 2),
         "complexity_mult": c_mult,
         "tech_mult": t_mult,
+        "calib_factor": calib_factor,
         "total_hours": round(total_hrs, 2),
         "wire_count": wire_cnt,
         "hs_labels_qty": hs_labels_qty,
+        "hs_rolls": hs_rolls_needed,
         "ctrl_wire_ft": ctrl_wire_ft,
         "pwr_wire_ft": pwr_wire_ft,
+        "wire_cost": round(wire_cost, 2),
+        "hs_cost": round(hs_cost, 2),
+        "wire_cost_per_ft": wire_cost_per_ft,
         "mat_cost_raw": round(mat_cost, 2),
         "mat_cost_markup": round(mat_with_markup, 2),
+        "margin_type": margin_type,
+        "margin_value": margin_value,
         "labor_cost": round(labor_cost, 2),
         "labor_rate_used": eff_labor_rate,
         "subtotal": round(subtotal, 2),
@@ -533,6 +575,11 @@ def generate_quote_pdf(bid_data, calc_results, quote_number):
     return buffer
 
 # ── Routes ─────────────────────────────────────────────────────────────────
+@app.route("/static/<path:filename>")
+def static_files(filename):
+    return send_from_directory("static", filename)
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -591,6 +638,331 @@ def quote_pdf():
     return send_file(pdf_buf, mimetype="application/pdf",
                      as_attachment=True,
                      download_name=f"AAE_Quote_{quote_num}.pdf")
+
+@app.route("/api/bom_pdf", methods=["POST"])
+def bom_pdf():
+    """Generate a BOM PDF for download."""
+    data      = request.get_json()
+    bid_data  = data.get("bid_data", {})
+    calc_data = data.get("calc", {})
+    quote_num = data.get("quote_num", f"AAE-{datetime.now().strftime('%Y%m%d')}")
+    buf = generate_bom_pdf(bid_data, calc_data, quote_num)
+    return send_file(buf, mimetype="application/pdf", as_attachment=True,
+                     download_name=f"AAE_BOM_{quote_num}.pdf")
+
+
+@app.route("/api/bom_excel", methods=["POST"])
+def bom_excel():
+    """Generate a BOM Excel file for download."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    data      = request.get_json()
+    bid_data  = data.get("bid_data", {})
+    calc_data = data.get("calc", {})
+    quote_num = data.get("quote_num", f"AAE-{datetime.now().strftime('%Y%m%d')}")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "BOM"
+
+    red_fill   = PatternFill("solid", fgColor="9B1B1B")
+    gray_fill  = PatternFill("solid", fgColor="E8E4E0")
+    white_font = Font(bold=True, color="FFFFFF", name="Calibri")
+    head_font  = Font(bold=True, name="Calibri")
+    mono_font  = Font(name="Courier New", size=10)
+    thin       = Side(style="thin", color="CCCCCC")
+    border     = Border(bottom=Side(style="thin", color="CCCCCC"))
+
+    # Title rows
+    ws.merge_cells("A1:G1")
+    ws["A1"] = "AAE AUTOMATION, INC. — BILL OF MATERIALS"
+    ws["A1"].font = Font(bold=True, size=14, color="9B1B1B", name="Calibri")
+    ws.merge_cells("A2:G2")
+    ws["A2"] = f"Customer: {bid_data.get('customer_name','')}   |   Project: {bid_data.get('project_name','')}   |   Date: {datetime.now().strftime('%m/%d/%Y')}   |   Quote #: {quote_num}"
+    ws["A2"].font = Font(size=10, name="Calibri")
+    ws.merge_cells("A3:G3")
+    ws["A3"] = "*** INTERNAL DOCUMENT ONLY — Not for customer distribution ***"
+    ws["A3"].font = Font(bold=True, color="CC6600", name="Calibri")
+    ws.row_dimensions[3].height = 18
+
+    # Headers row 5
+    headers = ["Category", "Item / Part #", "Description", "Qty", "Unit", "Unit Cost ($)", "Total Cost ($)"]
+    for ci, h in enumerate(headers, 1):
+        cell = ws.cell(row=5, column=ci, value=h)
+        cell.fill = red_fill
+        cell.font = white_font
+        cell.alignment = Alignment(horizontal="center")
+
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 42
+    ws.column_dimensions["D"].width = 8
+    ws.column_dimensions["E"].width = 8
+    ws.column_dimensions["F"].width = 14
+    ws.column_dimensions["G"].width = 14
+
+    # Build BOM rows from calc data
+    bom_items = build_bom_items(bid_data, calc_data)
+    row = 6
+    last_cat = None
+    for item in bom_items:
+        if item["category"] != last_cat:
+            last_cat = item["category"]
+            ws.merge_cells(f"A{row}:G{row}")
+            c = ws.cell(row=row, column=1, value=item["category"].upper())
+            c.fill = PatternFill("solid", fgColor="2C2C2C")
+            c.font = Font(bold=True, color="FFFFFF", name="Calibri", size=9)
+            row += 1
+        fill = PatternFill("solid", fgColor="FAFAFA") if row % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
+        vals = [item["category"], item["part_num"], item["description"],
+                item["qty"], item["unit"], round(item["unit_cost"], 2), round(item["total_cost"], 2)]
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(row=row, column=ci, value=v)
+            c.fill = fill
+            c.font = mono_font if ci in (4, 6, 7) else Font(name="Calibri", size=10)
+            if ci in (6, 7):
+                c.number_format = '"$"#,##0.00'
+                c.alignment = Alignment(horizontal="right")
+        row += 1
+
+    # Totals
+    total_raw = sum(i["total_cost"] for i in bom_items)
+    ws.cell(row=row+1, column=5, value="TOTAL RAW COST:").font = Font(bold=True, name="Calibri")
+    tc = ws.cell(row=row+1, column=7, value=round(total_raw, 2))
+    tc.font = Font(bold=True, color="9B1B1B", name="Calibri")
+    tc.number_format = '"$"#,##0.00'
+
+    # Labor summary sheet
+    ws2 = wb.create_sheet("Labor Summary")
+    labor_rows = [
+        ("Raw Labor Hours", f"{calc_data.get('raw_hours', 0):.2f} hrs"),
+        ("Complexity Multiplier", f"{calc_data.get('complexity_mult', 1.0)}×"),
+        ("Tech Multiplier", f"{calc_data.get('tech_mult', 1.0)}×"),
+        ("Calibration Factor", f"{calc_data.get('calib_factor', 1.0):.3f}×"),
+        ("Total Billable Hours", f"{calc_data.get('total_hours', 0):.2f} hrs"),
+        ("Labor Rate", f"${calc_data.get('labor_rate_used', 0):.2f}/hr"),
+        ("Labor Cost", calc_data.get("labor_cost", 0)),
+        ("Material (raw)", calc_data.get("mat_cost_raw", 0)),
+        ("Wire Cost", calc_data.get("wire_cost", 0)),
+        ("Heat Shrink Cost", calc_data.get("hs_cost", 0)),
+        ("Material w/ Margin", calc_data.get("mat_cost_markup", 0)),
+        ("Overhead (12%)", calc_data.get("overhead_cost", 0)),
+        ("Expedite", calc_data.get("expedite_cost", 0)),
+        ("TOTAL QUOTED PRICE", calc_data.get("total_price", 0)),
+    ]
+    ws2.column_dimensions["A"].width = 26
+    ws2.column_dimensions["B"].width = 18
+    for ri, (label, val) in enumerate(labor_rows, 1):
+        lc = ws2.cell(row=ri, column=1, value=label)
+        vc = ws2.cell(row=ri, column=2, value=val)
+        lc.font = Font(bold=(ri == len(labor_rows)), name="Calibri")
+        if isinstance(val, float):
+            vc.number_format = '"$"#,##0.00'
+            vc.font = Font(bold=(ri == len(labor_rows)),
+                           color=("9B1B1B" if ri == len(labor_rows) else "000000"), name="Calibri")
+        if ri == len(labor_rows):
+            lc.font = Font(bold=True, color="9B1B1B", name="Calibri")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True,
+                     download_name=f"AAE_BOM_{quote_num}.xlsx")
+
+
+@app.route("/api/bid_quote_pdf/<int:bid_id>", methods=["GET"])
+def bid_quote_pdf(bid_id):
+    """Download quote PDF for a saved bid by ID."""
+    try:
+        result = supabase.table("bids").select("*").eq("id", bid_id).single().execute()
+        bid = result.data
+        if not bid:
+            return jsonify({"error": "Bid not found"}), 404
+        bid_data  = json.loads(bid.get("bid_data", "{}"))
+        calc_data = bid_data.get("calc", {})
+        actual_bid = {k: v for k, v in bid_data.items() if k != "calc"}
+        actual_bid["customer_name"] = bid.get("customer_name", "")
+        actual_bid["project_name"]  = bid.get("project_name", "")
+        actual_bid["estimator_name"]= bid.get("estimator_name", "")
+        quote_num = f"AAE-{bid.get('created_at','')[:10].replace('-','')}-{bid_id}"
+        pdf_buf   = generate_quote_pdf(actual_bid, calc_data, quote_num)
+        return send_file(pdf_buf, mimetype="application/pdf", as_attachment=True,
+                         download_name=f"AAE_Quote_{quote_num}.pdf")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def build_bom_items(bid_data, calc_data):
+    """Build a structured BOM item list from bid + calc data."""
+    items = []
+    def add(cat, part, desc, qty, unit, unit_cost):
+        if qty <= 0: return
+        items.append({"category": cat, "part_num": part, "description": desc,
+                       "qty": qty, "unit": unit, "unit_cost": unit_cost,
+                       "total_cost": qty * unit_cost})
+
+    enc  = int(bid_data.get("enc_qty", 1))
+    add("Enclosure", "ENCLOSURE", "Panel Enclosure", enc, "ea", 450)
+    add("Enclosure", "DIN-RAIL", "DIN Rail (1m stick)", int(bid_data.get("din_rail_runs", 0)), "ea", 12.50)
+    add("Enclosure", "WIRE-DUCT", "Wire Duct Section", int(bid_data.get("wire_duct_runs", 0))*2, "ea", 8.75)
+    add("Power", "MAIN-DISC", "Main Disconnect/Breaker", 1 if int(bid_data.get("main_amp",0))>0 else 0, "ea", 180)
+    add("Power", "BREAKER-1P", "1P Branch Circuit Breaker", int(bid_data.get("branch_1p", 0)), "ea", 25)
+    add("Power", "BREAKER-2P", "2P Branch Circuit Breaker", int(bid_data.get("branch_2p", 0)), "ea", 45)
+    add("Power", "BREAKER-3P", "3P Branch Circuit Breaker", int(bid_data.get("branch_3p", 0)), "ea", 65)
+    add("Power", "FUSED-DISC", "Fused Disconnect", int(bid_data.get("fused_disconnects", 0)), "ea", 85)
+    add("Power", "CPT", "Control Power Transformer", 1 if str(bid_data.get("cpt_present","N")).upper()=="Y" else 0, "ea", 220)
+    add("Power", "PWR-DIST-BLK", "Power Distribution Block", int(bid_data.get("pdb_qty", 0)), "ea", 28)
+    add("Motor Ctrl", "CONT-SM", "Contactor ≤40A", int(bid_data.get("contactor_small", 0)), "ea", 65)
+    add("Motor Ctrl", "CONT-LG", "Contactor 41-100A", int(bid_data.get("contactor_large", 0)), "ea", 140)
+    add("Motor Ctrl", "OVERLOAD", "Overload Relay", int(bid_data.get("overload", 0)), "ea", 45)
+    add("Motor Ctrl", "VFD-SM", "VFD ≤5HP", int(bid_data.get("vfd_small", 0)), "ea", 380)
+    add("Motor Ctrl", "VFD-MD", "VFD 6-25HP", int(bid_data.get("vfd_med", 0)), "ea", 680)
+    add("Motor Ctrl", "VFD-LG", "VFD 26-100HP", int(bid_data.get("vfd_large", 0)), "ea", 1400)
+    add("Motor Ctrl", "SS-SM", "Soft Starter ≤50A", int(bid_data.get("soft_starter_small", 0)), "ea", 280)
+    add("Motor Ctrl", "SS-LG", "Soft Starter >50A", int(bid_data.get("soft_starter_large", 0)), "ea", 520)
+    add("Control", "RELAY-IC", "Ice Cube Relay", int(bid_data.get("relay_icecube", 0)), "ea", 18)
+    add("Control", "RELAY-DIN", "DIN Mount Relay", int(bid_data.get("relay_din", 0)), "ea", 28)
+    add("Control", "SSR", "Solid State Relay", int(bid_data.get("ssrs", 0)), "ea", 45)
+    add("Control", "TIMER", "Timer Relay", int(bid_data.get("timers", 0)), "ea", 55)
+    add("Control", "PILOT", "Pilot Light", int(bid_data.get("pilot_lights", 0)), "ea", 22)
+    add("Control", "SEL-SW", "Selector Switch", int(bid_data.get("selectors", 0)), "ea", 28)
+    add("Control", "PUSH-BTN", "Push Button", int(bid_data.get("push_buttons", 0)), "ea", 22)
+    add("Control", "E-STOP", "E-Stop Button", int(bid_data.get("estops", 0)), "ea", 48)
+    if str(bid_data.get("plc_present","N")).upper() == "Y":
+        add("PLC/Network", "PLC-CTRL", "PLC Controller", 1, "ea", 600)
+    add("PLC/Network", "DI-PT", "Digital Input Point", int(bid_data.get("plc_di", 0)), "pt", 8)
+    add("PLC/Network", "DO-PT", "Digital Output Point", int(bid_data.get("plc_do", 0)), "pt", 10)
+    add("PLC/Network", "AI-PT", "Analog Input Point", int(bid_data.get("plc_ai", 0)), "pt", 18)
+    add("PLC/Network", "AO-PT", "Analog Output Point", int(bid_data.get("plc_ao", 0)), "pt", 22)
+    if str(bid_data.get("hmi_present","N")).upper() == "Y":
+        add("PLC/Network", "HMI", "HMI Display Panel", 1, "ea", 800)
+    if str(bid_data.get("safety_relay","N")).upper() == "Y":
+        add("PLC/Network", "SAFETY-CTRL", "Safety Relay/Controller", 1, "ea", 450)
+    if str(bid_data.get("eth_switch","N")).upper() == "Y":
+        add("PLC/Network", "ETH-SW", "Ethernet Switch", 1, "ea", 180)
+    add("PLC/Network", "ETH-CBL", "Internal Ethernet Cable", int(bid_data.get("eth_cables", 0)), "ea", 12)
+    add("Terminals", "TB-STD", "Standard Terminal Block", int(bid_data.get("tb_standard", 0)), "ea", 3.50)
+    add("Terminals", "TB-GND", "Ground Terminal Block", int(bid_data.get("tb_ground", 0)), "ea", 4.20)
+    add("Terminals", "TB-FUSED", "Fused Terminal Block", int(bid_data.get("tb_fused", 0)), "ea", 8.50)
+    add("Terminals", "TB-DISC", "Disconnect Terminal Block", int(bid_data.get("tb_disconnect", 0)), "ea", 9.80)
+    # Wire
+    ctrl_ft = calc_data.get("ctrl_wire_ft", 0)
+    pwr_ft  = calc_data.get("pwr_wire_ft", 0)
+    wrate   = calc_data.get("wire_cost_per_ft", 0.40)
+    if ctrl_ft + pwr_ft > 0:
+        add("Wiring", "WIRE", f"Control/Power Wire ({ctrl_ft+pwr_ft} ft total)", ctrl_ft + pwr_ft, "ft", wrate)
+    # Heat shrink labels
+    hs_rolls = calc_data.get("hs_rolls", 0)
+    if hs_rolls > 0:
+        add("Wiring", "H075X044H1T", f"Heat Shrink Labels — {calc_data.get('hs_labels_qty',0)} pcs ({hs_rolls} roll{'s' if hs_rolls>1 else ''})", hs_rolls, "roll", 275)
+    return items
+
+
+def generate_bom_pdf(bid_data, calc_results, quote_number):
+    """Generate a standalone BOM PDF with AAE branding."""
+    buffer = io.BytesIO()
+    from reportlab.lib.pagesizes import landscape
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter),
+                            rightMargin=0.5*inch, leftMargin=0.5*inch,
+                            topMargin=0.5*inch, bottomMargin=0.5*inch)
+    red   = colors.HexColor("#9B1B1B")
+    dark  = colors.HexColor("#2C2C2C")
+    lgray = colors.HexColor("#F0EDE8")
+    styles = getSampleStyleSheet()
+
+    story = []
+    # Header
+    hdr_data = [[Paragraph("<font color='white'><b>AAE AUTOMATION, INC.</b></font>",
+                            ParagraphStyle("h", fontSize=16, fontName="Helvetica-Bold")),
+                 Paragraph("<font color='white'>BILL OF MATERIALS</font>",
+                            ParagraphStyle("h2", fontSize=12, fontName="Helvetica", alignment=TA_RIGHT))]]
+    hdr_tbl = Table(hdr_data, colWidths=[5*inch, 4.5*inch])
+    hdr_tbl.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,-1), red),
+        ("TOPPADDING",(0,0),(-1,-1), 10), ("BOTTOMPADDING",(0,0),(-1,-1), 10),
+        ("LEFTPADDING",(0,0),(-1,-1), 14), ("RIGHTPADDING",(0,0),(-1,-1), 14),
+        ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+    ]))
+    story.append(hdr_tbl)
+    story.append(Spacer(1, 0.1*inch))
+
+    # Sub-header info
+    story.append(Paragraph(
+        f"<b>Customer:</b> {bid_data.get('customer_name','')} &nbsp;&nbsp; "
+        f"<b>Project:</b> {bid_data.get('project_name','')} &nbsp;&nbsp; "
+        f"<b>Quote #:</b> {quote_number} &nbsp;&nbsp; "
+        f"<b>Date:</b> {datetime.now().strftime('%m/%d/%Y')} &nbsp;&nbsp;&nbsp; "
+        f"<font color='#CC6600'><b>⚠ INTERNAL DOCUMENT ONLY</b></font>",
+        ParagraphStyle("sub", fontSize=9, fontName="Helvetica", spaceAfter=8)))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#CCCCCC")))
+    story.append(Spacer(1, 0.05*inch))
+
+    # Column headers
+    col_widths = [1.3*inch, 1.5*inch, 3.2*inch, 0.5*inch, 0.5*inch, 1*inch, 1*inch]
+    col_heads  = [["Category","Part #","Description","Qty","Unit","Unit Cost","Total Cost"]]
+    tbl_hdr = Table(col_heads, colWidths=col_widths)
+    tbl_hdr.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,-1), dark),
+        ("TEXTCOLOR",(0,0),(-1,-1), colors.white),
+        ("FONTNAME",(0,0),(-1,-1),"Helvetica-Bold"),
+        ("FONTSIZE",(0,0),(-1,-1), 8.5),
+        ("TOPPADDING",(0,0),(-1,-1), 5), ("BOTTOMPADDING",(0,0),(-1,-1), 5),
+        ("LEFTPADDING",(0,0),(-1,-1), 6),
+    ]))
+    story.append(tbl_hdr)
+
+    # BOM rows
+    bom_items = build_bom_items(bid_data, calc_results)
+    last_cat  = None
+    row_data  = []
+    for item in bom_items:
+        if item["category"] != last_cat:
+            last_cat = item["category"]
+            row_data.append([item["category"].upper(), "", "", "", "", "", ""])
+        row_data.append([
+            "", item["part_num"], item["description"],
+            str(item["qty"]), item["unit"],
+            f'${item["unit_cost"]:.2f}', f'${item["total_cost"]:.2f}'
+        ])
+
+    bom_tbl = Table(row_data, colWidths=col_widths)
+    style_cmds = [
+        ("FONTNAME",(0,0),(-1,-1),"Helvetica"),
+        ("FONTSIZE",(0,0),(-1,-1), 8.5),
+        ("TOPPADDING",(0,0),(-1,-1), 4), ("BOTTOMPADDING",(0,0),(-1,-1), 4),
+        ("LEFTPADDING",(0,0),(-1,-1), 6),
+        ("LINEBELOW",(0,0),(-1,-1), 0.5, colors.HexColor("#DDDDDD")),
+        ("ALIGN",(3,0),(6,-1),"RIGHT"),
+    ]
+    # Category rows styling
+    ri = 0
+    for item in bom_items:
+        if item["category"] != (bom_items[ri-1]["category"] if ri > 0 else None):
+            style_cmds += [
+                ("BACKGROUND",(0,ri),(6,ri), lgray),
+                ("FONTNAME",(0,ri),(6,ri),"Helvetica-Bold"),
+                ("TEXTCOLOR",(0,ri),(0,ri), red),
+                ("SPAN",(0,ri),(6,ri)),
+            ]
+        elif ri % 2 == 0:
+            style_cmds.append(("BACKGROUND",(0,ri),(6,ri), colors.HexColor("#FAFAFA")))
+        ri += 1
+
+    bom_tbl.setStyle(TableStyle(style_cmds))
+    story.append(bom_tbl)
+
+    # Total row
+    total_raw = sum(i["total_cost"] for i in bom_items)
+    story.append(Spacer(1, 0.1*inch))
+    tot_data = [[Paragraph(f"<b>TOTAL MATERIAL COST (RAW): ${total_raw:,.2f}</b>",
+                            ParagraphStyle("tot", fontSize=11, textColor=red, fontName="Helvetica-Bold", alignment=TA_RIGHT))]]
+    story.append(Table(tot_data, colWidths=[9.5*inch]))
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
