@@ -1004,10 +1004,43 @@ function showTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   const panel = document.getElementById('tab-' + name);
   if (panel) panel.classList.add('active');
-  // Highlight the clicked button if called from a click event
   try { if (event && event.target) event.target.classList.add('active'); } catch(e) {}
   if (name === 'history') loadHistory();
-  if (name === 'admin') { loadLaborRates(); loadUsers(); loadVendors(); }
+  if (name === 'admin') renderAdminTab();
+}
+
+function renderAdminTab() {
+  try {
+    // Labor rates — always from hardcoded defaults + localStorage overrides
+    const overrides = JSON.parse(localStorage.getItem('aae_labor_rates_overrides') || '{}');
+    const rates = DEFAULT_LABOR_RATES.map(r => ({
+      ...r, rate_value: overrides[r.rate_key] !== undefined ? overrides[r.rate_key] : r.rate_value
+    }));
+    laborRatesCache = rates;
+    renderLaborRatesTable(rates);
+  } catch(e) {
+    const d = document.getElementById('laborRatesTable');
+    if (d) d.innerHTML = '<p style="color:#F4A9A8">Error: ' + e.message + '</p>';
+  }
+  try {
+    loadUsers();
+  } catch(e) {}
+  try {
+    renderVendorsTable(getVendors());
+  } catch(e) {
+    const d = document.getElementById('vendorsTable');
+    if (d) d.innerHTML = '<p style="color:#F4A9A8">Error: ' + e.message + '</p>';
+  }
+  // Background sync — does not block rendering
+  fetch('/api/labor_rates').then(r => r.ok ? r.json() : null).then(sd => {
+    if (!sd || !Array.isArray(sd) || sd.length === 0) return;
+    const sm = {};
+    sd.forEach(r => { if (r.rate_key) sm[r.rate_key] = r.rate_value; });
+    laborRatesCache = laborRatesCache.map(r =>
+      sm[r.rate_key] !== undefined ? {...r, rate_value: sm[r.rate_key]} : r
+    );
+    renderLaborRatesTable(laborRatesCache);
+  }).catch(() => {});
 }
 
 // ── Toast notifications ────────────────────────────────────────────────────
@@ -2062,4 +2095,3 @@ const _origDownloadPDF = downloadPDF;
 </script>
 </body>
 </html>
-
