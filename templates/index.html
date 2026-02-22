@@ -898,13 +898,67 @@ body {
       <div class="btn-row" style="margin-top:1.5rem">
         <button class="btn btn-primary" onclick="downloadPDF()">📄 Download Quote PDF</button>
         <button class="btn btn-secondary" onclick="saveBid()">💾 Save Bid</button>
-        <button class="btn btn-ghost" onclick="exportBomPDF()">📦 BOM PDF</button>
-        <button class="btn btn-ghost" onclick="exportBomExcel()">📊 BOM Excel</button>
+        <button class="btn btn-ghost" onclick="exportBomExcel()">📦 Download BOM</button>
+        <button class="btn btn-ghost" onclick="downloadHoursReport()" style="border-color:#7B52AB;color:#B39DDB">📊 Hour Breakdown</button>
       </div>
     </div>
   </div>
-</div><!-- end new-bid tab -->
+<!-- ══ TAB: ADMIN ══ -->
+<div id="tab-admin" class="tab-panel">
+  <div class="page-header">
+    <h1>⚙️ ADMIN PANEL</h1>
+    <p>Labor rates, users, and vendor management — admin access only.</p>
+  </div>
 
+  <!-- ── Labor Rates ── -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <div class="card-title" style="margin:0">🔧 LABOR RATES EDITOR</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="loadLaborRates()">↺ Refresh</button>
+        <button class="btn btn-primary" onclick="saveAllLaborRates()">💾 Save All Changes</button>
+      </div>
+    </div>
+    <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">All values in <b>minutes per unit</b>. Changes apply to all future bids immediately. Calibrated from CR Permian PLC (28 hrs actual).</p>
+    <div id="laborRatesTable" style="overflow-x:auto"></div>
+  </div>
+
+  <!-- ── User Management ── -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <div class="card-title" style="margin:0">👤 USER MANAGEMENT</div>
+      <button class="btn btn-primary" onclick="showAddUserForm()">➕ Add User</button>
+    </div>
+    <div id="addUserForm" style="display:none;background:rgba(155,27,27,0.1);border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:16px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end">
+        <div class="field"><label>Username</label><input type="text" id="newUsername" placeholder="jsmith"></div>
+        <div class="field"><label>Display Name</label><input type="text" id="newDisplayName" placeholder="J. Smith"></div>
+        <div class="field"><label>Password</label><input type="text" id="newPassword" placeholder="temporary123"></div>
+        <div class="field"><label>Role</label><select id="newRole"><option value="estimator">Estimator</option><option value="admin">Admin</option></select></div>
+        <button class="btn btn-primary" onclick="createUser()" style="margin-bottom:0;height:38px">Create</button>
+      </div>
+    </div>
+    <div id="usersTable"></div>
+  </div>
+
+  <!-- ── Vendor / Manufacturer Mapping ── -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <div class="card-title" style="margin:0">🏭 VENDOR / MANUFACTURER MAPPING</div>
+      <button class="btn btn-primary" onclick="showAddVendorForm()">➕ Add Mapping</button>
+    </div>
+    <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">Auto-populates the Vendor column on BOM exports. Partial matching — "Allen Bradley" matches "Allen-Bradley" too.</p>
+    <div id="addVendorForm" style="display:none;background:rgba(155,27,27,0.1);border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:16px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end">
+        <div class="field"><label>Manufacturer</label><input type="text" id="newMfr" placeholder="Allen Bradley"></div>
+        <div class="field"><label>Vendor (AAE buys from)</label><input type="text" id="newVendor" placeholder="Rexel"></div>
+        <div class="field"><label>Notes</label><input type="text" id="newVendorNotes" placeholder="optional"></div>
+        <button class="btn btn-primary" onclick="createVendor()" style="margin-bottom:0;height:38px">Add</button>
+      </div>
+    </div>
+    <div id="vendorsTable"></div>
+  </div>
+</div>
 
 <!-- ══ TAB: HISTORY ══ -->
 <div id="tab-history" class="tab-panel">
@@ -922,8 +976,6 @@ body {
     </div>
   </div>
 </div>
-
-</div><!-- end container -->
 
 <!-- Toast container -->
 <div class="toast-container" id="toastContainer"></div>
@@ -1320,19 +1372,47 @@ const USERS = [
 ];
 let currentUser = null;
 
-function doLogin() {
+async function doLogin() {
   const u = document.getElementById("login_user").value.trim().toLowerCase();
   const p = document.getElementById("login_pass").value;
-  const user = USERS.find(x => x.username===u && x.password===p);
-  if (user) {
-    currentUser = user;
-    document.getElementById("login-overlay").classList.remove("visible");
-    document.getElementById("user_pill").textContent = "👤 " + user.display;
-    document.getElementById("estimator_name").value = user.display + " — AAE Automation";
-    loadHistory();
-    loadCalibration();
-  } else {
-    document.getElementById("login_err").style.display = "block";
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({username: u, password: p})
+    });
+    const data = await res.json();
+    if (data.success) {
+      currentUser = {username: u, display: data.display_name, role: data.role};
+      document.getElementById("login-overlay").classList.remove("visible");
+      document.getElementById("user_pill").textContent = "👤 " + data.display_name;
+      document.getElementById("estimator_name").value = data.display_name + " — AAE Automation";
+      // Show admin tab for admin users
+      const adminBtn = document.getElementById("adminTabBtn");
+      if (adminBtn) adminBtn.style.display = (data.role === "admin") ? "inline-flex" : "none";
+      loadHistory();
+      loadCalibration();
+    } else {
+      document.getElementById("login_err").style.display = "block";
+    }
+  } catch(e) {
+    // Fallback to hardcoded if API fails
+    const USERS = [
+      {username:"mfellers",password:"aae2025",display:"M. Fellers",role:"admin"},
+      {username:"admin",password:"aae2025",display:"Admin",role:"admin"},
+      {username:"estimator",password:"panel123",display:"Estimator",role:"estimator"}
+    ];
+    const user = USERS.find(x => x.username===u && x.password===p);
+    if (user) {
+      currentUser = user;
+      document.getElementById("login-overlay").classList.remove("visible");
+      document.getElementById("user_pill").textContent = "👤 " + user.display;
+      document.getElementById("estimator_name").value = user.display + " — AAE Automation";
+      const adminBtn = document.getElementById("adminTabBtn");
+      if (adminBtn) adminBtn.style.display = (user.role==="admin") ? "inline-flex" : "none";
+      loadHistory(); loadCalibration();
+    } else {
+      document.getElementById("login_err").style.display = "block";
+    }
   }
 }
 function doLogout() {
@@ -1340,6 +1420,8 @@ function doLogout() {
   document.getElementById("login-overlay").classList.add("visible");
   document.getElementById("login_pass").value = "";
   document.getElementById("login_err").style.display = "none";
+  const adminBtn = document.getElementById("adminTabBtn");
+  if (adminBtn) adminBtn.style.display = "none";
 }
 ["login_user","login_pass"].forEach(id => {
   document.getElementById(id)?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
@@ -1512,6 +1594,272 @@ async function downloadHistoryBOM(bidId) {
     a.download = `AAE_BOM_${bid.project_name||bidId}.xlsx`;
     a.click(); toast("BOM Excel downloaded!","success");
   } catch(e) { toast("BOM download failed","error"); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// HOURS REPORT DOWNLOAD
+// ═══════════════════════════════════════════════════════════
+async function downloadHoursReport() {
+  if (!currentCalcResults || !currentBidData) { toast("Calculate a bid first","error"); return; }
+  try {
+    const res = await fetch("/api/hours_report", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({calc: currentCalcResults, bid_data: currentBidData})
+    });
+    if (!res.ok) { toast("Hour report failed","error"); return; }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `AAE_HourBreakdown_${(currentBidData.project_name||"bid").replace(/[^a-z0-9]/gi,"_")}.xlsx`;
+    a.click();
+    toast("Hour breakdown downloaded!","success");
+  } catch(e) { toast("Download failed: "+e.message,"error"); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADMIN: LABOR RATES
+// ═══════════════════════════════════════════════════════════
+let laborRatesCache = [];
+
+async function loadLaborRates() {
+  const div = document.getElementById("laborRatesTable");
+  div.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:13px">Loading...</p>';
+  try {
+    const res  = await fetch("/api/labor_rates");
+    const data = await res.json();
+    laborRatesCache = data;
+    renderLaborRatesTable(data);
+  } catch(e) { div.innerHTML = '<p style="color:#F4A9A8">Failed to load rates: '+e.message+'</p>'; }
+}
+
+function renderLaborRatesTable(rates) {
+  const div = document.getElementById("laborRatesTable");
+  // Group by category
+  const cats = {};
+  rates.forEach(r => { if(!cats[r.category]) cats[r.category]=[]; cats[r.category].push(r); });
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>
+      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">DESCRIPTION</th>
+      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">RATE KEY</th>
+      <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white">MIN/UNIT</th>
+      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">UNIT</th>
+    </tr></thead><tbody>`;
+  const catOrder = ["Enclosure","Power","Motor Ctrl","Control","PLC/Network","Terminals","Wiring","UL/QC"];
+  const allCats  = [...catOrder.filter(c=>cats[c]), ...Object.keys(cats).filter(c=>!catOrder.includes(c))];
+  allCats.forEach(cat => {
+    html += `<tr><td colspan="4" style="padding:6px 12px;background:#9B1B1B;color:white;font-weight:bold;font-size:11px">${cat.toUpperCase()}</td></tr>`;
+    cats[cat].forEach((r,i) => {
+      const bg = i%2===0 ? "#1A0505" : "#200808";
+      html += `<tr style="background:${bg}">
+        <td style="padding:6px 12px;color:rgba(255,255,255,0.85)">${r.description}</td>
+        <td style="padding:6px 12px;color:rgba(255,255,255,0.4);font-family:monospace;font-size:11px">${r.rate_key}</td>
+        <td style="padding:4px 8px;text-align:center">
+          <input type="number" data-key="${r.rate_key}" value="${r.rate_value}" step="0.1" min="0"
+            style="width:70px;background:#2C0A0A;border:1px solid rgba(155,27,27,0.5);color:white;
+                   border-radius:4px;padding:4px 6px;text-align:center;font-size:12px"
+            onchange="markRateChanged(this)">
+        </td>
+        <td style="padding:6px 12px;color:rgba(255,255,255,0.4);font-size:11px">${r.unit||'min/unit'}</td>
+      </tr>`;
+    });
+  });
+  html += '</tbody></table>';
+  div.innerHTML = html;
+}
+
+function markRateChanged(input) {
+  input.style.borderColor = "#FFD54F";
+  input.style.color = "#FFD54F";
+}
+
+async function saveAllLaborRates() {
+  const inputs = document.querySelectorAll("#laborRatesTable input[data-key]");
+  const updates = {};
+  inputs.forEach(inp => { updates[inp.dataset.key] = parseFloat(inp.value); });
+  try {
+    const res = await fetch("/api/labor_rates/bulk", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({rates: updates, username: currentUser?.username || "mfellers"})
+    });
+    const data = await res.json();
+    if (data.success) {
+      toast(`Saved ${data.updated} labor rates ✓`,"success");
+      // Reset highlight
+      document.querySelectorAll("#laborRatesTable input").forEach(i => {
+        i.style.borderColor=""; i.style.color="white";
+      });
+    } else { toast("Save failed: "+data.error,"error"); }
+  } catch(e) { toast("Save failed: "+e.message,"error"); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADMIN: USERS
+// ═══════════════════════════════════════════════════════════
+async function loadUsers() {
+  const div = document.getElementById("usersTable");
+  if (!div) return;
+  try {
+    const res  = await fetch("/api/users");
+    const data = await res.json();
+    if (!Array.isArray(data)) { div.innerHTML="<p style='color:#F4A9A8'>Error loading users</p>"; return; }
+    let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr>
+        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">USERNAME</th>
+        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">DISPLAY NAME</th>
+        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">ROLE</th>
+        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">STATUS</th>
+        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">NEW PASSWORD</th>
+        <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white">ACTIONS</th>
+      </tr></thead><tbody>`;
+    data.forEach((u,i) => {
+      const bg = i%2===0 ? "#1A0505" : "#200808";
+      html += `<tr style="background:${bg}" id="urow_${u.id}">
+        <td style="padding:8px 12px;color:white;font-weight:bold">${u.username}</td>
+        <td style="padding:8px 12px;color:rgba(255,255,255,0.8)">${u.display_name}</td>
+        <td style="padding:8px 12px"><span style="background:${u.role==='admin'?'#9B1B1B':'#2C2C2C'};
+          color:white;padding:2px 8px;border-radius:10px;font-size:11px">${u.role}</span></td>
+        <td style="padding:8px 12px;color:${u.active?'#81C784':'#F4A9A8'}">${u.active?'Active':'Inactive'}</td>
+        <td style="padding:6px 8px"><input type="text" id="pw_${u.id}" placeholder="enter to change..."
+          style="background:#2C0A0A;border:1px solid rgba(155,27,27,0.4);color:white;border-radius:4px;
+                 padding:4px 8px;font-size:11px;width:150px"></td>
+        <td style="padding:6px 8px;text-align:center;display:flex;gap:6px;justify-content:center">
+          <button onclick="saveUserPassword('${u.id}')" style="background:#9B1B1B;color:white;border:none;
+            border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">💾 Save PW</button>
+          ${u.username!=='mfellers' ? `<button onclick="toggleUser('${u.id}',${!u.active})" style="background:#2C2C2C;
+            color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">
+            ${u.active?'Deactivate':'Activate'}</button>` : ''}
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    div.innerHTML = html;
+  } catch(e) { div.innerHTML = "<p style='color:#F4A9A8'>Error: "+e.message+"</p>"; }
+}
+
+function showAddUserForm() {
+  const f = document.getElementById("addUserForm");
+  f.style.display = f.style.display==="none" ? "block" : "none";
+}
+
+async function createUser() {
+  const username     = document.getElementById("newUsername").value.trim();
+  const display_name = document.getElementById("newDisplayName").value.trim();
+  const password     = document.getElementById("newPassword").value;
+  const role         = document.getElementById("newRole").value;
+  if (!username || !password) { toast("Username and password required","error"); return; }
+  try {
+    const res = await fetch("/api/users",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username,display_name:display_name||username,password,role})});
+    const data = await res.json();
+    if (data.success) {
+      toast("User created: "+username,"success");
+      document.getElementById("addUserForm").style.display="none";
+      ["newUsername","newDisplayName","newPassword"].forEach(id=>document.getElementById(id).value="");
+      loadUsers();
+    } else { toast("Error: "+data.error,"error"); }
+  } catch(e) { toast("Failed: "+e.message,"error"); }
+}
+
+async function saveUserPassword(uid) {
+  const pw = document.getElementById("pw_"+uid).value.trim();
+  if (!pw) { toast("Enter a new password first","error"); return; }
+  try {
+    const res = await fetch(`/api/users/${uid}`,{method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({password:pw})});
+    const data = await res.json();
+    if (data.success) { toast("Password updated ✓","success"); document.getElementById("pw_"+uid).value=""; }
+    else { toast("Error: "+data.error,"error"); }
+  } catch(e) { toast("Failed","error"); }
+}
+
+async function toggleUser(uid, active) {
+  try {
+    const res = await fetch(`/api/users/${uid}`,{method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({active})});
+    const data = await res.json();
+    if (data.success) { toast(active?"User activated":"User deactivated","success"); loadUsers(); }
+  } catch(e) { toast("Failed","error"); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADMIN: VENDORS
+// ═══════════════════════════════════════════════════════════
+async function loadVendors() {
+  const div = document.getElementById("vendorsTable");
+  if (!div) return;
+  try {
+    const res  = await fetch("/api/vendors");
+    const data = await res.json();
+    if (!Array.isArray(data)) { div.innerHTML="<p style='color:#F4A9A8'>Error loading vendors</p>"; return; }
+    // Group by vendor
+    const byVendor = {};
+    data.forEach(v => { if(!byVendor[v.vendor_name]) byVendor[v.vendor_name]=[]; byVendor[v.vendor_name].push(v); });
+    let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr>
+        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">VENDOR</th>
+        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">MANUFACTURER</th>
+        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">NOTES</th>
+        <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white">ACTIONS</th>
+      </tr></thead><tbody>`;
+    data.filter(v=>v.active).forEach((v,i) => {
+      const bg = i%2===0 ? "#1A0505" : "#200808";
+      const TEAL = "00897A";
+      html += `<tr style="background:${bg}">
+        <td style="padding:8px 12px;color:#4DB6AC;font-weight:bold">${v.vendor_name}</td>
+        <td style="padding:8px 12px;color:rgba(255,255,255,0.85)">${v.manufacturer}</td>
+        <td style="padding:8px 12px;color:rgba(255,255,255,0.45);font-size:11px">${v.notes||''}</td>
+        <td style="padding:6px 8px;text-align:center">
+          <button onclick="deleteVendor(${v.id})" style="background:rgba(155,27,27,0.3);color:#F4A9A8;
+            border:1px solid rgba(155,27,27,0.4);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px">Remove</button>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    div.innerHTML = html;
+  } catch(e) { div.innerHTML = "<p style='color:#F4A9A8'>Error: "+e.message+"</p>"; }
+}
+
+function showAddVendorForm() {
+  const f = document.getElementById("addVendorForm");
+  f.style.display = f.style.display==="none" ? "block" : "none";
+}
+
+async function createVendor() {
+  const mfr    = document.getElementById("newMfr").value.trim();
+  const vendor = document.getElementById("newVendor").value.trim();
+  const notes  = document.getElementById("newVendorNotes").value.trim();
+  if (!mfr || !vendor) { toast("Manufacturer and vendor required","error"); return; }
+  try {
+    const res = await fetch("/api/vendors",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({manufacturer:mfr,vendor_name:vendor,notes,updated_by:currentUser?.username})});
+    const data = await res.json();
+    if (data.success) {
+      toast(`Added: ${mfr} → ${vendor}`,"success");
+      document.getElementById("addVendorForm").style.display="none";
+      ["newMfr","newVendor","newVendorNotes"].forEach(id=>document.getElementById(id).value="");
+      loadVendors();
+    } else { toast("Error: "+data.error,"error"); }
+  } catch(e) { toast("Failed: "+e.message,"error"); }
+}
+
+async function deleteVendor(vid) {
+  try {
+    const res = await fetch(`/api/vendors/${vid}`,{method:"DELETE"});
+    const data = await res.json();
+    if (data.success) { toast("Mapping removed","success"); loadVendors(); }
+    else { toast("Error: "+data.error,"error"); }
+  } catch(e) { toast("Failed","error"); }
+}
+
+// Load admin data when admin tab is shown
+const _origShowTab = showTab;
+function showTab(name) {
+  _origShowTab(name);
+  if (name === "admin") {
+    loadLaborRates();
+    loadUsers();
+    loadVendors();
+  }
 }
 
 // Add Rockwell logo to quote PDF area (shown in print)
