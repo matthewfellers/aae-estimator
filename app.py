@@ -373,7 +373,11 @@ Rules:
         raw = re.sub(r"\s*```$", "", raw)
         return json.loads(raw)
     except Exception as e:
-        return {"error": str(e), "quantities": {}, "extraction_summary": {"confidence": 0}}
+        import traceback
+        err_detail = traceback.format_exc()
+        print("SCAN ERROR:", err_detail)  # shows in Railway logs
+        return {"error": str(e), "error_detail": err_detail,
+                "quantities": {}, "extraction_summary": {"confidence": 0}}
 
 # ── PDF Quote Generator ────────────────────────────────────────────────────
 def generate_quote_pdf(bid_data, calc_results, quote_number):
@@ -578,6 +582,23 @@ def generate_quote_pdf(bid_data, calc_results, quote_number):
 @app.route("/static/<path:filename>")
 def static_files(filename):
     return send_from_directory("static", filename)
+
+
+@app.route("/api/test")
+def api_test():
+    """Quick health check — verifies Anthropic API key and model are working."""
+    try:
+        resp = anthropic.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=20,
+            messages=[{"role":"user","content":"Reply with the word OK only."}]
+        )
+        return jsonify({"status": "ok", "reply": resp.content[0].text,
+                        "anthropic_sdk": anthropic.__version__})
+    except Exception as e:
+        import traceback
+        return jsonify({"status": "error", "error": str(e),
+                        "detail": traceback.format_exc()}), 500
 
 
 @app.route("/")
