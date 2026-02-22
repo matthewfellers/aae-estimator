@@ -991,9 +991,12 @@ let lastScanMeta = {};
 function showTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
-  event.target.classList.add('active');
+  const panel = document.getElementById('tab-' + name);
+  if (panel) panel.classList.add('active');
+  // Highlight the clicked button if called from a click event
+  try { if (event && event.target) event.target.classList.add('active'); } catch(e) {}
   if (name === 'history') loadHistory();
+  if (name === 'admin') { loadLaborRates(); loadUsers(); loadVendors(); }
 }
 
 // ── Toast notifications ────────────────────────────────────────────────────
@@ -1059,7 +1062,14 @@ async function startScan(file) {
     clearInterval(interval);
     status.classList.remove('visible');
 
-    if (data.error) { toast('Scan error: ' + data.error, 'error'); return; }
+    if (data.error) {
+      if (data.error === 'rate_limit') {
+        toast('⏱ API rate limit — wait 60 sec and try again. Check console.anthropic.com for usage.', 'error');
+      } else {
+        toast('Scan error: ' + (data.error_message || data.error), 'error');
+      }
+      return;
+    }
 
     // Populate fields
     const q = data.quantities || {};
@@ -1123,7 +1133,6 @@ async function startScan(file) {
       bomRow.querySelector('.bom-export-label').textContent =
         `📦 ${lastScanBOM.length} BOM line items extracted — download before calculating`;
     } else if (data.quantities) {
-      // No BOM table found but quantities extracted — still offer download
       bomRow.style.display = 'block';
       bomRow.querySelector('.bom-export-label').textContent =
         `📦 Component quantities extracted (no BOM table found) — download summary`;
@@ -1132,7 +1141,13 @@ async function startScan(file) {
   } catch (err) {
     clearInterval(interval);
     status.classList.remove('visible');
-    toast('Scan failed — check connection', 'error');
+    document.getElementById('uploadText').textContent = '❌ Scan failed';
+
+    if (err.message && (err.message.includes('rate_limit') || err.message.includes('429'))) {
+      toast('⏱ Rate limit hit — wait 60 seconds then try again', 'error');
+    } else {
+      toast('Scan failed: ' + (err.message || 'check connection'), 'error');
+    }
   }
 }
 
@@ -1833,16 +1848,6 @@ async function deleteVendor(vid) {
 }
 
 // Load admin data when admin tab is shown
-const _origShowTab = showTab;
-function showTab(name) {
-  _origShowTab(name);
-  if (name === "admin") {
-    loadLaborRates();
-    loadUsers();
-    loadVendors();
-  }
-}
-
 // Add Rockwell logo to quote PDF area (shown in print)
 const _origDownloadPDF = downloadPDF;
 </script>
