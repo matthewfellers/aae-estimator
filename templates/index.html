@@ -1403,12 +1403,14 @@ function doLogin() {
   const p    = document.getElementById("login_pass").value;
   const user = getUsers().find(x => x.username === u && x.password === p);
   if (user) {
+    // Ensure role is always set (handles stale localStorage data without role field)
+    if (!user.role) user.role = (u === 'mfellers' || u === 'admin') ? 'admin' : 'estimator';
     currentUser = user;
     document.getElementById("login-overlay").classList.remove("visible");
     document.getElementById("user_pill").textContent = "👤 " + user.display;
     document.getElementById("estimator_name").value   = user.display + " — AAE Automation";
     const adminBtn = document.getElementById("adminTabBtn");
-    if (adminBtn) adminBtn.style.display = user.role === "admin" ? "inline-flex" : "none";
+    if (adminBtn) adminBtn.style.display = (user.role === "admin") ? "inline-flex" : "none";
     loadHistory();
     loadCalibration();
   } else {
@@ -1617,49 +1619,159 @@ async function downloadHoursReport() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ADMIN: LABOR RATES
+// ADMIN: LABOR RATES  (localStorage-first, syncs to Supabase if available)
 // ═══════════════════════════════════════════════════════════
+
+const DEFAULT_LABOR_RATES = [
+  // Enclosure & Mechanical
+  {rate_key:"enclosure_prep",    rate_value:20,   category:"Enclosure",   description:"Enclosure prep",                        unit:"min/enclosure"},
+  {rate_key:"subpanel_mount",    rate_value:15,   category:"Enclosure",   description:"Sub-panel mounting",                    unit:"min/enclosure"},
+  {rate_key:"panel_layout",      rate_value:25,   category:"Enclosure",   description:"Panel layout planning",                 unit:"min/enclosure"},
+  {rate_key:"din_rail",          rate_value:6,    category:"Enclosure",   description:"DIN rail installation",                 unit:"min/run"},
+  {rate_key:"wire_duct",         rate_value:4,    category:"Enclosure",   description:"Wire duct installation",                unit:"min/section"},
+  {rate_key:"enc_accessory",     rate_value:8,    category:"Enclosure",   description:"Enclosure accessory (fan, light...)",   unit:"min/item"},
+  {rate_key:"door_component",    rate_value:12,   category:"Enclosure",   description:"Door-mounted component",                unit:"min/item"},
+  // Power
+  {rate_key:"main_breaker_small",rate_value:15,   category:"Power",       description:"Main breaker ≤100A",                    unit:"min/breaker"},
+  {rate_key:"main_breaker_large",rate_value:30,   category:"Power",       description:"Main breaker >100A",                    unit:"min/breaker"},
+  {rate_key:"branch_breaker_1p", rate_value:6,    category:"Power",       description:"1-pole branch breaker",                 unit:"min/breaker"},
+  {rate_key:"branch_breaker_23p",rate_value:10,   category:"Power",       description:"2/3-pole branch breaker",               unit:"min/breaker"},
+  {rate_key:"fused_disconnect",  rate_value:15,   category:"Power",       description:"Fused disconnect",                      unit:"min/unit"},
+  {rate_key:"cpt",               rate_value:20,   category:"Power",       description:"Control power transformer",             unit:"min/unit"},
+  {rate_key:"pdb",               rate_value:12,   category:"Power",       description:"Power distribution block",              unit:"min/unit"},
+  // Motor Control
+  {rate_key:"relay_icecube",     rate_value:8,    category:"Motor Ctrl",  description:"Ice cube relay",                        unit:"min/relay"},
+  {rate_key:"relay_din",         rate_value:6,    category:"Motor Ctrl",  description:"DIN mount relay",                       unit:"min/relay"},
+  {rate_key:"contactor_small",   rate_value:15,   category:"Motor Ctrl",  description:"Contactor ≤40A",                        unit:"min/contactor"},
+  {rate_key:"contactor_large",   rate_value:25,   category:"Motor Ctrl",  description:"Contactor >40A",                        unit:"min/contactor"},
+  {rate_key:"overload",          rate_value:10,   category:"Motor Ctrl",  description:"Overload relay",                        unit:"min/unit"},
+  {rate_key:"timer",             rate_value:8,    category:"Motor Ctrl",  description:"Timer relay",                           unit:"min/unit"},
+  {rate_key:"ssr",               rate_value:10,   category:"Motor Ctrl",  description:"Solid state relay",                     unit:"min/unit"},
+  {rate_key:"vfd_small",         rate_value:40,   category:"Motor Ctrl",  description:"VFD ≤5HP",                              unit:"min/VFD"},
+  {rate_key:"vfd_med",           rate_value:65,   category:"Motor Ctrl",  description:"VFD 6–25HP",                            unit:"min/VFD"},
+  {rate_key:"vfd_large",         rate_value:100,  category:"Motor Ctrl",  description:"VFD 26–100HP",                          unit:"min/VFD"},
+  {rate_key:"soft_starter_small",rate_value:50,   category:"Motor Ctrl",  description:"Soft starter ≤50A",                     unit:"min/unit"},
+  {rate_key:"soft_starter_large",rate_value:80,   category:"Motor Ctrl",  description:"Soft starter >50A",                     unit:"min/unit"},
+  // Control Devices
+  {rate_key:"pilot_light",       rate_value:6,    category:"Control",     description:"Pilot light",                           unit:"min/item"},
+  {rate_key:"selector",          rate_value:8,    category:"Control",     description:"Selector switch",                       unit:"min/item"},
+  {rate_key:"pushbutton",        rate_value:6,    category:"Control",     description:"Push button",                           unit:"min/item"},
+  {rate_key:"estop",             rate_value:12,   category:"Control",     description:"E-stop button",                         unit:"min/item"},
+  // PLC / Networking
+  {rate_key:"plc_rack",          rate_value:35,   category:"PLC/Network", description:"PLC rack/controller mounting",          unit:"min/rack"},
+  {rate_key:"plc_di_do",         rate_value:2.5,  category:"PLC/Network", description:"Digital I/O point wiring",              unit:"min/point"},
+  {rate_key:"plc_ai_ao",         rate_value:3.5,  category:"PLC/Network", description:"Analog I/O point wiring",               unit:"min/point"},
+  {rate_key:"hmi",               rate_value:30,   category:"PLC/Network", description:"HMI mounting & cabling",                unit:"min/HMI"},
+  {rate_key:"safety_relay",      rate_value:20,   category:"PLC/Network", description:"Safety relay",                          unit:"min/unit"},
+  {rate_key:"eth_switch",        rate_value:15,   category:"PLC/Network", description:"Ethernet switch",                       unit:"min/switch"},
+  {rate_key:"eth_cable",         rate_value:5,    category:"PLC/Network", description:"Ethernet cable routing & landing",      unit:"min/cable"},
+  // Terminals
+  {rate_key:"tb_standard",       rate_value:2.5,  category:"Terminals",   description:"Standard terminal block",               unit:"min/TB"},
+  {rate_key:"tb_ground",         rate_value:2.5,  category:"Terminals",   description:"Ground terminal block",                 unit:"min/TB"},
+  {rate_key:"tb_fused",          rate_value:4,    category:"Terminals",   description:"Fused terminal block",                  unit:"min/TB"},
+  {rate_key:"tb_disconnect",     rate_value:4,    category:"Terminals",   description:"Disconnect terminal block",             unit:"min/TB"},
+  {rate_key:"tb_accessories",    rate_value:3,    category:"Terminals",   description:"TB accessories (end caps, markers...)", unit:"min/set"},
+  {rate_key:"terminal_markers",  rate_value:3,    category:"Terminals",   description:"Terminal marker strip labeling",         unit:"min/strip"},
+  // Wiring
+  {rate_key:"wire_land_control", rate_value:1.2,  category:"Wiring",      description:"Wire landing — both ends",              unit:"min/wire"},
+  {rate_key:"ferrule",           rate_value:0.25, category:"Wiring",      description:"Ferrule crimping — both ends",          unit:"min/wire"},
+  {rate_key:"wire_route",        rate_value:0.35, category:"Wiring",      description:"Wire routing through duct",             unit:"min/wire"},
+  {rate_key:"heat_shrink_label", rate_value:0.25, category:"Wiring",      description:"Heat shrink label application",         unit:"min/label"},
+  {rate_key:"heat_shrink_batch", rate_value:2,    category:"Wiring",      description:"Heat shrink batch setup",               unit:"min/50 labels"},
+  // UL / QC
+  {rate_key:"ul_labels",         rate_value:15,   category:"UL/QC",       description:"UL component labeling",                 unit:"min/enclosure"},
+  {rate_key:"continuity_check",  rate_value:0.4,  category:"UL/QC",       description:"Continuity check per wire",             unit:"min/wire"},
+  {rate_key:"hipot",             rate_value:12,   category:"UL/QC",       description:"Hi-pot test",                           unit:"min/enclosure"},
+  {rate_key:"as_built",          rate_value:25,   category:"UL/QC",       description:"As-built drawing update",               unit:"min/enclosure"},
+  {rate_key:"qc_signoff",        rate_value:12,   category:"UL/QC",       description:"QC sign-off",                           unit:"min/enclosure"},
+];
+
 let laborRatesCache = [];
+
+function getLaborRates() {
+  const stored = localStorage.getItem("aae_labor_rates");
+  if (stored) { try { return JSON.parse(stored); } catch(e) {} }
+  return DEFAULT_LABOR_RATES.map(r => ({...r}));  // fresh copy of defaults
+}
+
+function saveLaborRatesLocal(rates) {
+  localStorage.setItem("aae_labor_rates", JSON.stringify(rates));
+}
 
 async function loadLaborRates() {
   const div = document.getElementById("laborRatesTable");
+  if (!div) return;
   div.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:13px">Loading...</p>';
+
+  // Start from defaults (always have complete data including unit labels)
+  let rates = DEFAULT_LABOR_RATES.map(r => ({...r}));
+
+  // Try to pull overrides from server — merge values only (keep our descriptions/units)
   try {
-    const res  = await fetch("/api/labor_rates");
-    const data = await res.json();
-    laborRatesCache = data;
-    renderLaborRatesTable(data);
-  } catch(e) { div.innerHTML = '<p style="color:#F4A9A8">Failed to load rates: '+e.message+'</p>'; }
+    const res = await fetch("/api/labor_rates");
+    if (res.ok) {
+      const serverData = await res.json();
+      if (Array.isArray(serverData) && serverData.length > 0 && !serverData.error) {
+        const serverMap = {};
+        serverData.forEach(r => { serverMap[r.rate_key] = r.rate_value; });
+        rates = rates.map(r => serverMap[r.rate_key] !== undefined
+          ? {...r, rate_value: serverMap[r.rate_key]}
+          : r
+        );
+      }
+    }
+  } catch(e) { /* server unavailable — use defaults */ }
+
+  // Also apply any locally saved overrides
+  const localSaved = localStorage.getItem("aae_labor_rates_overrides");
+  if (localSaved) {
+    try {
+      const overrides = JSON.parse(localSaved);
+      rates = rates.map(r => overrides[r.rate_key] !== undefined
+        ? {...r, rate_value: overrides[r.rate_key]}
+        : r
+      );
+    } catch(e) {}
+  }
+
+  laborRatesCache = rates;
+  renderLaborRatesTable(laborRatesCache);
 }
 
 function renderLaborRatesTable(rates) {
   const div = document.getElementById("laborRatesTable");
-  // Group by category
+  if (!div) return;
   const cats = {};
   rates.forEach(r => { if(!cats[r.category]) cats[r.category]=[]; cats[r.category].push(r); });
-  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
-    <thead><tr>
-      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">DESCRIPTION</th>
-      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">RATE KEY</th>
-      <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white">MIN/UNIT</th>
-      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">UNIT</th>
-    </tr></thead><tbody>`;
   const catOrder = ["Enclosure","Power","Motor Ctrl","Control","PLC/Network","Terminals","Wiring","UL/QC"];
   const allCats  = [...catOrder.filter(c=>cats[c]), ...Object.keys(cats).filter(c=>!catOrder.includes(c))];
+
+  let html = `<div style="margin-bottom:8px;color:rgba(255,255,255,0.4);font-size:11px">
+    💡 Changes save to this browser immediately. Yellow = unsaved. Hit Save to persist.
+  </div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>
+      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white;min-width:220px">DESCRIPTION</th>
+      <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white;width:100px">MIN / UNIT</th>
+      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">UNIT LABEL</th>
+      <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:rgba(255,255,255,0.3);width:140px">KEY</th>
+    </tr></thead><tbody>`;
+
   allCats.forEach(cat => {
-    html += `<tr><td colspan="4" style="padding:6px 12px;background:#9B1B1B;color:white;font-weight:bold;font-size:11px">${cat.toUpperCase()}</td></tr>`;
-    cats[cat].forEach((r,i) => {
+    html += `<tr><td colspan="4" style="padding:6px 12px;background:#9B1B1B;color:white;font-weight:bold;font-size:11px;letter-spacing:0.5px">${cat.toUpperCase()}</td></tr>`;
+    cats[cat].forEach((r, i) => {
       const bg = i%2===0 ? "#1A0505" : "#200808";
-      html += `<tr style="background:${bg}">
-        <td style="padding:6px 12px;color:rgba(255,255,255,0.85)">${r.description}</td>
-        <td style="padding:6px 12px;color:rgba(255,255,255,0.4);font-family:monospace;font-size:11px">${r.rate_key}</td>
+      html += `<tr style="background:${bg}" id="lrow_${r.rate_key}">
+        <td style="padding:6px 12px;color:rgba(255,255,255,0.9)">${r.description}</td>
         <td style="padding:4px 8px;text-align:center">
-          <input type="number" data-key="${r.rate_key}" value="${r.rate_value}" step="0.1" min="0"
+          <input type="number" id="rate_${r.rate_key}" data-key="${r.rate_key}"
+            value="${r.rate_value}" step="0.05" min="0"
             style="width:70px;background:#2C0A0A;border:1px solid rgba(155,27,27,0.5);color:white;
                    border-radius:4px;padding:4px 6px;text-align:center;font-size:12px"
             onchange="markRateChanged(this)">
         </td>
-        <td style="padding:6px 12px;color:rgba(255,255,255,0.4);font-size:11px">${r.unit||'min/unit'}</td>
+        <td style="padding:6px 12px;color:rgba(255,255,255,0.45);font-size:11px">${r.unit||''}</td>
+        <td style="padding:6px 12px;color:rgba(255,255,255,0.2);font-family:monospace;font-size:10px">${r.rate_key}</td>
       </tr>`;
     });
   });
@@ -1670,26 +1782,35 @@ function renderLaborRatesTable(rates) {
 function markRateChanged(input) {
   input.style.borderColor = "#FFD54F";
   input.style.color = "#FFD54F";
+  input.style.fontWeight = "bold";
 }
 
 async function saveAllLaborRates() {
   const inputs = document.querySelectorAll("#laborRatesTable input[data-key]");
   const updates = {};
   inputs.forEach(inp => { updates[inp.dataset.key] = parseFloat(inp.value); });
-  try {
-    const res = await fetch("/api/labor_rates/bulk", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({rates: updates, username: currentUser?.username || "mfellers"})
-    });
-    const data = await res.json();
-    if (data.success) {
-      toast(`Saved ${data.updated} labor rates ✓`,"success");
-      // Reset highlight
-      document.querySelectorAll("#laborRatesTable input").forEach(i => {
-        i.style.borderColor=""; i.style.color="white";
-      });
-    } else { toast("Save failed: "+data.error,"error"); }
-  } catch(e) { toast("Save failed: "+e.message,"error"); }
+
+  // Save as overrides map in localStorage (preserves descriptions/units from defaults)
+  const existing = JSON.parse(localStorage.getItem("aae_labor_rates_overrides")||'{}');
+  Object.assign(existing, updates);
+  localStorage.setItem("aae_labor_rates_overrides", JSON.stringify(existing));
+
+  // Also update the live cache
+  laborRatesCache = laborRatesCache.map(r =>
+    updates[r.rate_key] !== undefined ? {...r, rate_value: updates[r.rate_key]} : r
+  );
+
+  // Reset yellow highlight
+  inputs.forEach(i => { i.style.borderColor=""; i.style.color="white"; i.style.fontWeight=""; });
+  toast(`✓ Saved ${Object.keys(updates).length} labor rates`, "success");
+
+  // Background sync to server (non-blocking)
+  fetch("/api/labor_rates/bulk", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({rates: updates, username: currentUser?.username || "mfellers"})
+  }).then(r=>r.json()).then(d=>{
+    if(d.success) toast("Also synced to database ✓","info");
+  }).catch(()=>{});
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1778,41 +1899,100 @@ function removeUser(idx) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ADMIN: VENDORS
+// ADMIN: VENDORS  (localStorage-first, syncs to Supabase if available)
 // ═══════════════════════════════════════════════════════════
+
+const DEFAULT_VENDORS = [
+  {id:1,  vendor_name:"Rexel",     manufacturer:"Allen Bradley",               notes:""},
+  {id:2,  vendor_name:"Rexel",     manufacturer:"Rockwell Automation",         notes:"Same as Allen Bradley"},
+  {id:3,  vendor_name:"Rexel",     manufacturer:"Hammond Power",               notes:""},
+  {id:4,  vendor_name:"Rexel",     manufacturer:"Panduit",                     notes:"Wire duct, labels"},
+  {id:5,  vendor_name:"Rexel",     manufacturer:"Mersen",                      notes:"Fuses"},
+  {id:6,  vendor_name:"Rexel",     manufacturer:"Hoffman",                     notes:"Enclosure accessories"},
+  {id:7,  vendor_name:"Rexel",     manufacturer:"N-Tron",                      notes:"Ethernet switches"},
+  {id:8,  vendor_name:"Rexel",     manufacturer:"Corning",                     notes:"Fiber"},
+  {id:9,  vendor_name:"AWC",       manufacturer:"Phoenix Contact",             notes:"Terminal blocks"},
+  {id:10, vendor_name:"AWC",       manufacturer:"Rittal",                      notes:"Enclosures"},
+  {id:11, vendor_name:"AWC",       manufacturer:"Hammond Enclosures",          notes:""},
+  {id:12, vendor_name:"AWC",       manufacturer:"Siemens",                     notes:""},
+  {id:13, vendor_name:"AWC",       manufacturer:"Solar Shield",                notes:"HMIs"},
+  {id:14, vendor_name:"AWC",       manufacturer:"Bussmann",                    notes:"Fuses"},
+  {id:15, vendor_name:"AWC",       manufacturer:"Marathon Special Products",   notes:"Terminal blocks"},
+  {id:16, vendor_name:"AWC",       manufacturer:"Tripp Lite",                  notes:"UPS / power"},
+  {id:17, vendor_name:"A-Tech",    manufacturer:"Turck",                       notes:"Sensors, connectors"},
+  {id:18, vendor_name:"A-Tech",    manufacturer:"Red Lion",                    notes:"HMI, comm"},
+  {id:19, vendor_name:"Graybar",   manufacturer:"Square D",                    notes:""},
+  {id:20, vendor_name:"Graybar",   manufacturer:"Schneider Electric",          notes:"Same as Square D"},
+  {id:21, vendor_name:"TD Synnex", manufacturer:"Cisco",                       notes:"Networking"},
+  {id:22, vendor_name:"Saginaw",   manufacturer:"Saginaw Control Engineering", notes:"Custom enclosures"},
+  {id:23, vendor_name:"Saginaw",   manufacturer:"SCE",                         notes:"Short name for Saginaw"},
+];
+
+let _nextVendorId = 100;
+
+function getVendors() {
+  const stored = localStorage.getItem("aae_vendors");
+  if (stored) { try { return JSON.parse(stored); } catch(e) {} }
+  return DEFAULT_VENDORS.map(v => ({...v, active:true}));
+}
+function saveVendorsLocal(vendors) {
+  localStorage.setItem("aae_vendors", JSON.stringify(vendors));
+}
+
 async function loadVendors() {
   const div = document.getElementById("vendorsTable");
   if (!div) return;
+  div.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:13px">Loading...</p>';
   try {
-    const res  = await fetch("/api/vendors");
-    const data = await res.json();
-    if (!Array.isArray(data)) { div.innerHTML="<p style='color:#F4A9A8'>Error loading vendors</p>"; return; }
-    // Group by vendor
-    const byVendor = {};
-    data.forEach(v => { if(!byVendor[v.vendor_name]) byVendor[v.vendor_name]=[]; byVendor[v.vendor_name].push(v); });
-    let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead><tr>
-        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">VENDOR</th>
-        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">MANUFACTURER</th>
-        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">NOTES</th>
-        <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white">ACTIONS</th>
-      </tr></thead><tbody>`;
-    data.filter(v=>v.active).forEach((v,i) => {
-      const bg = i%2===0 ? "#1A0505" : "#200808";
-      const TEAL = "00897A";
+    const res = await fetch("/api/vendors");
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        saveVendorsLocal(data.filter(v => v.active !== false));
+      }
+    }
+  } catch(e) {}
+  renderVendorsTable(getVendors());
+}
+
+function renderVendorsTable(vendors) {
+  const div = document.getElementById("vendorsTable");
+  if (!div) return;
+  const groups = {};
+  vendors.filter(v => v.active !== false).forEach(v => {
+    if (!groups[v.vendor_name]) groups[v.vendor_name] = [];
+    groups[v.vendor_name].push(v);
+  });
+  const vendorColors = {
+    "Rexel":"#1565C0","AWC":"#2E7D32","A-Tech":"#6A1B9A",
+    "Graybar":"#E65100","TD Synnex":"#37474F","Saginaw":"#880E4F"
+  };
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>
+      <th style="text-align:left;padding:8px 14px;background:#2C2C2C;color:white">VENDOR</th>
+      <th style="text-align:left;padding:8px 14px;background:#2C2C2C;color:white">MANUFACTURER</th>
+      <th style="text-align:left;padding:8px 14px;background:#2C2C2C;color:white">NOTES</th>
+      <th style="text-align:center;padding:8px 14px;background:#2C2C2C;color:white;width:80px">REMOVE</th>
+    </tr></thead><tbody>`;
+  let rowIdx = 0;
+  Object.keys(groups).sort().forEach(vname => {
+    groups[vname].forEach(v => {
+      const bg = rowIdx++%2===0 ? "#1A0505" : "#200808";
+      const vc = vendorColors[vname] || "#555555";
       html += `<tr style="background:${bg}">
-        <td style="padding:8px 12px;color:#4DB6AC;font-weight:bold">${v.vendor_name}</td>
-        <td style="padding:8px 12px;color:rgba(255,255,255,0.85)">${v.manufacturer}</td>
-        <td style="padding:8px 12px;color:rgba(255,255,255,0.45);font-size:11px">${v.notes||''}</td>
+        <td style="padding:8px 14px"><span style="background:${vc};color:white;padding:2px 10px;
+          border-radius:10px;font-size:11px;font-weight:bold">${vname}</span></td>
+        <td style="padding:8px 14px;color:rgba(255,255,255,0.9)">${v.manufacturer}</td>
+        <td style="padding:8px 14px;color:rgba(255,255,255,0.4);font-size:11px">${v.notes||''}</td>
         <td style="padding:6px 8px;text-align:center">
-          <button onclick="deleteVendor(${v.id})" style="background:rgba(155,27,27,0.3);color:#F4A9A8;
-            border:1px solid rgba(155,27,27,0.4);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px">Remove</button>
-        </td>
-      </tr>`;
+          <button onclick="removeVendorLocal(${v.id})"
+            style="background:rgba(155,27,27,0.3);color:#F4A9A8;border:1px solid rgba(155,27,27,0.4);
+                   border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px">&#x2715;</button>
+        </td></tr>`;
     });
-    html += '</tbody></table>';
-    div.innerHTML = html;
-  } catch(e) { div.innerHTML = "<p style='color:#F4A9A8'>Error: "+e.message+"</p>"; }
+  });
+  html += '</tbody></table>';
+  div.innerHTML = html;
 }
 
 function showAddVendorForm() {
@@ -1820,32 +2000,39 @@ function showAddVendorForm() {
   f.style.display = f.style.display==="none" ? "block" : "none";
 }
 
-async function createVendor() {
+function createVendor() {
   const mfr    = document.getElementById("newMfr").value.trim();
   const vendor = document.getElementById("newVendor").value.trim();
   const notes  = document.getElementById("newVendorNotes").value.trim();
   if (!mfr || !vendor) { toast("Manufacturer and vendor required","error"); return; }
-  try {
-    const res = await fetch("/api/vendors",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({manufacturer:mfr,vendor_name:vendor,notes,updated_by:currentUser?.username})});
-    const data = await res.json();
-    if (data.success) {
-      toast(`Added: ${mfr} → ${vendor}`,"success");
-      document.getElementById("addVendorForm").style.display="none";
-      ["newMfr","newVendor","newVendorNotes"].forEach(id=>document.getElementById(id).value="");
-      loadVendors();
-    } else { toast("Error: "+data.error,"error"); }
-  } catch(e) { toast("Failed: "+e.message,"error"); }
+  const vendors = getVendors();
+  if (vendors.find(v => v.manufacturer.toLowerCase()===mfr.toLowerCase())) {
+    toast(mfr+" already mapped — remove first","error"); return;
+  }
+  vendors.push({id:_nextVendorId++, vendor_name:vendor, manufacturer:mfr, notes, active:true});
+  saveVendorsLocal(vendors);
+  toast("Added: "+mfr+" → "+vendor,"success");
+  document.getElementById("addVendorForm").style.display="none";
+  ["newMfr","newVendor","newVendorNotes"].forEach(id=>document.getElementById(id).value="");
+  renderVendorsTable(getVendors());
+  fetch("/api/vendors",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({manufacturer:mfr,vendor_name:vendor,notes,
+      updated_by:currentUser?.username||"mfellers"})}).catch(()=>{});
 }
 
-async function deleteVendor(vid) {
-  try {
-    const res = await fetch(`/api/vendors/${vid}`,{method:"DELETE"});
-    const data = await res.json();
-    if (data.success) { toast("Mapping removed","success"); loadVendors(); }
-    else { toast("Error: "+data.error,"error"); }
-  } catch(e) { toast("Failed","error"); }
+function removeVendorLocal(id) {
+  const vendors = getVendors();
+  const idx = vendors.findIndex(v => v.id===id);
+  if (idx===-1) return;
+  if (!confirm("Remove "+vendors[idx].manufacturer+" → "+vendors[idx].vendor_name+"?")) return;
+  vendors.splice(idx,1);
+  saveVendorsLocal(vendors);
+  toast("Mapping removed","success");
+  renderVendorsTable(getVendors());
+  fetch("/api/vendors/"+id,{method:"DELETE"}).catch(()=>{});
 }
+const deleteVendor = removeVendorLocal;
+
 
 // Load admin data when admin tab is shown
 // Add Rockwell logo to quote PDF area (shown in print)
