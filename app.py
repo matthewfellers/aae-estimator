@@ -1086,55 +1086,61 @@ def bom_from_scan():
     thin = Side(style="thin", color="E0D0D0")
     bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
 
-    # Row 1: banner
-    ws.merge_cells("A1:H1"); ws.row_dimensions[1].height = 14
-    s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
+    # ── Column widths — 9 columns ──────────────────────────────────────────────
+    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",14),("I",20)]:
+        ws.column_dimensions[col].width = w
+
+    # ── Row 1: Banner (A1:I1) ──────────────────────────────────────────────────
+    ws.merge_cells("A1:I1"); ws.row_dimensions[1].height = 14
     ws["A1"] = "AAE AUTOMATION, INC.  |  UL-NNNY  |  UL-508A Certified Industrial Control Panel Specialists"
+    s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
 
-    # Row 2: title
-    ws.merge_cells("A2:D2"); ws.row_dimensions[2].height = 34
+    # ── Row 2: Title (A2:E2) | Job# (F2:I2) ───────────────────────────────────
+    ws.merge_cells("A2:E2"); ws.row_dimensions[2].height = 34
     ws["A2"] = "BILL OF MATERIALS"
-    s(ws["A2"], bold=True, bg=DARK_RED, sz=18, ha="left"); ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.merge_cells("E2:H2")
-    ws["E2"] = job_num
-    s(ws["E2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
+    ws["A2"].font      = Font(name="Arial", bold=True, color=WHITE, size=18)
+    ws["A2"].fill      = PatternFill("solid", fgColor=DARK_RED)
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.merge_cells("F2:I2")
+    ws["F2"] = job_num
+    s(ws["F2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
 
-    # Row 3: customer / project
-    ws.merge_cells("A3:B3"); ws["A3"] = "Customer:"; s(ws["A3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("C3:D3"); ws["C3"] = customer; s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
-    ws["E3"] = "Project:"; s(ws["E3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("F3:H3"); ws["F3"] = project; s(ws["F3"], bg=LIGHT_RED, fg=DARK, sz=10)
+    # ── Row 3: Customer (A3:B3 | C3:E3) | Project (F3 | G3:I3) ───────────────
     ws.row_dimensions[3].height = 18
+    ws.merge_cells("A3:B3"); ws["A3"] = "Customer:"
+    s(ws["A3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("C3:E3"); ws["C3"] = customer
+    s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
+    ws["F3"] = "Project:"
+    s(ws["F3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("G3:I3"); ws["G3"] = project
+    s(ws["G3"], bg=LIGHT_RED, fg=DARK, sz=10)
 
-    # Row 4: date
-    ws.merge_cells("A4:B4"); ws["A4"] = "Date:"; s(ws["A4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("C4:D4"); ws["C4"] = datetime.now().strftime("%m/%d/%Y"); s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
-    ws["E4"] = "Estimator:"; s(ws["E4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("F4:H4"); ws["F4"] = "AAE Automation"; s(ws["F4"], bg=MID_GRAY, fg=DARK, sz=9)
+    # ── Row 4: Date (A4:B4 | C4:E4) | Estimator (F4 | G4:I4) ─────────────────
     ws.row_dimensions[4].height = 16
+    ws.merge_cells("A4:B4"); ws["A4"] = "Date:"
+    s(ws["A4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("C4:E4"); ws["C4"] = datetime.now().strftime("%m/%d/%Y")
+    s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
+    ws["F4"] = "Estimator:"
+    s(ws["F4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("G4:I4"); ws["G4"] = "AAE Automation"
+    s(ws["G4"], bg=MID_GRAY, fg=DARK, sz=9)
 
-    # Load vendor map for auto-lookup
-    vendor_map = get_vendor_map()
-
-    # Row 5: internal notice (9 cols now)
+    # ── Row 5: Internal notice (A5:I5) ────────────────────────────────────────
     ws.merge_cells("A5:I5"); ws.row_dimensions[5].height = 15
     ws["A5"] = "⚠  INTERNAL DOCUMENT ONLY — Not for Customer Distribution  ⚠"
     s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
 
-    # Update header row merges to 9 cols
-    for merge in ["A2:D2","E2:I2","F3:I3","F4:I4"]:
-        try: ws.merge_cells(merge)
-        except: pass
-
-    # Row 6: headers — now 9 columns including VENDOR
+    # ── Row 6: Column headers ──────────────────────────────────────────────────
+    ws.row_dimensions[6].height = 20
     for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","AAE COST","NOTES"], 1):
         c = ws.cell(row=6, column=ci, value=h)
         s(c, bold=True, bg=DARK, sz=9, ha="center")
         c.border = Border(bottom=Side(style="medium", color=RED))
-    ws.row_dimensions[6].height = 20
-    # set col widths for 9 cols
-    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",14),("I",20)]:
-        ws.column_dimensions[col].width = w
+
+    # ── Load vendor map ────────────────────────────────────────────────────────
+    vendor_map = get_vendor_map()
 
     # Group items by category
     from collections import defaultdict
