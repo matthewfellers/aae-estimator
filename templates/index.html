@@ -598,12 +598,14 @@ body {
     </div>
     <div class="confidence-bar" id="confidenceBar"></div>
     <div class="review-flags" id="reviewFlags"></div>
-    <!-- BOM EXPORT BUTTONS -->
-    <div class="bom-export-row">
-      <div class="bom-export-label">📦 Export Bill of Materials</div>
+    <!-- SCAN BOM DOWNLOAD — appears after scan -->
+    <div class="bom-export-row" id="scanBomRow" style="display:none">
+      <div class="bom-export-label">📦 Bill of Materials extracted from drawing — download before calculating</div>
       <div class="bom-btns">
-        <button class="bom-btn bom-btn-pdf" onclick="exportBomPDF()">📄 Download BOM — PDF</button>
-        <button class="bom-btn bom-btn-xls" onclick="exportBomExcel()">📊 Download BOM — Excel</button>
+        <button class="bom-btn bom-btn-xls" onclick="downloadScanBOM()">📊 Download AAE BOM — Excel</button>
+      </div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:6px">
+        Cost column will be $0.00 — QuickBooks pricing integration coming soon
       </div>
     </div>
   </div>
@@ -704,13 +706,21 @@ body {
 
     <!-- LABOR CALIBRATION -->
     <div class="calib-box">
-      <div class="calib-title">🎯 Labor Hour Calibration — Log Actual Hours to Improve Accuracy</div>
-      <div class="calib-grid">
-        <div class="field"><label>Panel Description</label><input type="text" id="calib_desc" placeholder="e.g. Devon RIO Panel V3.2"></div>
-        <div class="field"><label>Actual Hours Taken</label><input type="number" id="calib_actual" placeholder="28" min="1" step="0.5"></div>
-        <button class="calib-btn" onclick="logCalibration()">Log Hours</button>
+      <div class="calib-title">🎯 Labor Calibration — Log Completed Jobs to Improve Accuracy</div>
+      <div style="font-size:11px;color:rgba(179,157,219,0.8);margin-bottom:10px;line-height:1.5">
+        How it works: Calculate a bid → build the panel → come back and log the actual hours.
+        The system averages your actual vs estimated ratios and auto-corrects future bids.
       </div>
-      <div class="calib-factor" id="calib_factor_display">Calibration factor: <b>1.000×</b> — no data yet. Log actual hours above to improve estimates.</div>
+      <div class="calib-grid">
+        <div class="field"><label>Job Description</label><input type="text" id="calib_desc" placeholder="e.g. CR Permian PLC V2.2"></div>
+        <div class="field"><label>Actual Hours (what it really took)</label><input type="number" id="calib_actual" placeholder="28" min="1" step="0.5"></div>
+        <div class="field"><label>Estimated Hours (what system said)</label><input type="number" id="calib_estimated_input" placeholder="auto-fills after calc" min="1" step="0.5"></div>
+        <button class="calib-btn" onclick="logCalibration()">Log Job</button>
+      </div>
+      <div class="calib-factor" id="calib_factor_display">
+        <b>No jobs logged yet.</b> Estimates use base rates only.
+        Log your first completed job above to start calibrating.
+      </div>
       <div class="calib-log" id="calib_log"></div>
     </div>
   </div>
@@ -921,6 +931,8 @@ body {
 <script>
 let currentCalcResults = null;
 let currentBidData = null;
+let lastScanBOM = [];
+let lastScanMeta = {};
 
 // ── Tab switching ──────────────────────────────────────────────────────────
 function showTab(name) {
@@ -1044,6 +1056,25 @@ async function startScan(file) {
 
     document.getElementById('uploadText').textContent = `✅ ${file.name} — scan complete`;
     toast(`Drawing scanned — ${Math.round(conf*100)}% confidence`, conf >= 0.75 ? 'success' : 'info');
+
+    // Store BOM line items for download
+    lastScanBOM = data.bom_line_items || [];
+    lastScanMeta = {
+      customer_name: document.getElementById('customer_name').value || '',
+      project_name:  document.getElementById('project_name').value || '',
+      job_number:    'AAE-' + Date.now()
+    };
+    const bomRow = document.getElementById('scanBomRow');
+    if (lastScanBOM.length > 0) {
+      bomRow.style.display = 'block';
+      bomRow.querySelector('.bom-export-label').textContent =
+        `📦 ${lastScanBOM.length} BOM line items extracted — download before calculating`;
+    } else if (data.quantities) {
+      // No BOM table found but quantities extracted — still offer download
+      bomRow.style.display = 'block';
+      bomRow.querySelector('.bom-export-label').textContent =
+        `📦 Component quantities extracted (no BOM table found) — download summary`;
+    }
 
   } catch (err) {
     clearInterval(interval);
@@ -1174,6 +1205,9 @@ async function calculateBid() {
     document.getElementById('resultsSection').style.display = 'block';
     document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth' });
     toast('Bid calculated successfully!', 'success');
+    // Auto-fill calibration estimated hours field
+    const calInput = document.getElementById('calib_estimated_input');
+    if (calInput) calInput.value = calc.total_hours.toFixed(1);
 
   } catch (err) {
     toast('Calculation failed', 'error');
@@ -1355,10 +1389,12 @@ function loadCalibration() {
   if (s) { calibData = JSON.parse(s); recalcCalib(); renderCalibLog(); }
 }
 function logCalibration() {
-  const desc   = document.getElementById("calib_desc").value.trim();
-  const actual = parseFloat(document.getElementById("calib_actual").value);
-  if (!desc || isNaN(actual) || actual<=0) { toast("Enter panel description and actual hours","error"); return; }
-  const estimated = currentCalcResults ? currentCalcResults.total_hours : null;
+  const desc      = document.getElementById("calib_desc").value.trim();
+  const actual    = parseFloat(document.getElementById("calib_actual").value);
+  const estInput  = document.getElementById("calib_estimated_input");
+  const estimated = estInput && estInput.value ? parseFloat(estInput.value) : (currentCalcResults ? currentCalcResults.total_hours : null);
+  if (!desc || isNaN(actual) || actual<=0) { toast("Enter job description and actual hours","error"); return; }
+  if (!estimated || isNaN(estimated) || estimated<=0) { toast("Enter or calculate estimated hours first","error"); return; }
   calibData.push({desc, actual, estimated, date: new Date().toLocaleDateString()});
   localStorage.setItem("aae_calib", JSON.stringify(calibData));
   recalcCalib(); renderCalibLog();
@@ -1373,10 +1409,19 @@ function recalcCalib() {
   updateCalibDisplay();
 }
 function updateCalibDisplay() {
-  const pct = ((calibFactor-1)*100).toFixed(1);
-  const sign = calibFactor < 1 ? "" : "+";
+  const n    = calibData.filter(d=>d.estimated && d.estimated>0).length;
+  const pct  = ((calibFactor-1)*100).toFixed(1);
+  const sign = calibFactor >= 1 ? "+" : "";
+  const color= calibFactor < 0.8 ? "#F4A9A8" : calibFactor < 1.0 ? "#FFD54F" : "#81C784";
+  const msg  = calibFactor < 1 
+    ? `System over-estimates by ${Math.abs(pct)}% — correcting down`
+    : calibFactor > 1 
+    ? `System under-estimates by ${pct}% — correcting up`
+    : "No correction needed";
   document.getElementById("calib_factor_display").innerHTML =
-    `Calibration factor: <b>${calibFactor.toFixed(3)}×</b> (${sign}${pct}% adjustment) · Based on ${calibData.filter(d=>d.estimated).length} paired job(s)`;
+    `<b style="color:${color}">Calibration factor: ${calibFactor.toFixed(3)}×</b> &nbsp;·&nbsp; `+
+    `${msg} &nbsp;·&nbsp; Based on <b>${n}</b> logged job${n!==1?'s':''}<br>`+
+    `<span style="font-size:11px;opacity:0.7">Estimated hours are multiplied by this factor before pricing</span>`;
 }
 function renderCalibLog() {
   const el = document.getElementById("calib_log");
@@ -1384,6 +1429,34 @@ function renderCalibLog() {
   el.innerHTML = "<b>Recent:</b> " + calibData.slice(-3).reverse()
     .map(d=>`${d.date}: ${d.desc} — ${d.actual}h actual${d.estimated?` vs ${d.estimated.toFixed(1)}h est`:""}`)
     .join(" · ");
+}
+
+// ── SCAN BOM DOWNLOAD ─────────────────────────────────────────────────────
+async function downloadScanBOM() {
+  // Update meta with current form values
+  lastScanMeta.customer_name = document.getElementById('customer_name').value || lastScanMeta.customer_name;
+  lastScanMeta.project_name  = document.getElementById('project_name').value  || lastScanMeta.project_name;
+
+  try {
+    const res = await fetch('/api/bom_from_scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        bom_line_items: lastScanBOM,
+        customer_name:  lastScanMeta.customer_name,
+        project_name:   lastScanMeta.project_name,
+        job_number:     lastScanMeta.job_number
+      })
+    });
+    if (!res.ok) { toast('BOM download failed', 'error'); return; }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `AAE_BOM_${(lastScanMeta.project_name || 'scan').replace(/[^a-z0-9]/gi,'_')}.xlsx`;
+    a.click();
+    toast('BOM Excel downloaded!', 'success');
+  } catch(e) { toast('BOM download failed: ' + e.message, 'error'); }
 }
 
 // ── BOM EXPORT ─────────────────────────────────────────────────────────────
