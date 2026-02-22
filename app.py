@@ -20,26 +20,36 @@ _sb_key = os.environ.get("SUPABASE_ANON_KEY", "")
 supabase = create_client(_sb_url, _sb_key) if _sb_url and _sb_key else None
 
 # ── Labor rates (minutes per unit) ────────────────────────────────────────
+# Labor rates in MINUTES per unit — calibrated against AAE actual job history
+# Baseline: CR Permian PLC panel = 28 hrs actual
 LABOR_RATES = {
-    "enclosure_prep": 30, "subpanel_mount": 20, "din_rail": 10,
-    "wire_duct": 8, "enc_accessory": 12, "door_component": 20,
-    "panel_layout": 45,
-    "main_breaker_small": 25, "main_breaker_large": 45,
-    "branch_breaker_1p": 12, "branch_breaker_23p": 18,
-    "fused_disconnect": 30, "cpt": 35, "pdb": 25,
-    "relay_icecube": 15, "relay_din": 12, "contactor_small": 25,
-    "contactor_large": 40, "overload": 20, "timer": 15, "ssr": 18,
-    "pilot_light": 10, "selector": 15, "pushbutton": 12, "estop": 18,
-    "vfd_small": 60, "vfd_med": 90, "vfd_large": 150,
-    "soft_starter_small": 75, "soft_starter_large": 120,
-    "plc_rack": 45, "plc_di_do": 8, "plc_ai_ao": 12, "hmi": 40,
-    "safety_relay": 35, "eth_switch": 30, "eth_cable": 8,
-    "tb_standard": 4, "tb_ground": 5, "tb_fused": 8, "tb_disconnect": 7,
-    "tb_accessories": 5, "terminal_markers": 6,
-    "wire_land_control": 3, "ferrule": 1.5, "wire_route": 2,
-    "heat_shrink_label": 1.5, "heat_shrink_batch": 5,
-    "ul_labels": 45, "continuity_check": 1.5, "hipot": 30,
-    "as_built": 60, "qc_signoff": 30,
+    # Enclosure & mechanical
+    "enclosure_prep": 20, "subpanel_mount": 15, "panel_layout": 25,
+    "din_rail": 6, "wire_duct": 4, "enc_accessory": 8, "door_component": 12,
+    # Power distribution
+    "main_breaker_small": 15, "main_breaker_large": 30,
+    "branch_breaker_1p": 6, "branch_breaker_23p": 10,
+    "fused_disconnect": 15, "cpt": 20, "pdb": 12,
+    # Motor control
+    "relay_icecube": 8, "relay_din": 6, "contactor_small": 15,
+    "contactor_large": 25, "overload": 10, "timer": 8, "ssr": 10,
+    # VFDs / soft starters
+    "vfd_small": 40, "vfd_med": 65, "vfd_large": 100,
+    "soft_starter_small": 50, "soft_starter_large": 80,
+    # Control devices
+    "pilot_light": 6, "selector": 8, "pushbutton": 6, "estop": 12,
+    # PLC / networking
+    "plc_rack": 35, "plc_di_do": 2.5, "plc_ai_ao": 3.5, "hmi": 30,
+    "safety_relay": 20, "eth_switch": 15, "eth_cable": 5,
+    # Terminal blocks
+    "tb_standard": 2.5, "tb_ground": 2.5, "tb_fused": 4, "tb_disconnect": 4,
+    "tb_accessories": 3, "terminal_markers": 3,
+    # Wiring (per wire, includes routing + landing both ends)
+    "wire_land_control": 1.2, "ferrule": 0.25, "wire_route": 0.35,
+    "heat_shrink_label": 0.25, "heat_shrink_batch": 2,
+    # UL / QC (realistic shop times)
+    "ul_labels": 15, "continuity_check": 0.4, "hipot": 12,
+    "as_built": 25, "qc_signoff": 12,
 }
 
 COMPLEXITY_MULT = {
@@ -138,8 +148,11 @@ def calculate_bid(data):
     calib_factor  = float(data.get("calib_factor", 1.0))
 
     # If wire count not provided, estimate it
+    # Revised formula: I/O points drive most wiring on PLC panels
+    # tb_total drives field wiring, not all I/O have individual home-run wires
     if wire_cnt == 0:
-        wire_cnt = int((di+do_pts)*1.2 + (ai+ao)*1.5 + tb_total*0.8 + br_1p*2 + (br_2p+br_3p)*3)
+        wire_cnt = int((di+do_pts)*0.8 + (ai+ao)*1.0 + tb_total*0.6 + (br_2p+br_3p)*2)
+        wire_cnt = max(wire_cnt, enc_qty * 10)  # minimum 10 wires per enclosure
 
     # Labor minutes by section
     enc_min = (r["enclosure_prep"]+r["subpanel_mount"]+r["panel_layout"])*enc_qty + \
@@ -270,12 +283,9 @@ def calculate_bid(data):
 # ── AI Drawing Scan ────────────────────────────────────────────────────────
 def scan_drawing(pdf_b64, filename="drawing.pdf"):
     # Stage 1 + 2 combined: classify and extract in one smart call
-    prompt = """You are an expert electrical estimator at AAE Automation, a UL-508A certified 
-industrial control panel shop. Analyze this electrical drawing set and extract ALL component 
-quantities needed for a panel bid.
+    prompt = """You are an expert electrical estimator at AAE Automation, a UL-508A certified industrial control panel shop. Analyze this electrical drawing set and extract ALL component quantities needed for a panel bid.
 
-Extract and count every component you can identify. Return ONLY valid JSON — no markdown, 
-no explanation, no code blocks. Just the raw JSON object.
+Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object.
 
 {
   "extraction_summary": {
@@ -285,65 +295,48 @@ no explanation, no code blocks. Just the raw JSON object.
     "review_flags": []
   },
   "quantities": {
-    "enc_qty": 1,
-    "din_rail_runs": 3,
-    "wire_duct_runs": 4,
-    "enc_accessories": 0,
-    "main_amp": 100,
-    "main_disconnect_type": "",
-    "branch_1p": 0,
-    "branch_2p": 0,
-    "branch_3p": 0,
-    "fused_disconnects": 0,
-    "cpt_present": "N",
-    "cpt_kva": 0,
-    "pdb_qty": 0,
-    "relay_icecube": 0,
-    "relay_din": 0,
-    "contactor_small": 0,
-    "contactor_large": 0,
-    "overload": 0,
-    "timers": 0,
-    "ssrs": 0,
-    "pilot_lights": 0,
-    "selectors": 0,
-    "push_buttons": 0,
-    "estops": 0,
-    "vfd_small": 0,
-    "vfd_med": 0,
-    "vfd_large": 0,
-    "soft_starter_small": 0,
-    "soft_starter_large": 0,
-    "plc_present": "N",
-    "plc_manufacturer": "",
-    "plc_model": "",
-    "plc_di": 0,
-    "plc_do": 0,
-    "plc_ai": 0,
-    "plc_ao": 0,
-    "hmi_present": "N",
-    "hmi_size": 0,
-    "safety_relay": "N",
-    "eth_switch": "N",
-    "eth_cables": 0,
-    "tb_standard": 0,
-    "tb_ground": 0,
-    "tb_fused": 0,
-    "tb_disconnect": 0,
-    "wire_count": 0,
-    "wire_avg_len": 24
+    "enc_qty": 1, "din_rail_runs": 3, "wire_duct_runs": 4, "enc_accessories": 0,
+    "main_amp": 100, "main_disconnect_type": "",
+    "branch_1p": 0, "branch_2p": 0, "branch_3p": 0,
+    "fused_disconnects": 0, "cpt_present": "N", "cpt_kva": 0, "pdb_qty": 0,
+    "relay_icecube": 0, "relay_din": 0,
+    "contactor_small": 0, "contactor_large": 0, "overload": 0,
+    "timers": 0, "ssrs": 0,
+    "pilot_lights": 0, "selectors": 0, "push_buttons": 0, "estops": 0,
+    "vfd_small": 0, "vfd_med": 0, "vfd_large": 0,
+    "soft_starter_small": 0, "soft_starter_large": 0,
+    "plc_present": "N", "plc_manufacturer": "", "plc_model": "",
+    "plc_di": 0, "plc_do": 0, "plc_ai": 0, "plc_ao": 0,
+    "hmi_present": "N", "hmi_size": 0,
+    "safety_relay": "N", "eth_switch": "N", "eth_cables": 0,
+    "tb_standard": 0, "tb_ground": 0, "tb_fused": 0, "tb_disconnect": 0,
+    "wire_count": 0, "wire_avg_len": 24
   },
-  "component_list": [
-    {"ref_des": "", "description": "", "part_number": "", "qty": 0, "confidence": 0.0}
+  "bom_line_items": [
+    {
+      "item_num": 1,
+      "part_number": "WM483610NC",
+      "description": "Rittal Enclosure 48x36x10 NEMA 4",
+      "qty": 1,
+      "unit": "ea",
+      "manufacturer": "RITTAL",
+      "category": "Enclosure",
+      "notes": ""
+    }
   ]
 }
 
 Rules:
 - VFDs: <=5HP = small, 6-25HP = med, 26-100HP = large
-- Contactors: <=40A = small, >40A = large  
+- Contactors: <=40A = small, >40A = large
 - Soft starters: <=50A = small, >50A = large
 - Count wire numbers if a wire schedule exists for wire_count
-- If no wire schedule: estimate wire_count as (DI+DO)*1.2 + (AI+AO)*1.5 + terminals*0.8
+- If no wire schedule: estimate wire_count as (DI+DO)*0.8 + (AI+AO)*1.0 + terminals*0.6
+- bom_line_items: extract EVERY line item from any BOM table found in the drawings
+  - Include part numbers, descriptions, quantities, manufacturers exactly as shown
+  - Use these categories: Enclosure, Power, Motor Ctrl, Control Devices, PLC/Network, Terminals, Relays, Wiring, HMI/Computer, Markers, Other
+  - If no BOM table found, return empty array []
+  - Set qty to numeric value (not "A/R" — use 1 for A/R items and note in notes field)
 - Flag anything uncertain in review_flags
 - confidence: 0.0 to 1.0"""
 
@@ -1003,6 +996,176 @@ def generate_bom_pdf(bid_data, calc_results, quote_number):
     doc.build(story)
     buffer.seek(0)
     return buffer
+
+
+@app.route("/api/bom_from_scan", methods=["POST"])
+def bom_from_scan():
+    """Generate a formatted AAE BOM Excel from scanned line items."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    data       = request.get_json()
+    line_items = data.get("bom_line_items", [])
+    customer   = data.get("customer_name", "")
+    project    = data.get("project_name", "")
+    job_num    = data.get("job_number", f"AAE-{datetime.now().strftime('%Y%m%d')}")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Bill of Materials"
+
+    # Column widths
+    for col, w in [("A",10),("B",22),("C",54),("D",7),("E",7),("F",22),("G",14),("H",22)]:
+        ws.column_dimensions[col].width = w
+
+    RED      = "9B1B1B"; DARK_RED = "6B0A0A"; WHITE = "FFFFFF"
+    LIGHT_RED= "FDECEA"; MID_GRAY = "F5F0F0"; DARK  = "2C2C2C"
+
+    def s(cell, bold=False, bg=None, fg=WHITE, sz=10, ha="left", wrap=False):
+        cell.font = Font(name="Arial", bold=bold, color=fg, size=sz)
+        if bg: cell.fill = PatternFill("solid", fgColor=bg)
+        cell.alignment = Alignment(horizontal=ha, vertical="center", wrap_text=wrap)
+
+    thin = Side(style="thin", color="E0D0D0")
+    bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
+
+    # Row 1: banner
+    ws.merge_cells("A1:H1"); ws.row_dimensions[1].height = 14
+    s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
+    ws["A1"] = "AAE AUTOMATION, INC.  |  UL-NNNY  |  UL-508A Certified Industrial Control Panel Specialists"
+
+    # Row 2: title
+    ws.merge_cells("A2:D2"); ws.row_dimensions[2].height = 34
+    ws["A2"] = "BILL OF MATERIALS"
+    s(ws["A2"], bold=True, bg=DARK_RED, sz=18, ha="left"); ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.merge_cells("E2:H2")
+    ws["E2"] = job_num
+    s(ws["E2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
+
+    # Row 3: customer / project
+    ws.merge_cells("A3:B3"); ws["A3"] = "Customer:"; s(ws["A3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("C3:D3"); ws["C3"] = customer; s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
+    ws["E3"] = "Project:"; s(ws["E3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("F3:H3"); ws["F3"] = project; s(ws["F3"], bg=LIGHT_RED, fg=DARK, sz=10)
+    ws.row_dimensions[3].height = 18
+
+    # Row 4: date
+    ws.merge_cells("A4:B4"); ws["A4"] = "Date:"; s(ws["A4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("C4:D4"); ws["C4"] = datetime.now().strftime("%m/%d/%Y"); s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
+    ws["E4"] = "Estimator:"; s(ws["E4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("F4:H4"); ws["F4"] = "AAE Automation"; s(ws["F4"], bg=MID_GRAY, fg=DARK, sz=9)
+    ws.row_dimensions[4].height = 16
+
+    # Row 5: internal notice
+    ws.merge_cells("A5:H5"); ws.row_dimensions[5].height = 15
+    ws["A5"] = "⚠  INTERNAL DOCUMENT ONLY — Not for Customer Distribution  ⚠"
+    s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
+
+    # Row 6: headers
+    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","AAE COST","NOTES"], 1):
+        c = ws.cell(row=6, column=ci, value=h)
+        s(c, bold=True, bg=DARK, sz=9, ha="center")
+        c.border = Border(bottom=Side(style="medium", color=RED))
+    ws.row_dimensions[6].height = 20
+
+    # Group items by category
+    from collections import defaultdict
+    grouped = defaultdict(list)
+    cat_order = ["Enclosure","Power","Motor Ctrl","Control Devices","PLC/Network",
+                 "Terminals","Relays","HMI/Computer","Wiring","Markers","Other"]
+    for item in line_items:
+        cat = item.get("category","Other")
+        grouped[cat].append(item)
+    # Also handle ungrouped
+    for item in line_items:
+        if item.get("category","Other") not in cat_order:
+            grouped["Other"].append(item)
+
+    row = 7; item_counter = 0
+    even_fill = PatternFill("solid", fgColor="FDF8F8")
+    odd_fill  = PatternFill("solid", fgColor=WHITE)
+
+    cats_with_items = [c for c in cat_order if grouped[c]]
+    for cat in cats_with_items:
+        items = grouped[cat]
+        # Section header
+        ws.merge_cells(f"A{row}:H{row}")
+        ws.cell(row=row, column=1, value=f"  {cat.upper()}")
+        hc = ws.cell(row=row, column=1)
+        hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
+        hc.fill = PatternFill("solid", fgColor=RED)
+        hc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws.row_dimensions[row].height = 16
+        row += 1
+
+        for itm in items:
+            item_counter += 1
+            fill = even_fill if item_counter % 2 == 0 else odd_fill
+            ws.row_dimensions[row].height = 15
+            vals = [
+                itm.get("item_num", item_counter),
+                itm.get("part_number", ""),
+                itm.get("description", ""),
+                itm.get("qty", 1),
+                itm.get("unit", "ea"),
+                itm.get("manufacturer", ""),
+                0.00,  # AAE cost — placeholder, will pull from QB eventually
+                itm.get("notes", "")
+            ]
+            for ci, val in enumerate(vals, 1):
+                c = ws.cell(row=row, column=ci, value=val)
+                c.fill = fill; c.border = bdr
+                c.font = Font(name="Arial", size=9, color=DARK)
+                if ci in (1, 4): c.alignment = Alignment(horizontal="center", vertical="center")
+                elif ci == 7:
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                    c.number_format = '"$"#,##0.00'
+                    c.font = Font(name="Arial", size=9, color="999999", italic=True)
+                else: c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
+            row += 1
+
+        row += 1  # spacer
+
+    # Total row
+    ws.merge_cells(f"A{row}:F{row}")
+    tl = ws.cell(row=row, column=1, value="TOTAL MATERIAL COST (AAE Cost — pricing TBD from QuickBooks):")
+    tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
+    tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tl.alignment = Alignment(horizontal="right", vertical="center")
+    tv = ws.cell(row=row, column=7, value=f"=SUM(G7:G{row-1})")
+    tv.font = Font(name="Arial", bold=True, color="999999", size=11, italic=True)
+    tv.number_format = '"$"#,##0.00'
+    tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tv.alignment = Alignment(horizontal="right", vertical="center")
+    ws.cell(row=row, column=8).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.row_dimensions[row].height = 20
+    row += 1
+
+    # QB note
+    ws.merge_cells(f"A{row}:H{row}")
+    note = ws.cell(row=row, column=1, value="NOTE: AAE Cost column will be populated automatically from QuickBooks pricing data in a future update.")
+    note.font = Font(name="Arial", size=8, color="888080", italic=True)
+    note.alignment = Alignment(horizontal="left")
+    row += 2
+
+    # Footer
+    ws.merge_cells(f"A{row}:H{row}")
+    ft = ws.cell(row=row, column=1, value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
+    ft.font = Font(name="Arial", size=8, color="888080", italic=True)
+    ft.alignment = Alignment(horizontal="center")
+
+    ws.freeze_panes = "A7"
+    ws.auto_filter.ref = f"A6:H{row-3}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
+    ws.print_title_rows = "1:6"
+
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    fname = f"AAE_BOM_{(project or job_num).replace(' ','_')}.xlsx"
+    return send_file(buf,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name=fname)
 
 
 if __name__ == "__main__":
