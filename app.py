@@ -626,9 +626,17 @@ def scan():
 
 @app.route("/api/calculate", methods=["POST"])
 def calculate():
-    data = request.get_json()
-    result = calculate_bid(data)
-    return jsonify(result)
+    import traceback
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data received"}), 400
+        result = calculate_bid(data)
+        return jsonify(result)
+    except Exception as e:
+        err = traceback.format_exc()
+        print("CALCULATE ERROR:", err, flush=True)
+        return jsonify({"error": str(e), "detail": err}), 500
 
 @app.route("/api/save_bid", methods=["POST"])
 def save_bid():
