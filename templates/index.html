@@ -1372,47 +1372,36 @@ const USERS = [
 ];
 let currentUser = null;
 
-async function doLogin() {
-  const u = document.getElementById("login_user").value.trim().toLowerCase();
-  const p = document.getElementById("login_pass").value;
-  try {
-    const res = await fetch("/api/login", {
-      method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({username: u, password: p})
-    });
-    const data = await res.json();
-    if (data.success) {
-      currentUser = {username: u, display: data.display_name, role: data.role};
-      document.getElementById("login-overlay").classList.remove("visible");
-      document.getElementById("user_pill").textContent = "👤 " + data.display_name;
-      document.getElementById("estimator_name").value = data.display_name + " — AAE Automation";
-      // Show admin tab for admin users
-      const adminBtn = document.getElementById("adminTabBtn");
-      if (adminBtn) adminBtn.style.display = (data.role === "admin") ? "inline-flex" : "none";
-      loadHistory();
-      loadCalibration();
-    } else {
-      document.getElementById("login_err").style.display = "block";
-    }
-  } catch(e) {
-    // Fallback to hardcoded if API fails
-    const USERS = [
-      {username:"mfellers",password:"aae2025",display:"M. Fellers",role:"admin"},
-      {username:"admin",password:"aae2025",display:"Admin",role:"admin"},
-      {username:"estimator",password:"panel123",display:"Estimator",role:"estimator"}
-    ];
-    const user = USERS.find(x => x.username===u && x.password===p);
-    if (user) {
-      currentUser = user;
-      document.getElementById("login-overlay").classList.remove("visible");
-      document.getElementById("user_pill").textContent = "👤 " + user.display;
-      document.getElementById("estimator_name").value = user.display + " — AAE Automation";
-      const adminBtn = document.getElementById("adminTabBtn");
-      if (adminBtn) adminBtn.style.display = (user.role==="admin") ? "inline-flex" : "none";
-      loadHistory(); loadCalibration();
-    } else {
-      document.getElementById("login_err").style.display = "block";
-    }
+// ── User store — localStorage-backed, editable by mfellers ─────────────────
+function getUsers() {
+  const stored = localStorage.getItem("aae_users");
+  if (stored) { try { return JSON.parse(stored); } catch(e) {} }
+  // Default users — mfellers can add/edit/remove from Admin panel
+  return [
+    {username:"mfellers",  password:"aae2025",  display:"M. Fellers",  role:"admin"},
+    {username:"admin",     password:"aae2025",  display:"Admin",        role:"admin"},
+    {username:"estimator", password:"panel123", display:"Estimator",    role:"estimator"}
+  ];
+}
+function saveUsers(users) {
+  localStorage.setItem("aae_users", JSON.stringify(users));
+}
+
+function doLogin() {
+  const u    = document.getElementById("login_user").value.trim().toLowerCase();
+  const p    = document.getElementById("login_pass").value;
+  const user = getUsers().find(x => x.username === u && x.password === p);
+  if (user) {
+    currentUser = user;
+    document.getElementById("login-overlay").classList.remove("visible");
+    document.getElementById("user_pill").textContent = "👤 " + user.display;
+    document.getElementById("estimator_name").value   = user.display + " — AAE Automation";
+    const adminBtn = document.getElementById("adminTabBtn");
+    if (adminBtn) adminBtn.style.display = user.role === "admin" ? "inline-flex" : "none";
+    loadHistory();
+    loadCalibration();
+  } else {
+    document.getElementById("login_err").style.display = "block";
   }
 }
 function doLogout() {
@@ -1693,92 +1682,88 @@ async function saveAllLaborRates() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ADMIN: USERS
+// ADMIN: USERS  (localStorage — no server needed)
 // ═══════════════════════════════════════════════════════════
-async function loadUsers() {
-  const div = document.getElementById("usersTable");
+function loadUsers() {
+  const div   = document.getElementById("usersTable");
   if (!div) return;
-  try {
-    const res  = await fetch("/api/users");
-    const data = await res.json();
-    if (!Array.isArray(data)) { div.innerHTML="<p style='color:#F4A9A8'>Error loading users</p>"; return; }
-    let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead><tr>
-        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">USERNAME</th>
-        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">DISPLAY NAME</th>
-        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">ROLE</th>
-        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">STATUS</th>
-        <th style="text-align:left;padding:8px 12px;background:#2C2C2C;color:white">NEW PASSWORD</th>
-        <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white">ACTIONS</th>
-      </tr></thead><tbody>`;
-    data.forEach((u,i) => {
-      const bg = i%2===0 ? "#1A0505" : "#200808";
-      html += `<tr style="background:${bg}" id="urow_${u.id}">
-        <td style="padding:8px 12px;color:white;font-weight:bold">${u.username}</td>
-        <td style="padding:8px 12px;color:rgba(255,255,255,0.8)">${u.display_name}</td>
-        <td style="padding:8px 12px"><span style="background:${u.role==='admin'?'#9B1B1B':'#2C2C2C'};
-          color:white;padding:2px 8px;border-radius:10px;font-size:11px">${u.role}</span></td>
-        <td style="padding:8px 12px;color:${u.active?'#81C784':'#F4A9A8'}">${u.active?'Active':'Inactive'}</td>
-        <td style="padding:6px 8px"><input type="text" id="pw_${u.id}" placeholder="enter to change..."
-          style="background:#2C0A0A;border:1px solid rgba(155,27,27,0.4);color:white;border-radius:4px;
-                 padding:4px 8px;font-size:11px;width:150px"></td>
-        <td style="padding:6px 8px;text-align:center;display:flex;gap:6px;justify-content:center">
-          <button onclick="saveUserPassword('${u.id}')" style="background:#9B1B1B;color:white;border:none;
-            border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">💾 Save PW</button>
-          ${u.username!=='mfellers' ? `<button onclick="toggleUser('${u.id}',${!u.active})" style="background:#2C2C2C;
-            color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">
-            ${u.active?'Deactivate':'Activate'}</button>` : ''}
-        </td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
-    div.innerHTML = html;
-  } catch(e) { div.innerHTML = "<p style='color:#F4A9A8'>Error: "+e.message+"</p>"; }
+  const users = getUsers();
+  const thStyle = "text-align:left;padding:8px 12px;background:#2C2C2C;color:white";
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>
+      <th style="${thStyle}">USERNAME</th>
+      <th style="${thStyle}">DISPLAY NAME</th>
+      <th style="${thStyle}">ROLE</th>
+      <th style="${thStyle}">NEW PASSWORD</th>
+      <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white">ACTIONS</th>
+    </tr></thead><tbody>`;
+  users.forEach((u, i) => {
+    const bg = i%2===0 ? "#1A0505" : "#200808";
+    html += `<tr style="background:${bg}">
+      <td style="padding:8px 12px;color:white;font-weight:bold">${u.username}</td>
+      <td style="padding:8px 12px;color:rgba(255,255,255,0.8)">${u.display}</td>
+      <td style="padding:8px 12px"><span style="background:${u.role==='admin'?'#9B1B1B':'#2C2C2C'};
+        color:white;padding:2px 8px;border-radius:10px;font-size:11px">${u.role}</span></td>
+      <td style="padding:6px 8px">
+        <input type="text" id="pw_${i}" placeholder="enter new password..."
+          style="background:#2C0A0A;border:1px solid rgba(155,27,27,0.4);color:white;
+                 border-radius:4px;padding:4px 8px;font-size:11px;width:160px">
+      </td>
+      <td style="padding:6px 8px;text-align:center;display:flex;gap:6px;justify-content:center">
+        <button onclick="saveUserPassword(${i})"
+          style="background:#9B1B1B;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">
+          💾 Save PW</button>
+        ${u.username !== 'mfellers' ?
+          `<button onclick="removeUser(${i})"
+            style="background:rgba(155,27,27,0.3);color:#F4A9A8;border:1px solid rgba(155,27,27,0.4);
+                   border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">Remove</button>` : ''}
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  div.innerHTML = html;
 }
 
 function showAddUserForm() {
   const f = document.getElementById("addUserForm");
-  f.style.display = f.style.display==="none" ? "block" : "none";
+  f.style.display = f.style.display === "none" ? "block" : "none";
 }
 
-async function createUser() {
-  const username     = document.getElementById("newUsername").value.trim();
-  const display_name = document.getElementById("newDisplayName").value.trim();
-  const password     = document.getElementById("newPassword").value;
-  const role         = document.getElementById("newRole").value;
-  if (!username || !password) { toast("Username and password required","error"); return; }
-  try {
-    const res = await fetch("/api/users",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({username,display_name:display_name||username,password,role})});
-    const data = await res.json();
-    if (data.success) {
-      toast("User created: "+username,"success");
-      document.getElementById("addUserForm").style.display="none";
-      ["newUsername","newDisplayName","newPassword"].forEach(id=>document.getElementById(id).value="");
-      loadUsers();
-    } else { toast("Error: "+data.error,"error"); }
-  } catch(e) { toast("Failed: "+e.message,"error"); }
+function createUser() {
+  const username = document.getElementById("newUsername").value.trim().toLowerCase();
+  const display  = document.getElementById("newDisplayName").value.trim();
+  const password = document.getElementById("newPassword").value;
+  const role     = document.getElementById("newRole").value;
+  if (!username || !password) { toast("Username and password required", "error"); return; }
+  const users = getUsers();
+  if (users.find(u => u.username === username)) { toast("Username already exists", "error"); return; }
+  users.push({username, password, display: display || username, role});
+  saveUsers(users);
+  toast("User created: " + username, "success");
+  document.getElementById("addUserForm").style.display = "none";
+  ["newUsername","newDisplayName","newPassword"].forEach(id => document.getElementById(id).value = "");
+  loadUsers();
 }
 
-async function saveUserPassword(uid) {
-  const pw = document.getElementById("pw_"+uid).value.trim();
-  if (!pw) { toast("Enter a new password first","error"); return; }
-  try {
-    const res = await fetch(`/api/users/${uid}`,{method:"PUT",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({password:pw})});
-    const data = await res.json();
-    if (data.success) { toast("Password updated ✓","success"); document.getElementById("pw_"+uid).value=""; }
-    else { toast("Error: "+data.error,"error"); }
-  } catch(e) { toast("Failed","error"); }
+function saveUserPassword(idx) {
+  const pw = document.getElementById("pw_" + idx)?.value.trim();
+  if (!pw) { toast("Enter a new password first", "error"); return; }
+  const users = getUsers();
+  if (!users[idx]) return;
+  users[idx].password = pw;
+  saveUsers(users);
+  toast("Password updated for " + users[idx].username, "success");
+  document.getElementById("pw_" + idx).value = "";
 }
 
-async function toggleUser(uid, active) {
-  try {
-    const res = await fetch(`/api/users/${uid}`,{method:"PUT",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({active})});
-    const data = await res.json();
-    if (data.success) { toast(active?"User activated":"User deactivated","success"); loadUsers(); }
-  } catch(e) { toast("Failed","error"); }
+function removeUser(idx) {
+  const users = getUsers();
+  if (!users[idx] || users[idx].username === 'mfellers') return;
+  if (!confirm(`Remove user "${users[idx].username}"?`)) return;
+  users.splice(idx, 1);
+  saveUsers(users);
+  toast("User removed", "success");
+  loadUsers();
 }
 
 // ═══════════════════════════════════════════════════════════
