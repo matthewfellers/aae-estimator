@@ -1017,6 +1017,7 @@ function handleFileSelect(input) {
 }
 
 const zone = document.getElementById('uploadZone');
+if (zone) {
 zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
 zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
 zone.addEventListener('drop', e => {
@@ -1030,6 +1031,7 @@ zone.addEventListener('drop', e => {
     toast('Please drop a PDF file', 'error');
   }
 });
+} // end if(zone)
 
 async function startScan(file) {
   const status = document.getElementById('scanStatus');
@@ -1406,6 +1408,8 @@ function doLogin() {
     // Ensure role is always set (handles stale localStorage data without role field)
     if (!user.role) user.role = (u === 'mfellers' || u === 'admin') ? 'admin' : 'estimator';
     currentUser = user;
+    // Clear stale localStorage keys from old app versions that could break settings tab
+    ['aae_labor_rates', 'aae_vendors_old'].forEach(k => localStorage.removeItem(k));
     document.getElementById("login-overlay").classList.remove("visible");
     document.getElementById("user_pill").textContent = "👤 " + user.display;
     document.getElementById("estimator_name").value   = user.display + " — AAE Automation";
@@ -1689,13 +1693,18 @@ const DEFAULT_LABOR_RATES = [
 let laborRatesCache = [];
 
 function getLaborRates() {
-  const stored = localStorage.getItem("aae_labor_rates");
-  if (stored) { try { return JSON.parse(stored); } catch(e) {} }
-  return DEFAULT_LABOR_RATES.map(r => ({...r}));  // fresh copy of defaults
+  // ALWAYS start from defaults (ensures unit/description fields are always present)
+  // Only merge saved override VALUES — never replace full objects from old stale data
+  let rates = DEFAULT_LABOR_RATES.map(r => ({...r}));
+  try {
+    const overrides = JSON.parse(localStorage.getItem("aae_labor_rates_overrides") || "{}");
+    rates = rates.map(r => overrides[r.rate_key] !== undefined
+      ? {...r, rate_value: overrides[r.rate_key]} : r);
+  } catch(e) {}
+  return rates;
 }
-
 function saveLaborRatesLocal(rates) {
-  localStorage.setItem("aae_labor_rates", JSON.stringify(rates));
+  // Intentionally empty — we only save overrides now via saveAllLaborRates()
 }
 
 async function loadLaborRates() {
