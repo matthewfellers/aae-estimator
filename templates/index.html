@@ -546,14 +546,28 @@ body {
     <img src="/static/aae_logo.jpg" alt="AAE Automation" onerror="this.style.display='none'">
     <div class="login-logo-name">AAE AUTOMATION</div>
     <div class="login-tagline">Panel Estimating System</div>
-    <h2>Sign In</h2>
-    <div class="login-field"><label>Email</label><input type="email" id="login_email" placeholder="you@aaeautomation.com" autocomplete="username"></div>
-    <div class="login-field"><label>Password</label><input type="password" id="login_pass" placeholder="password" autocomplete="current-password"></div>
-    <div id="mfa-section" style="display:none">
-      <div class="login-field"><label>MFA Code</label><input type="text" id="login_mfa" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" inputmode="numeric"></div>
+
+    <!-- Normal sign-in form -->
+    <div id="signin-form">
+      <h2>Sign In</h2>
+      <div class="login-field"><label>Email</label><input type="email" id="login_email" placeholder="you@aaeautomation.com" autocomplete="username"></div>
+      <div class="login-field"><label>Password</label><input type="password" id="login_pass" placeholder="password" autocomplete="current-password"></div>
+      <div id="mfa-section" style="display:none">
+        <div class="login-field"><label>MFA Code</label><input type="text" id="login_mfa" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" inputmode="numeric"></div>
+      </div>
+      <button class="login-submit" onclick="doLogin()">SIGN IN</button>
+      <div class="login-err" id="login_err"></div>
     </div>
-    <button class="login-submit" onclick="doLogin()">SIGN IN</button>
-    <div class="login-err" id="login_err"></div>
+
+    <!-- Set-password form (shown after accepting invite link) -->
+    <div id="setpassword-form" style="display:none">
+      <h2>Set Your Password</h2>
+      <div class="login-field"><label>Email</label><input type="email" id="invite_email" disabled></div>
+      <div class="login-field"><label>New Password</label><input type="password" id="invite_pass" placeholder="Choose a password" autocomplete="new-password"></div>
+      <div class="login-field"><label>Confirm Password</label><input type="password" id="invite_pass2" placeholder="Confirm password" autocomplete="new-password"></div>
+      <button class="login-submit" onclick="doSetPassword()">SET PASSWORD &amp; SIGN IN</button>
+      <div class="login-err" id="setpass_err"></div>
+    </div>
   </div>
 </div>
 
@@ -1408,9 +1422,23 @@ let _accessToken = null;  // In-memory only — never written to localStorage/se
 const SUPABASE_URL  = "{{ supabase_url }}";
 const SUPABASE_ANON = "{{ supabase_anon_key }}";
 let _sbClient = null;
+let _inviteSession = null;
 if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undefined") {
   _sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
-    auth: { persistSession: false, detectSessionInUrl: false }
+    auth: { persistSession: false, detectSessionInUrl: true }
+  });
+
+  // Handle invite / password-recovery links — Supabase puts the token in the URL hash.
+  // onAuthStateChange fires SIGNED_IN after an invite or PASSWORD_RECOVERY after a reset.
+  _sbClient.auth.onAuthStateChange((event, session) => {
+    if ((event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') && session) {
+      // Only show set-password screen if we got here via an invite/recovery link
+      // (i.e. the user hasn't gone through doLogin() — _accessToken will be null)
+      if (!_accessToken) {
+        _inviteSession = session;
+        showSetPasswordScreen(session.user.email);
+      }
+    }
   });
 }
 
@@ -1495,6 +1523,61 @@ async function doLogout() {
 ["login_email","login_pass"].forEach(id => {
   document.getElementById(id)?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
 });
+
+function showSetPasswordScreen(email) {
+  document.getElementById("signin-form").style.display = "none";
+  document.getElementById("setpassword-form").style.display = "block";
+  document.getElementById("invite_email").value = email || "";
+  document.getElementById("login-overlay").classList.add("visible");
+  document.getElementById("invite_pass").focus();
+}
+
+async function doSetPassword() {
+  const pass  = document.getElementById("invite_pass").value;
+  const pass2 = document.getElementById("invite_pass2").value;
+  const errEl = document.getElementById("setpass_err");
+  const btn   = document.querySelector("#setpassword-form .login-submit");
+  errEl.style.display = "none";
+
+  if (pass.length < 8) {
+    errEl.textContent = "Password must be at least 8 characters.";
+    errEl.style.display = "block"; return;
+  }
+  if (pass !== pass2) {
+    errEl.textContent = "Passwords do not match.";
+    errEl.style.display = "block"; return;
+  }
+  if (!_inviteSession) {
+    errEl.textContent = "Session expired — please request a new invite.";
+    errEl.style.display = "block"; return;
+  }
+
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    // Set the session from the invite token so updateUser works
+    await _sbClient.auth.setSession({
+      access_token:  _inviteSession.access_token,
+      refresh_token: _inviteSession.refresh_token,
+    });
+    const { error } = await _sbClient.auth.updateUser({ password: pass });
+    if (error) throw error;
+
+    // Password set — now do a clean sign-in so Flask gets a fresh JWT
+    _inviteSession = null;
+    document.getElementById("setpassword-form").style.display = "none";
+    document.getElementById("signin-form").style.display = "block";
+    document.getElementById("login_email").value = document.getElementById("invite_email").value;
+    document.getElementById("login_pass").value = "";
+    document.getElementById("login_err").textContent = "Password set! Please sign in.";
+    document.getElementById("login_err").style.display = "block";
+    document.getElementById("login_pass").focus();
+  } catch (err) {
+    errEl.textContent = err.message || "Failed to set password. Try requesting a new invite.";
+    errEl.style.display = "block";
+  } finally {
+    btn.disabled = false; btn.textContent = "SET PASSWORD & SIGN IN";
+  }
+}
 
 // ── MARKUP / MARGIN ────────────────────────────────────────────────────────
 let markupType  = "margin";
@@ -2057,4 +2140,3 @@ const _origDownloadPDF = downloadPDF;
 </script>
 </body>
 </html>
-
