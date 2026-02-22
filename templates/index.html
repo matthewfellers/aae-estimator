@@ -568,6 +568,7 @@ body {
     <div class="topnav-tabs">
       <button class="tab-btn active" onclick="showTab('new-bid')">➕ New Bid</button>
       <button class="tab-btn" onclick="showTab('history')">📋 Bid History</button>
+      <button class="tab-btn" id="adminTabBtn" style="display:none" onclick="showTab('admin')">⚙️ Settings</button>
     </div>
     <span class="user-pill" id="user_pill">👤 Admin</span>
     <button class="logout-lnk" onclick="doLogout()">Sign Out</button>
@@ -1365,11 +1366,6 @@ function clearForm() {
 }
 
 // ── USERS / AUTH ──────────────────────────────────────────────────────────
-const USERS = [
-  {username:"admin",    password:"aae2025",  display:"Admin"},
-  {username:"mfellers", password:"aae2025",  display:"M. Fellers"},
-  {username:"estimator",password:"panel123", display:"Estimator"}
-];
 let currentUser = null;
 
 // ── User store — localStorage-backed, editable by mfellers ─────────────────
