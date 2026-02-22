@@ -397,36 +397,66 @@ Rules:
 - Flag anything uncertain in review_flags
 - confidence: 0.0 to 1.0"""
 
-    try:
-        response = claude_client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4000,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": pdf_b64
-                        }
-                    },
-                    {"type": "text", "text": prompt}
-                ]
-            }]
-        )
-        raw = response.content[0].text.strip()
-        # Strip markdown if model wrapped it anyway
-        raw = re.sub(r"^```json\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-        return json.loads(raw)
-    except Exception as e:
-        import traceback
-        err_detail = traceback.format_exc()
-        print("SCAN ERROR:", err_detail)  # shows in Railway logs
-        return {"error": str(e), "error_detail": err_detail,
-                "quantities": {}, "extraction_summary": {"confidence": 0}}
+    import time
+
+    # Try primary model first, fall back to haiku on rate limit
+    models_to_try = ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"]
+
+    for attempt, model in enumerate(models_to_try):
+        try:
+            response = claude_client.messages.create(
+                model=model,
+                max_tokens=4000,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": pdf_b64
+                            }
+                        },
+                        {"type": "text", "text": prompt}
+                    ]
+                }]
+            )
+            raw = response.content[0].text.strip()
+            # Strip markdown if model wrapped it anyway
+            raw = re.sub(r"^```json\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            result = json.loads(raw)
+            result["_model_used"] = model
+            return result
+
+        except Exception as e:
+            err_str = str(e)
+            print(f"SCAN attempt {attempt+1} ({model}) ERROR: {err_str}")
+
+            # Rate limit — wait briefly and try fallback
+            if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
+                if attempt < len(models_to_try) - 1:
+                    time.sleep(2)
+                    continue  # try next model
+                # All models failed with rate limit
+                return {
+                    "error": "rate_limit",
+                    "error_message": "API rate limit reached. Please wait 60 seconds and try again, or check your Anthropic account usage at console.anthropic.com.",
+                    "quantities": {}, "bom_line_items": [],
+                    "extraction_summary": {"confidence": 0, "scope_gap_flags": ["rate_limit"]}
+                }
+
+            # Other error — return detail
+            import traceback
+            err_detail = traceback.format_exc()
+            print("SCAN ERROR DETAIL:", err_detail)
+            return {"error": str(e), "error_detail": err_detail,
+                    "quantities": {}, "bom_line_items": [],
+                    "extraction_summary": {"confidence": 0}}
+
+    return {"error": "all_models_failed", "quantities": {}, "bom_line_items": [],
+            "extraction_summary": {"confidence": 0}}
 
 # ── PDF Quote Generator ────────────────────────────────────────────────────
 def generate_quote_pdf(bid_data, calc_results, quote_number):
