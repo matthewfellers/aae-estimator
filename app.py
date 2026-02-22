@@ -1254,78 +1254,7 @@ def bom_from_scan():
 # ADMIN API ROUTES
 # ═══════════════════════════════════════════════════════════════════
 
-# ── Auth ────────────────────────────────────────────────────────────
-@app.route("/api/login", methods=["POST"])
-def api_login():
-    data = request.get_json()
-    username = data.get("username","").strip().lower()
-    password = data.get("password","")
-    if not supabase:
-        # Fallback hardcoded users if DB not ready
-        FALLBACK = [
-            {"username":"mfellers","password":"aae2025","display_name":"M. Fellers","role":"admin"},
-            {"username":"admin","password":"aae2025","display_name":"Admin","role":"admin"},
-            {"username":"estimator","password":"panel123","display_name":"Estimator","role":"estimator"},
-        ]
-        user = next((u for u in FALLBACK if u["username"]==username and u["password"]==password), None)
-        if user:
-            return jsonify({"success":True,"display_name":user["display_name"],"role":user["role"],"username":username})
-        return jsonify({"success":False,"error":"Invalid credentials"}), 401
-    try:
-        rows = supabase.table("aae_users").select("*").eq("username",username).eq("active",True).execute()
-        if not rows.data:
-            return jsonify({"success":False,"error":"Invalid credentials"}), 401
-        user = rows.data[0]
-        if user["password"] != password:
-            return jsonify({"success":False,"error":"Invalid credentials"}), 401
-        return jsonify({"success":True,"display_name":user["display_name"],"role":user["role"],"username":username})
-    except Exception as e:
-        return jsonify({"success":False,"error":str(e)}), 500
-
-# ── User Management (admin only) ────────────────────────────────────
-@app.route("/api/users", methods=["GET"])
-def get_users():
-    if not supabase: return jsonify([])
-    try:
-        rows = supabase.table("aae_users").select("id,username,display_name,role,active,created_at").order("username").execute()
-        return jsonify(rows.data)
-    except Exception as e:
-        return jsonify({"error":str(e)}), 500
-
-@app.route("/api/users", methods=["POST"])
-def create_user():
-    data = request.get_json()
-    if not supabase: return jsonify({"error":"DB not configured"}), 500
-    try:
-        row = {"username":data["username"].strip().lower(),"password":data["password"],
-               "display_name":data.get("display_name",data["username"]),"role":data.get("role","estimator")}
-        result = supabase.table("aae_users").insert(row).execute()
-        return jsonify({"success":True,"user":result.data[0]})
-    except Exception as e:
-        return jsonify({"error":str(e)}), 500
-
-@app.route("/api/users/<uid>", methods=["PUT"])
-def update_user(uid):
-    data = request.get_json()
-    if not supabase: return jsonify({"error":"DB not configured"}), 500
-    try:
-        updates = {}
-        for f in ["password","display_name","role","active"]:
-            if f in data: updates[f] = data[f]
-        updates["updated_at"] = datetime.now().isoformat()
-        result = supabase.table("aae_users").update(updates).eq("id",uid).execute()
-        return jsonify({"success":True})
-    except Exception as e:
-        return jsonify({"error":str(e)}), 500
-
-@app.route("/api/users/<uid>", methods=["DELETE"])
-def delete_user(uid):
-    if not supabase: return jsonify({"error":"DB not configured"}), 500
-    try:
-        supabase.table("aae_users").update({"active":False}).eq("id",uid).execute()
-        return jsonify({"success":True})
-    except Exception as e:
-        return jsonify({"error":str(e)}), 500
+# ── Auth: handled client-side (localStorage) ─────────────────────────────────
 
 # ── Labor Rates (admin only) ─────────────────────────────────────────
 @app.route("/api/labor_rates", methods=["GET"])
