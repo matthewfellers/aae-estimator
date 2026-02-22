@@ -294,6 +294,7 @@ def calculate_bid(data):
     return {
         "raw_hours": round(raw_hrs, 2),
         "complexity_mult": c_mult,
+        "_rates_snapshot": r,   # exact rates used — passed to hours report so line items match
         "tech_mult": t_mult,
         "calib_factor": calib_factor,
         "total_hours": round(total_hrs, 2),
@@ -827,12 +828,12 @@ def bom_excel():
     thin = Side(style="thin", color="E0D0D0")
     bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
 
-    # Column widths: A=Item, B=Part#, C=Description, D=Qty, E=Unit, F=Manufacturer, G=Vendor, H=AAE Cost, I=Notes
-    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",14),("I",20)]:
+    # 10 columns: A=Item,B=Part#,C=Description,D=Qty,E=Unit,F=Manufacturer,G=Vendor,H=Unit Cost,I=Total Cost,J=Notes
+    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",14),("I",14),("J",20)]:
         ws.column_dimensions[col].width = w
 
     # Row 1: Banner
-    ws.merge_cells("A1:I1"); ws.row_dimensions[1].height = 14
+    ws.merge_cells("A1:J1"); ws.row_dimensions[1].height = 14
     ws["A1"] = "AAE AUTOMATION, INC.  |  UL-NNNY  |  UL-508A Certified Industrial Control Panel Specialists"
     s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
 
@@ -842,7 +843,7 @@ def bom_excel():
     ws["A2"].font      = Font(name="Arial", bold=True, color=WHITE, size=18)
     ws["A2"].fill      = PatternFill("solid", fgColor=DARK_RED)
     ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.merge_cells("F2:I2")
+    ws.merge_cells("F2:J2")
     ws["F2"] = quote_num
     s(ws["F2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
 
@@ -854,7 +855,7 @@ def bom_excel():
     s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
     ws["F3"] = "Project:"
     s(ws["F3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("G3:I3"); ws["G3"] = project
+    ws.merge_cells("G3:J3"); ws["G3"] = project
     s(ws["G3"], bg=LIGHT_RED, fg=DARK, sz=10)
 
     # Row 4: Date | Estimator
@@ -865,17 +866,17 @@ def bom_excel():
     s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
     ws["F4"] = "Estimator:"
     s(ws["F4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("G4:I4"); ws["G4"] = bid_data.get("estimator_name", "AAE Automation")
+    ws.merge_cells("G4:J4"); ws["G4"] = bid_data.get("estimator_name", "AAE Automation")
     s(ws["G4"], bg=MID_GRAY, fg=DARK, sz=9)
 
     # Row 5: Internal notice
-    ws.merge_cells("A5:I5"); ws.row_dimensions[5].height = 15
+    ws.merge_cells("A5:J5"); ws.row_dimensions[5].height = 15
     ws["A5"] = "⚠  INTERNAL DOCUMENT ONLY — Not for Customer Distribution  ⚠"
     s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
 
     # Row 6: Column headers
     ws.row_dimensions[6].height = 20
-    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","AAE COST","NOTES"], 1):
+    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","UNIT COST","TOTAL COST","NOTES"], 1):
         c = ws.cell(row=6, column=ci, value=h)
         s(c, bold=True, bg=DARK, sz=9, ha="center")
         c.border = Border(bottom=Side(style="medium", color=RED))
@@ -894,7 +895,7 @@ def bom_excel():
 
     for cat in [c for c in cat_order if grouped[c]]:
         # Section header
-        ws.merge_cells(f"A{row}:I{row}")
+        ws.merge_cells(f"A{row}:J{row}")
         hc = ws.cell(row=row, column=1, value=f"  {cat.upper()}")
         hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
         hc.fill = PatternFill("solid", fgColor=RED)
@@ -908,7 +909,9 @@ def bom_excel():
             ws.row_dimensions[row].height = 15
             vals = [itm["item_num"], itm["part_number"], itm["description"],
                     itm["qty"], itm["unit"], itm["manufacturer"],
-                    itm.get("vendor",""), itm["aae_cost"], itm["notes"]]
+                    itm.get("vendor",""), itm["aae_cost"],
+                    itm["qty"] * itm["aae_cost"],   # TOTAL COST = qty × unit cost
+                    itm["notes"]]
             for ci, val in enumerate(vals, 1):
                 c = ws.cell(row=row, column=ci, value=val)
                 c.fill = fill; c.border = bdr
@@ -918,10 +921,14 @@ def bom_excel():
                 elif ci == 7:  # Vendor — teal
                     c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
                     c.alignment = Alignment(horizontal="center", vertical="center")
-                elif ci == 8:  # AAE Cost
+                elif ci == 8:  # Unit Cost
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                    c.number_format = '"$"#,##0.000'
+                    c.font = Font(name="Arial", size=9, color="555555")
+                elif ci == 9:  # Total Cost — bold green
                     c.alignment = Alignment(horizontal="right", vertical="center")
                     c.number_format = '"$"#,##0.00'
-                    c.font = Font(name="Arial", size=9, color="008800")
+                    c.font = Font(name="Arial", size=9, color="008800", bold=True)
                 else:
                     c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
             row += 1
@@ -933,24 +940,25 @@ def bom_excel():
     tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
     tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
     tl.alignment = Alignment(horizontal="right", vertical="center")
-    tv = ws.cell(row=row, column=8, value=f"=SUM(H7:H{row-1})")
+    tv = ws.cell(row=row, column=9, value=f"=SUM(I7:I{row-1})")
     tv.font = Font(name="Arial", bold=True, color="008800", size=11)
     tv.number_format = '"$"#,##0.00'
     tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
     tv.alignment = Alignment(horizontal="right", vertical="center")
-    ws.cell(row=row, column=9).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.cell(row=row, column=8).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.cell(row=row, column=10).fill = PatternFill("solid", fgColor=LIGHT_RED)
     ws.row_dimensions[row].height = 20
     row += 2
 
     # Footer
-    ws.merge_cells(f"A{row}:I{row}")
+    ws.merge_cells(f"A{row}:J{row}")
     ft = ws.cell(row=row, column=1,
         value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
     ft.font = Font(name="Arial", size=8, color="888080", italic=True)
     ft.alignment = Alignment(horizontal="center")
 
     ws.freeze_panes = "A7"
-    ws.auto_filter.ref = f"A6:I{row-3}"
+    ws.auto_filter.ref = f"A6:J{row-3}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:6"
@@ -1187,11 +1195,11 @@ def bom_from_scan():
     bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
 
     # ── Column widths — 9 columns ──────────────────────────────────────────────
-    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",14),("I",20)]:
+    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",12),("I",14),("J",20)]:
         ws.column_dimensions[col].width = w
 
     # ── Row 1: Banner (A1:I1) ──────────────────────────────────────────────────
-    ws.merge_cells("A1:I1"); ws.row_dimensions[1].height = 14
+    ws.merge_cells("A1:J1"); ws.row_dimensions[1].height = 14
     ws["A1"] = "AAE AUTOMATION, INC.  |  UL-NNNY  |  UL-508A Certified Industrial Control Panel Specialists"
     s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
 
@@ -1201,7 +1209,7 @@ def bom_from_scan():
     ws["A2"].font      = Font(name="Arial", bold=True, color=WHITE, size=18)
     ws["A2"].fill      = PatternFill("solid", fgColor=DARK_RED)
     ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.merge_cells("F2:I2")
+    ws.merge_cells("F2:J2")
     ws["F2"] = job_num
     s(ws["F2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
 
@@ -1213,7 +1221,7 @@ def bom_from_scan():
     s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
     ws["F3"] = "Project:"
     s(ws["F3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("G3:I3"); ws["G3"] = project
+    ws.merge_cells("G3:J3"); ws["G3"] = project
     s(ws["G3"], bg=LIGHT_RED, fg=DARK, sz=10)
 
     # ── Row 4: Date (A4:B4 | C4:E4) | Estimator (F4 | G4:I4) ─────────────────
@@ -1224,17 +1232,17 @@ def bom_from_scan():
     s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
     ws["F4"] = "Estimator:"
     s(ws["F4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("G4:I4"); ws["G4"] = "AAE Automation"
+    ws.merge_cells("G4:J4"); ws["G4"] = "AAE Automation"
     s(ws["G4"], bg=MID_GRAY, fg=DARK, sz=9)
 
     # ── Row 5: Internal notice (A5:I5) ────────────────────────────────────────
-    ws.merge_cells("A5:I5"); ws.row_dimensions[5].height = 15
+    ws.merge_cells("A5:J5"); ws.row_dimensions[5].height = 15
     ws["A5"] = "⚠  INTERNAL DOCUMENT ONLY — Not for Customer Distribution  ⚠"
     s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
 
     # ── Row 6: Column headers ──────────────────────────────────────────────────
     ws.row_dimensions[6].height = 20
-    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","AAE COST","NOTES"], 1):
+    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","UNIT COST","TOTAL COST","NOTES"], 1):
         c = ws.cell(row=6, column=ci, value=h)
         s(c, bold=True, bg=DARK, sz=9, ha="center")
         c.border = Border(bottom=Side(style="medium", color=RED))
@@ -1263,7 +1271,7 @@ def bom_from_scan():
     for cat in cats_with_items:
         items = grouped[cat]
         # Section header spanning 9 cols
-        ws.merge_cells(f"A{row}:I{row}")
+        ws.merge_cells(f"A{row}:J{row}")
         hc = ws.cell(row=row, column=1, value=f"  {cat.upper()}")
         hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
         hc.fill = PatternFill("solid", fgColor=RED)
@@ -1312,22 +1320,23 @@ def bom_from_scan():
         row += 1  # spacer
 
     # Total row (spans A:G, value in H)
-    ws.merge_cells(f"A{row}:G{row}")
-    tl = ws.cell(row=row, column=1, value="TOTAL MATERIAL COST  (AAE Cost — pricing TBD from QuickBooks):")
+    ws.merge_cells(f"A{row}:H{row}")
+    tl = ws.cell(row=row, column=1, value="TOTAL MATERIAL COST (pricing TBD from QuickBooks):")
     tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
     tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
     tl.alignment = Alignment(horizontal="right", vertical="center")
-    tv = ws.cell(row=row, column=8, value=f"=SUM(H7:H{row-1})")
+    tv = ws.cell(row=row, column=9, value=f"=SUM(I7:I{row-1})")
     tv.font = Font(name="Arial", bold=True, color="AAAAAA", size=11, italic=True)
     tv.number_format = '"$"#,##0.00'
     tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
     tv.alignment = Alignment(horizontal="right", vertical="center")
-    ws.cell(row=row, column=9).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.cell(row=row, column=8).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.cell(row=row, column=10).fill = PatternFill("solid", fgColor=LIGHT_RED)
     ws.row_dimensions[row].height = 20
     row += 1
 
     # QB note
-    ws.merge_cells(f"A{row}:I{row}")
+    ws.merge_cells(f"A{row}:J{row}")
     note = ws.cell(row=row, column=1,
         value="NOTE: AAE Cost column will be populated from QuickBooks pricing. Vendor column auto-assigned from AAE vendor database.")
     note.font = Font(name="Arial", size=8, color="888080", italic=True)
@@ -1335,14 +1344,14 @@ def bom_from_scan():
     row += 2
 
     # Footer
-    ws.merge_cells(f"A{row}:I{row}")
+    ws.merge_cells(f"A{row}:J{row}")
     ft = ws.cell(row=row, column=1,
         value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
     ft.font = Font(name="Arial", size=8, color="888080", italic=True)
     ft.alignment = Alignment(horizontal="center")
 
     ws.freeze_panes = "A7"
-    ws.auto_filter.ref = f"A6:I{row-3}"
+    ws.auto_filter.ref = f"A6:J{row-3}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:6"
@@ -1558,7 +1567,9 @@ def hours_report():
         ws.row_dimensions[r].height=15
         r+=1
 
-    rates = get_labor_rates()
+    # Use the exact rates that produced this calculation (from _rates_snapshot)
+    # so line-item hours match the section totals perfectly
+    rates = calc.get("_rates_snapshot") or get_labor_rates()
     bd    = breakdown
 
     enc_qty = max(1,int(bid.get("enc_qty",1)))
@@ -1601,10 +1612,31 @@ def hours_report():
     data_row("► SECTION TOTAL", bd.get("power_hrs",0))
 
     section("MOTOR CONTROL")
-    data_row("Ice cube relays", rates["relay_icecube"]*relay_ic/60, f"{rates['relay_icecube']} min × {relay_ic}")
-    vfd_sm=int(bid.get("vfd_small",0)); vfd_md=int(bid.get("vfd_med",0)); vfd_lg=int(bid.get("vfd_large",0))
-    data_row("VFDs (small/med/large)", (rates["vfd_small"]*vfd_sm+rates["vfd_med"]*vfd_md+rates["vfd_large"]*vfd_lg)/60,
-             f"{vfd_sm}×{rates['vfd_small']} + {vfd_md}×{rates['vfd_med']} + {vfd_lg}×{rates['vfd_large']} min")
+    vfd_sm  = int(bid.get("vfd_small",0))
+    vfd_md  = int(bid.get("vfd_med",0))
+    vfd_lg  = int(bid.get("vfd_large",0))
+    relay_dn= int(bid.get("relay_din",0))
+    cont_sm = int(bid.get("contactor_small",0))
+    cont_lg = int(bid.get("contactor_large",0))
+    overload= int(bid.get("overload",0))
+    timer_q = int(bid.get("timers",0))
+    ssr_q   = int(bid.get("ssrs",0))
+    ss_sm   = int(bid.get("soft_starter_small",0))
+    ss_lg   = int(bid.get("soft_starter_large",0))
+    if relay_ic:  data_row(f"Ice cube relays ({relay_ic})",   rates["relay_icecube"]*relay_ic/60,   f"{rates['relay_icecube']} min × {relay_ic}")
+    if relay_dn:  data_row(f"DIN relays ({relay_dn})",        rates["relay_din"]*relay_dn/60,       f"{rates['relay_din']} min × {relay_dn}")
+    if cont_sm:   data_row(f"Contactors ≤40A ({cont_sm})",    rates["contactor_small"]*cont_sm/60,  f"{rates['contactor_small']} min × {cont_sm}")
+    if cont_lg:   data_row(f"Contactors >40A ({cont_lg})",    rates["contactor_large"]*cont_lg/60,  f"{rates['contactor_large']} min × {cont_lg}")
+    if overload:  data_row(f"Overload relays ({overload})",   rates["overload"]*overload/60,        f"{rates['overload']} min × {overload}")
+    if timer_q:   data_row(f"Timer relays ({timer_q})",       rates["timer"]*timer_q/60,            f"{rates['timer']} min × {timer_q}")
+    if ssr_q:     data_row(f"Solid state relays ({ssr_q})",   rates["ssr"]*ssr_q/60,               f"{rates['ssr']} min × {ssr_q}")
+    if vfd_sm:    data_row(f"VFD ≤5HP ({vfd_sm})",           rates["vfd_small"]*vfd_sm/60,         f"{rates['vfd_small']} min × {vfd_sm}")
+    if vfd_md:    data_row(f"VFD 6–25HP ({vfd_md})",         rates["vfd_med"]*vfd_md/60,           f"{rates['vfd_med']} min × {vfd_md}")
+    if vfd_lg:    data_row(f"VFD 26–100HP ({vfd_lg})",       rates["vfd_large"]*vfd_lg/60,         f"{rates['vfd_large']} min × {vfd_lg}")
+    if ss_sm:     data_row(f"Soft starters ≤50A ({ss_sm})",  rates["soft_starter_small"]*ss_sm/60, f"{rates['soft_starter_small']} min × {ss_sm}")
+    if ss_lg:     data_row(f"Soft starters >50A ({ss_lg})",  rates["soft_starter_large"]*ss_lg/60, f"{rates['soft_starter_large']} min × {ss_lg}")
+    if not any([relay_ic,relay_dn,cont_sm,cont_lg,overload,timer_q,ssr_q,vfd_sm,vfd_md,vfd_lg,ss_sm,ss_lg]):
+        data_row("(no motor control components)", 0)
     data_row("► SECTION TOTAL", bd.get("motor_ctrl_hrs",0))
 
     section("CONTROL DEVICES")
