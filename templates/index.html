@@ -1,0 +1,2242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAE Automation — Panel Estimator</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* ============================================================
+   AAE AUTOMATION — PANEL ESTIMATOR v2.0
+   Color Scheme: AAE Red (#8B0000 / #A50000), White, Dark Gray
+   ============================================================ */
+:root {
+  --aae-red: #9B1B1B;
+  --aae-red-dark: #7A1010;
+  --aae-red-light: #C22020;
+  --aae-cream: #F9F5F0;
+  --aae-white: #FFFFFF;
+  --aae-gray: #2C2C2C;
+  --aae-gray-mid: #555555;
+  --aae-gray-light: #E8E4E0;
+  --aae-gray-border: #D0CAC4;
+  --accent-gold: #C9A84C;
+  --success: #2E7D32;
+  --warning: #E65100;
+  --font-heading: 'Oswald', sans-serif;
+  --font-body: 'Source Sans 3', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: #1A1A1A;
+  color: var(--aae-gray);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* ── LOGIN PAGE ── */
+#login-page {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, #1A0505 0%, #2C0A0A 50%, #1A0505 100%);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+#login-page.active { display: flex; }
+
+.login-card {
+  background: var(--aae-white);
+  border-radius: 4px;
+  padding: 48px 40px;
+  width: 380px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  text-align: center;
+}
+.login-logo {
+  width: 180px;
+  margin-bottom: 8px;
+}
+.login-tagline {
+  font-family: var(--font-heading);
+  color: var(--aae-red);
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 32px;
+}
+.login-card h2 {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  color: var(--aae-gray);
+  margin-bottom: 24px;
+  font-weight: 600;
+}
+.login-field { margin-bottom: 16px; text-align: left; }
+.login-field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--aae-gray-mid);
+  margin-bottom: 6px;
+}
+.login-field input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1.5px solid var(--aae-gray-border);
+  border-radius: 3px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--aae-gray);
+  transition: border-color 0.2s;
+}
+.login-field input:focus {
+  outline: none;
+  border-color: var(--aae-red);
+}
+.login-btn {
+  width: 100%;
+  padding: 12px;
+  background: var(--aae-red);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: background 0.2s;
+}
+.login-btn:hover { background: var(--aae-red-dark); }
+.login-error {
+  color: var(--aae-red);
+  font-size: 12px;
+  margin-top: 10px;
+  display: none;
+}
+.login-demo {
+  margin-top: 16px;
+  font-size: 11px;
+  color: var(--aae-gray-mid);
+}
+
+/* ── APP WRAPPER ── */
+#app-wrapper {
+  display: none;
+}
+#app-wrapper.active { display: block; }
+
+/* ── TOP HEADER ── */
+.top-header {
+  background: var(--aae-red-dark);
+  color: white;
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.header-logo {
+  height: 40px;
+  filter: brightness(0) invert(1);
+}
+.header-divider {
+  width: 1px;
+  height: 32px;
+  background: rgba(255,255,255,0.3);
+}
+.header-title {
+  font-family: var(--font-heading);
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.header-contact {
+  font-size: 11px;
+  opacity: 0.7;
+  text-align: right;
+  line-height: 1.6;
+}
+.header-contact a { color: rgba(255,255,255,0.8); text-decoration: none; }
+.user-badge {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.logout-btn {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white;
+  border-radius: 3px;
+  padding: 6px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--font-body);
+  transition: background 0.2s;
+}
+.logout-btn:hover { background: rgba(255,255,255,0.2); }
+
+/* ── NAV BAR ── */
+.nav-bar {
+  background: var(--aae-red);
+  display: flex;
+  gap: 0;
+  padding: 0 32px;
+}
+.nav-btn {
+  padding: 10px 20px;
+  color: rgba(255,255,255,0.75);
+  background: none;
+  border: none;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 0.2s;
+}
+.nav-btn:hover { color: white; background: rgba(0,0,0,0.15); }
+.nav-btn.active { color: white; border-bottom-color: white; background: rgba(0,0,0,0.2); }
+
+/* ── MAIN LAYOUT ── */
+.main-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 60px;
+}
+
+/* ── SECTION PANELS ── */
+.section-panel {
+  background: var(--aae-white);
+  border-radius: 3px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  overflow: hidden;
+}
+.section-header {
+  background: var(--aae-gray);
+  color: white;
+  padding: 12px 20px;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.section-header .step-badge {
+  background: var(--aae-red);
+  color: white;
+  border-radius: 50%;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+}
+.section-body { padding: 24px 20px; }
+
+/* ── UPLOAD ZONE ── */
+.upload-zone {
+  border: 2px dashed var(--aae-gray-border);
+  border-radius: 4px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #FAFAFA;
+}
+.upload-zone:hover, .upload-zone.drag-over {
+  border-color: var(--aae-red);
+  background: #FFF5F5;
+}
+.upload-zone .upload-icon { font-size: 32px; margin-bottom: 10px; opacity: 0.5; }
+.upload-zone p { color: var(--aae-gray-mid); margin-bottom: 4px; }
+.upload-zone small { color: #999; font-size: 11px; }
+.upload-status {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 3px;
+  font-size: 12px;
+  display: none;
+}
+.upload-status.processing {
+  background: #FFF3E0;
+  color: #E65100;
+  border: 1px solid #FFCC02;
+  display: block;
+}
+.upload-status.success {
+  background: #E8F5E9;
+  color: #2E7D32;
+  border: 1px solid #A5D6A7;
+  display: block;
+}
+.upload-status.error {
+  background: #FFEBEE;
+  color: #C62828;
+  border: 1px solid #FFCDD2;
+  display: block;
+}
+
+/* ── BOM EXPORT BUTTONS ── */
+.bom-export-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--aae-gray-light);
+}
+.bom-export-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--aae-gray-mid);
+  margin-bottom: 10px;
+}
+.bom-export-btns {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.bom-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 3px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 2px solid;
+  transition: all 0.2s;
+}
+.bom-btn-pdf {
+  background: var(--aae-red);
+  color: white;
+  border-color: var(--aae-red);
+}
+.bom-btn-pdf:hover { background: var(--aae-red-dark); border-color: var(--aae-red-dark); }
+.bom-btn-excel {
+  background: white;
+  color: #1D6F42;
+  border-color: #1D6F42;
+}
+.bom-btn-excel:hover { background: #1D6F42; color: white; }
+
+/* ── FORM GRID ── */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+.form-full { grid-column: 1 / -1; }
+
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-group label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--aae-gray-mid);
+}
+.form-group input,
+.form-group select {
+  padding: 8px 10px;
+  border: 1.5px solid var(--aae-gray-border);
+  border-radius: 3px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--aae-gray);
+  background: white;
+  transition: border-color 0.2s;
+}
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: var(--aae-red);
+}
+.form-group input.ai-filled {
+  background: #F0FFF0;
+  border-color: #66BB6A;
+}
+
+.sub-section-title {
+  font-family: var(--font-heading);
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--aae-red);
+  margin: 20px 0 12px;
+  padding-bottom: 4px;
+  border-bottom: 2px solid var(--aae-red-light);
+}
+.sub-section-title:first-child { margin-top: 0; }
+
+.toggle-group {
+  display: flex;
+  gap: 0;
+  border: 1.5px solid var(--aae-gray-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.toggle-group label {
+  flex: 1;
+  text-align: center;
+  padding: 7px 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--aae-gray-mid);
+  background: white;
+  transition: all 0.15s;
+  user-select: none;
+}
+.toggle-group input[type=radio] { display: none; }
+.toggle-group input[type=radio]:checked + label {
+  background: var(--aae-red);
+  color: white;
+}
+
+/* ── MARKUP INPUT ── */
+.markup-group {
+  background: #FFF9F0;
+  border: 1.5px solid #F0C97A;
+  border-radius: 3px;
+  padding: 12px 16px;
+  margin-top: 4px;
+}
+.markup-group label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--aae-gray-mid);
+  margin-bottom: 8px;
+  display: block;
+}
+.markup-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.markup-pill {
+  padding: 4px 12px;
+  border: 1.5px solid var(--aae-gray-border);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: white;
+  color: var(--aae-gray);
+}
+.markup-pill.active {
+  background: var(--aae-red);
+  color: white;
+  border-color: var(--aae-red);
+}
+.markup-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.markup-custom-row input {
+  width: 80px;
+  padding: 4px 8px;
+  border: 1.5px solid var(--aae-gray-border);
+  border-radius: 3px;
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+.markup-hint {
+  font-size: 11px;
+  color: var(--aae-gray-mid);
+  margin-top: 4px;
+}
+
+/* ── LABOR CALIBRATION ── */
+.calibration-box {
+  background: #F5F0FF;
+  border: 1.5px solid #9C7EEC;
+  border-radius: 3px;
+  padding: 12px 16px;
+  margin-top: 16px;
+}
+.calibration-box h4 {
+  font-family: var(--font-heading);
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #5E35B1;
+  margin-bottom: 8px;
+}
+.calib-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+.calib-grid label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #7B5EA7;
+  margin-bottom: 3px;
+  display: block;
+}
+.calib-grid input {
+  padding: 6px 8px;
+  border: 1.5px solid #C5B3E6;
+  border-radius: 3px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  background: white;
+}
+.calib-btn {
+  padding: 7px 14px;
+  background: #5E35B1;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+.calib-btn:hover { background: #4527A0; }
+.calib-history {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #7B5EA7;
+}
+.calib-factor-display {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: white;
+  border: 1px solid #C5B3E6;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #5E35B1;
+}
+
+/* ── CALCULATE BUTTON ── */
+.calc-btn-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+.btn-calculate {
+  flex: 1;
+  padding: 14px 24px;
+  background: var(--aae-red);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  font-family: var(--font-heading);
+  font-size: 18px;
+  letter-spacing: 2px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-calculate:hover { background: var(--aae-red-dark); }
+.btn-clear {
+  padding: 14px 20px;
+  background: #EEE;
+  color: var(--aae-gray);
+  border: none;
+  border-radius: 3px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-clear:hover { background: #DDD; }
+
+/* ── QUOTE RESULTS ── */
+.quote-results-panel {
+  display: none;
+}
+.quote-results-panel.visible { display: block; }
+
+.results-highlight {
+  background: var(--aae-red);
+  color: white;
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+.result-metric { text-align: center; }
+.result-metric .val {
+  font-family: var(--font-heading);
+  font-size: 28px;
+  font-weight: 700;
+  display: block;
+}
+.result-metric .lbl {
+  font-size: 10px;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+.cost-breakdown {
+  padding: 20px 24px;
+  background: white;
+}
+.breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.breakdown-table tr td {
+  padding: 7px 10px;
+  font-size: 13px;
+  border-bottom: 1px solid #F0EDE8;
+}
+.breakdown-table tr td:first-child { color: var(--aae-gray-mid); }
+.breakdown-table tr td:last-child {
+  text-align: right;
+  font-weight: 600;
+  color: var(--aae-gray);
+  font-family: monospace;
+  font-size: 14px;
+}
+.breakdown-table tr.total-row td {
+  border-top: 2px solid var(--aae-gray);
+  font-family: var(--font-heading);
+  font-size: 15px;
+  color: var(--aae-red);
+  font-weight: 700;
+}
+.breakdown-table tr.sub-header td {
+  background: #F5F5F5;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--aae-gray-mid);
+  padding: 5px 10px;
+}
+
+.results-actions {
+  padding: 16px 24px;
+  background: #F9F5F0;
+  border-top: 1px solid var(--aae-gray-light);
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 3px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 2px solid;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.action-btn-primary {
+  background: var(--aae-red);
+  color: white;
+  border-color: var(--aae-red);
+}
+.action-btn-primary:hover { background: var(--aae-red-dark); border-color: var(--aae-red-dark); }
+.action-btn-secondary {
+  background: white;
+  color: var(--aae-gray);
+  border-color: var(--aae-gray-border);
+}
+.action-btn-secondary:hover { border-color: var(--aae-gray); }
+
+/* Internal doc notice */
+.internal-notice {
+  background: #FFF8E1;
+  border: 2px solid #FFC107;
+  border-radius: 3px;
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #E65100;
+  text-align: center;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 0;
+}
+
+/* ── BID HISTORY ── */
+.bid-history-section {}
+
+.history-header {
+  background: var(--aae-gray);
+  color: white;
+  padding: 12px 20px;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.refresh-btn {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font-body);
+  transition: background 0.2s;
+}
+.refresh-btn:hover { background: rgba(255,255,255,0.2); }
+
+.history-table-wrap { overflow-x: auto; }
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.history-table th {
+  background: #F0EDE8;
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--aae-gray-mid);
+  white-space: nowrap;
+}
+.history-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #F0EDE8;
+  font-size: 13px;
+  vertical-align: middle;
+}
+.history-table tr:hover td { background: #FFF9F5; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.badge-standard { background: #E3F2FD; color: #1565C0; }
+.badge-complex { background: #FCE4EC; color: #880E4F; }
+.badge-simple { background: #E8F5E9; color: #1B5E20; }
+.badge-journeyman { background: #FFF3E0; color: #E65100; }
+.badge-master { background: #F3E5F5; color: #6A1B9A; }
+
+.price-cell {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--aae-red);
+}
+
+.history-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid;
+  text-decoration: none;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.hab-view { background: white; color: var(--aae-gray); border-color: var(--aae-gray-border); }
+.hab-view:hover { border-color: var(--aae-gray); }
+.hab-pdf { background: var(--aae-red); color: white; border-color: var(--aae-red); }
+.hab-pdf:hover { background: var(--aae-red-dark); }
+.hab-bom { background: #1D6F42; color: white; border-color: #1D6F42; }
+.hab-bom:hover { background: #155232; }
+
+/* ── QUOTE PRINT VIEW ── */
+#quote-print-view {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 500;
+  overflow-y: auto;
+  padding: 40px 20px;
+}
+#quote-print-view.open { display: block; }
+
+.quote-doc {
+  background: white;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 48px;
+  position: relative;
+  font-family: var(--font-body);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+}
+.close-quote-btn {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  background: var(--aae-red);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 36px; height: 36px;
+  font-size: 18px;
+  cursor: pointer;
+  z-index: 501;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.internal-stamp {
+  text-align: center;
+  background: #FFF8E1;
+  border: 2px dashed #FFC107;
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #E65100;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 32px;
+}
+.quote-doc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 3px solid var(--aae-red);
+}
+.quote-doc-company h1 {
+  font-family: var(--font-heading);
+  font-size: 28px;
+  color: var(--aae-red);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.quote-doc-company p {
+  font-size: 12px;
+  color: var(--aae-gray-mid);
+  margin-top: 4px;
+}
+.quote-doc-meta {
+  text-align: right;
+}
+.quote-doc-meta .quote-title {
+  font-family: var(--font-heading);
+  font-size: 40px;
+  color: var(--aae-red);
+  font-weight: 700;
+  line-height: 1;
+}
+.quote-meta-table {
+  margin-top: 8px;
+  border-collapse: collapse;
+  text-align: right;
+}
+.quote-meta-table td {
+  padding: 3px 8px;
+  font-size: 12px;
+  border: 1px solid var(--aae-gray-border);
+}
+.quote-meta-table thead td {
+  background: var(--aae-red);
+  color: white;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.quote-address-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+.quote-address-box {
+  border: 1px solid var(--aae-gray-border);
+}
+.quote-address-box .addr-header {
+  background: var(--aae-red);
+  color: white;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.quote-address-box .addr-body {
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.quote-line-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 24px;
+}
+.quote-line-table th {
+  background: var(--aae-red);
+  color: white;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-align: left;
+}
+.quote-line-table th:last-child,
+.quote-line-table td:last-child { text-align: right; }
+.quote-line-table td {
+  padding: 10px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid #EBEBEB;
+}
+.quote-line-table tr:nth-child(even) td { background: #FAFAFA; }
+
+.quote-total-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 28px;
+}
+.quote-total-box {
+  border: 2px solid var(--aae-gray);
+  min-width: 220px;
+}
+.quote-total-box .tot-label {
+  background: var(--aae-gray);
+  color: white;
+  padding: 8px 16px;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-align: center;
+}
+.quote-total-box .tot-value {
+  padding: 10px 16px;
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--aae-red);
+  text-align: center;
+}
+
+.quote-footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--aae-gray-light);
+}
+.warranty-badge {
+  background: var(--accent-gold);
+  color: #2C1A00;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.4;
+  max-width: 150px;
+}
+.quote-logos {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.quote-aae-logo { height: 44px; }
+.quote-rockwell-logo { height: 50px; }
+.quote-print-btn {
+  padding: 10px 24px;
+  background: var(--aae-red);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  display: block;
+  margin: 16px auto 0;
+}
+
+/* ── PAGE VIEWS ── */
+.page-view { display: none; }
+.page-view.active { display: block; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 700px) {
+  .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
+  .results-highlight { grid-template-columns: 1fr 1fr; }
+  .quote-address-row { grid-template-columns: 1fr; }
+  .top-header { padding: 0 16px; }
+  .header-contact { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ======================================================
+     LOGIN PAGE
+     ====================================================== -->
+<div id="login-page" class="active">
+  <div class="login-card">
+    <img src="/static/aae_logo.jpg" alt="AAE Automation" class="login-logo" onerror="this.style.display='none'">
+    <div style="font-family:'Oswald',sans-serif;color:#9B1B1B;font-size:24px;font-weight:700;margin-bottom:4px;">AAE AUTOMATION</div>
+    <div class="login-tagline">Panel Estimating System</div>
+    <h2>Sign In</h2>
+    <div class="login-field">
+      <label>Username</label>
+      <input type="text" id="login-user" placeholder="Enter username" autocomplete="username">
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="login-pass" placeholder="Enter password" autocomplete="current-password">
+    </div>
+    <button class="login-btn" onclick="doLogin()">SIGN IN</button>
+    <div class="login-error" id="login-error">Invalid username or password.</div>
+    <div class="login-demo">
+      <strong>Demo:</strong> admin / aae2025 &nbsp;|&nbsp; estimator / panel123
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================
+     MAIN APP
+     ====================================================== -->
+<div id="app-wrapper">
+
+  <!-- TOP HEADER -->
+  <div class="top-header">
+    <div class="header-left">
+      <img src="/static/aae_logo.jpg" alt="AAE Automation" class="header-logo" onerror="this.style.display='none'">
+      <div style="font-family:'Oswald',sans-serif;color:white;font-size:20px;font-weight:700;margin-right:4px;">AAE AUTOMATION</div>
+      <div class="header-divider"></div>
+      <div class="header-title">UL-508A Panel Estimating System</div>
+    </div>
+    <div class="header-right">
+      <div class="header-contact">
+        <div>8528 SW 2nd Street, Oklahoma City, OK 73128</div>
+        <div>📞 405-210-1567 &nbsp;✉ <a href="mailto:mfellers@aaeok.com">mfellers@aaeok.com</a></div>
+      </div>
+      <div class="user-badge">👤 <span id="user-display">Admin</span></div>
+      <button class="logout-btn" onclick="doLogout()">Sign Out</button>
+    </div>
+  </div>
+
+  <!-- NAV BAR -->
+  <div class="nav-bar">
+    <button class="nav-btn active" id="nav-new" onclick="showPage('new-bid')">➕ New Bid</button>
+    <button class="nav-btn" id="nav-history" onclick="showPage('history')">📋 Bid History</button>
+  </div>
+
+  <div class="main-container">
+
+    <!-- ============ NEW BID PAGE ============ -->
+    <div class="page-view active" id="page-new-bid">
+
+      <!-- STEP 1: AI DRAWING SCAN -->
+      <div class="section-panel">
+        <div class="section-header">
+          <span class="step-badge">1</span>
+          STEP 1 — AI DRAWING SCAN
+        </div>
+        <div class="section-body">
+          <div class="upload-zone" id="upload-zone"
+            ondragover="event.preventDefault(); this.classList.add('drag-over')"
+            ondragleave="this.classList.remove('drag-over')"
+            ondrop="handleDrop(event)"
+            onclick="document.getElementById('file-input').click()">
+            <div class="upload-icon">📐</div>
+            <p><strong>Drop customer drawing PDF here</strong></p>
+            <small>or click to browse · PDF format · Multi-page supported</small>
+          </div>
+          <input type="file" id="file-input" accept=".pdf" style="display:none" onchange="handleFile(this.files[0])">
+          <div class="upload-status" id="upload-status"></div>
+
+          <!-- BOM EXPORT BUTTONS (Note a) -->
+          <div class="bom-export-section">
+            <div class="bom-export-label">📦 Export Bill of Materials</div>
+            <div class="bom-export-btns">
+              <button class="bom-btn bom-btn-pdf" onclick="exportBomPDF()">
+                📄 Download BOM — PDF
+              </button>
+              <button class="bom-btn bom-btn-excel" onclick="exportBomExcel()">
+                📊 Download BOM — Excel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 2: PROJECT INFO -->
+      <div class="section-panel">
+        <div class="section-header">
+          <span class="step-badge">2</span>
+          STEP 2 — PROJECT INFORMATION
+        </div>
+        <div class="section-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Customer Name</label>
+              <input type="text" id="customer" placeholder="e.g. Devon Energy">
+            </div>
+            <div class="form-group">
+              <label>Project / PO Number</label>
+              <input type="text" id="project" placeholder="e.g. DVN-RIO-V4">
+            </div>
+            <div class="form-group">
+              <label>Estimator Name</label>
+              <input type="text" id="estimator" placeholder="e.g. M. Fellers — AAE Automation">
+            </div>
+            <div class="form-group">
+              <label>Labor Rate Override ($/hr)</label>
+              <input type="number" id="labor-rate" placeholder="95" min="0" step="5">
+            </div>
+            <div class="form-group">
+              <label>Panel Complexity</label>
+              <select id="complexity">
+                <option value="0.70">Simple MCC / Single Motor</option>
+                <option value="1.00" selected>Standard Distribution</option>
+                <option value="1.15">Multi-Motor Control</option>
+                <option value="1.30">PLC — Moderate I/O (≤64 pts)</option>
+                <option value="1.50">PLC — High I/O (65–256 pts)</option>
+                <option value="1.65">PLC + Drives</option>
+                <option value="1.80">Safety-Rated (SIL/PLe)</option>
+                <option value="2.00">Custom / Complex</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Technician Level</label>
+              <select id="tech-level">
+                <option value="0.85">Master / Lead (10+ yrs) — 0.85×</option>
+                <option value="1.00" selected>Journeyman (5–10 yrs) — 1.00×</option>
+                <option value="1.30">Apprentice / Entry Level — 1.30×</option>
+                <option value="1.10">Mixed Crew — 1.10×</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- MARKUP SECTION (Note e) -->
+          <div class="markup-group" style="margin-top:16px;">
+            <label>💰 Customer Markup / Profit Margin</label>
+            <div class="markup-options">
+              <div class="markup-pill" onclick="setMarkup('margin',0.20,this)">Margin 20% (÷0.80)</div>
+              <div class="markup-pill active" onclick="setMarkup('margin',0.25,this)">Margin 25% (÷0.75)</div>
+              <div class="markup-pill" onclick="setMarkup('markup',0.30,this)">Markup 30%</div>
+              <div class="markup-pill" onclick="setMarkup('custom',0,this)">Custom</div>
+            </div>
+            <div class="markup-custom-row" id="custom-markup-row" style="display:none;">
+              <label>Custom %:</label>
+              <input type="number" id="custom-markup-val" placeholder="25" min="0" max="100" step="1">
+              <label>Type:</label>
+              <select id="custom-markup-type" style="padding:4px 8px;border:1.5px solid #D0CAC4;border-radius:3px;">
+                <option value="margin">Margin (÷)</option>
+                <option value="markup">Markup (×)</option>
+              </select>
+            </div>
+            <div class="markup-hint" id="markup-hint">Current: Profit margin 25% — divides raw material cost by 0.75</div>
+          </div>
+
+          <div class="form-grid" style="margin-top:16px;">
+            <div class="form-group">
+              <label>UL Listing Required?</label>
+              <div class="toggle-group">
+                <input type="radio" name="ul" id="ul-yes" value="yes" checked>
+                <label for="ul-yes">Yes — NNNY/508A</label>
+                <input type="radio" name="ul" id="ul-no" value="no">
+                <label for="ul-no">No</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Witness Test?</label>
+              <div class="toggle-group">
+                <input type="radio" name="witness" id="wit-no" value="no" checked>
+                <label for="wit-no">No</label>
+                <input type="radio" name="witness" id="wit-yes" value="yes">
+                <label for="wit-yes">Yes</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Expedite?</label>
+              <div class="toggle-group">
+                <input type="radio" name="expedite" id="exp-no" value="no" checked>
+                <label for="exp-no">No</label>
+                <input type="radio" name="expedite" id="exp-yes" value="yes">
+                <label for="exp-yes">Yes (+15%)</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Engineering Included?</label>
+              <div class="toggle-group">
+                <input type="radio" name="eng" id="eng-no" value="no" checked>
+                <label for="eng-no">No</label>
+                <input type="radio" name="eng" id="eng-yes" value="yes">
+                <label for="eng-yes">Yes</label>
+              </div>
+            </div>
+          </div>
+
+          <!-- LABOR CALIBRATION (Note c) -->
+          <div class="calibration-box">
+            <h4>🎯 Labor Hour Calibration</h4>
+            <p style="font-size:11px;color:#7B5EA7;margin-bottom:10px;">
+              Improve accuracy by logging actual hours from completed panels. The system learns a calibration factor for future estimates.
+            </p>
+            <div class="calib-grid">
+              <div>
+                <label>Panel Description</label>
+                <input type="text" id="calib-desc" placeholder="e.g. Devon RIO Panel V3.2">
+              </div>
+              <div>
+                <label>Actual Hours Taken</label>
+                <input type="number" id="calib-actual" placeholder="28" min="1" step="0.5">
+              </div>
+              <div>
+                <button class="calib-btn" onclick="logCalibration()">Log Hours</button>
+              </div>
+            </div>
+            <div class="calib-factor-display" id="calib-factor-display">
+              Calibration factor: <strong>1.00×</strong> (no data yet — log actual hours above)
+            </div>
+            <div class="calib-history" id="calib-history"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- STEP 3: COMPONENT QUANTITIES -->
+      <div class="section-panel">
+        <div class="section-header">
+          <span class="step-badge">3</span>
+          STEP 3 — COMPONENT QUANTITIES
+        </div>
+        <div class="section-body">
+          <p style="font-size:12px;color:#2E7D32;font-weight:600;margin-bottom:16px;">
+            🟢 Green fields were auto-filled by AI scan. Review and adjust as needed.
+          </p>
+
+          <!-- ENCLOSURE & MECHANICAL -->
+          <div class="sub-section-title">Enclosure & Mechanical</div>
+          <div class="form-grid-3">
+            <div class="form-group"><label>Qty Enclosures</label><input type="number" id="q-enclosures" min="0" value="0"></div>
+            <div class="form-group"><label>DIN Rail Runs</label><input type="number" id="q-din-rail" min="0" value="0"></div>
+            <div class="form-group"><label>Wire Duct Runs</label><input type="number" id="q-wire-duct" min="0" value="0"></div>
+            <div class="form-group"><label>Enclosure Accessories</label><input type="number" id="q-enc-acc" min="0" value="0"></div>
+          </div>
+
+          <!-- POWER DISTRIBUTION -->
+          <div class="sub-section-title">Power Distribution</div>
+          <div class="form-grid-3">
+            <div class="form-group"><label>Main Amperage</label><input type="number" id="q-main-amp" min="0" value="0"></div>
+            <div class="form-group"><label>Branch Breakers — 1P</label><input type="number" id="q-bb-1p" min="0" value="0"></div>
+            <div class="form-group"><label>Branch Breakers — 2P</label><input type="number" id="q-bb-2p" min="0" value="0"></div>
+            <div class="form-group"><label>Branch Breakers — 3P</label><input type="number" id="q-bb-3p" min="0" value="0"></div>
+            <div class="form-group"><label>Fused Disconnects</label><input type="number" id="q-fused-disc" min="0" value="0"></div>
+            <div class="form-group">
+              <label>CPT Present?</label>
+              <div class="toggle-group">
+                <input type="radio" name="cpt" id="cpt-no" value="0" checked><label for="cpt-no">No</label>
+                <input type="radio" name="cpt" id="cpt-yes" value="1"><label for="cpt-yes">Yes</label>
+              </div>
+            </div>
+            <div class="form-group"><label>Power Dist. Blocks</label><input type="number" id="q-pdb" min="0" value="0"></div>
+          </div>
+
+          <!-- MOTOR CONTROL -->
+          <div class="sub-section-title">Motor Control</div>
+          <div class="form-grid-3">
+            <div class="form-group"><label>Contactors ≤40A</label><input type="number" id="q-cont-sm" min="0" value="0"></div>
+            <div class="form-group"><label>Contactors 41–100A</label><input type="number" id="q-cont-lg" min="0" value="0"></div>
+            <div class="form-group"><label>Overload Relays</label><input type="number" id="q-overload" min="0" value="0"></div>
+            <div class="form-group"><label>VFDs ≤5HP</label><input type="number" id="q-vfd-sm" min="0" value="0"></div>
+            <div class="form-group"><label>VFDs 6–25HP</label><input type="number" id="q-vfd-md" min="0" value="0"></div>
+            <div class="form-group"><label>VFDs 26–100HP</label><input type="number" id="q-vfd-lg" min="0" value="0"></div>
+            <div class="form-group"><label>Soft Starters ≤50A</label><input type="number" id="q-ss-sm" min="0" value="0"></div>
+            <div class="form-group"><label>Soft Starters >50A</label><input type="number" id="q-ss-lg" min="0" value="0"></div>
+          </div>
+
+          <!-- CONTROL DEVICES -->
+          <div class="sub-section-title">Control Devices</div>
+          <div class="form-grid-3">
+            <div class="form-group"><label>Relays — Ice Cube</label><input type="number" id="q-relay-ic" min="0" value="0"></div>
+            <div class="form-group"><label>Relays — DIN Mount</label><input type="number" id="q-relay-din" min="0" value="0"></div>
+            <div class="form-group"><label>SSRs</label><input type="number" id="q-ssr" min="0" value="0"></div>
+            <div class="form-group"><label>Timers</label><input type="number" id="q-timers" min="0" value="0"></div>
+            <div class="form-group"><label>Pilot Lights</label><input type="number" id="q-pilots" min="0" value="0"></div>
+            <div class="form-group"><label>Selector Switches</label><input type="number" id="q-selectors" min="0" value="0"></div>
+            <div class="form-group"><label>Push Buttons</label><input type="number" id="q-pushbtns" min="0" value="0"></div>
+            <div class="form-group"><label>E-Stops</label><input type="number" id="q-estops" min="0" value="0"></div>
+          </div>
+
+          <!-- PLC / NETWORKING -->
+          <div class="sub-section-title">PLC / Networking</div>
+          <div class="form-grid-3">
+            <div class="form-group">
+              <label>PLC Present?</label>
+              <div class="toggle-group">
+                <input type="radio" name="plc" id="plc-no" value="0" checked><label for="plc-no">No</label>
+                <input type="radio" name="plc" id="plc-yes" value="1"><label for="plc-yes">Yes</label>
+              </div>
+            </div>
+            <div class="form-group"><label>Digital Inputs (DI)</label><input type="number" id="q-di" min="0" value="0"></div>
+            <div class="form-group"><label>Digital Outputs (DO)</label><input type="number" id="q-do" min="0" value="0"></div>
+            <div class="form-group"><label>Analog Inputs (AI)</label><input type="number" id="q-ai" min="0" value="0"></div>
+            <div class="form-group"><label>Analog Outputs (AO)</label><input type="number" id="q-ao" min="0" value="0"></div>
+            <div class="form-group">
+              <label>HMI Present?</label>
+              <div class="toggle-group">
+                <input type="radio" name="hmi" id="hmi-no" value="0" checked><label for="hmi-no">No</label>
+                <input type="radio" name="hmi" id="hmi-yes" value="1"><label for="hmi-yes">Yes</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Safety Relay/Controller?</label>
+              <div class="toggle-group">
+                <input type="radio" name="safety" id="safety-no" value="0" checked><label for="safety-no">No</label>
+                <input type="radio" name="safety" id="safety-yes" value="1"><label for="safety-yes">Yes</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Ethernet Switch?</label>
+              <div class="toggle-group">
+                <input type="radio" name="eth" id="eth-no" value="0" checked><label for="eth-no">No</label>
+                <input type="radio" name="eth" id="eth-yes" value="1"><label for="eth-yes">Yes</label>
+              </div>
+            </div>
+            <div class="form-group"><label>Internal Ethernet Cables</label><input type="number" id="q-eth-cables" min="0" value="0"></div>
+          </div>
+
+          <!-- TERMINAL BLOCKS & WIRING -->
+          <div class="sub-section-title">Terminal Blocks & Wiring</div>
+          <div class="form-grid-3">
+            <div class="form-group"><label>Standard TBs</label><input type="number" id="q-tb-std" min="0" value="0"></div>
+            <div class="form-group"><label>Ground TBs</label><input type="number" id="q-tb-gnd" min="0" value="0"></div>
+            <div class="form-group"><label>Fused TBs</label><input type="number" id="q-tb-fused" min="0" value="0"></div>
+            <div class="form-group"><label>Disconnect TBs</label><input type="number" id="q-tb-disc" min="0" value="0"></div>
+            <div class="form-group">
+              <label>Terminal Markers?</label>
+              <div class="toggle-group">
+                <input type="radio" name="tm" id="tm-yes" value="1" checked><label for="tm-yes">Yes</label>
+                <input type="radio" name="tm" id="tm-no" value="0"><label for="tm-no">No</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Ferrules?</label>
+              <div class="toggle-group">
+                <input type="radio" name="ferrule" id="ferr-yes" value="1" checked><label for="ferr-yes">Yes</label>
+                <input type="radio" name="ferrule" id="ferr-no" value="0"><label for="ferr-no">No</label>
+              </div>
+            </div>
+            <div class="form-group"><label>Wire Count (total)</label><input type="number" id="q-wire-count" min="0" value="0"></div>
+            <div class="form-group"><label>Avg Wire Length (in)</label><input type="number" id="q-wire-len" min="0" value="18"></div>
+            <div class="form-group">
+              <label>Wire Gauge (dominant)</label>
+              <select id="q-wire-gauge">
+                <option value="0.40">10 AWG or smaller ($0.40/ft)</option>
+                <option value="0.65">8 AWG ($0.65/ft)</option>
+                <option value="1.10">6 AWG ($1.10/ft)</option>
+                <option value="1.75">4 AWG ($1.75/ft)</option>
+                <option value="3.00">2 AWG ($3.00/ft)</option>
+                <option value="3.50">1 AWG ($3.50/ft)</option>
+                <option value="5.25">1/0 AWG ($5.25/ft)</option>
+                <option value="5.50">2/0 AWG ($5.50/ft)</option>
+                <option value="6.36">3/0 AWG ($6.36/ft)</option>
+                <option value="7.50">4/0 AWG ($7.50/ft)</option>
+                <option value="13.00">250 MCM ($13.00/ft)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Heat Shrink Labels?</label>
+              <div class="toggle-group">
+                <input type="radio" name="hsl" id="hsl-yes" value="1" checked><label for="hsl-yes">Yes — Both Ends</label>
+                <input type="radio" name="hsl" id="hsl-no" value="0"><label for="hsl-no">No</label>
+              </div>
+            </div>
+          </div>
+
+          <!-- ADDITIONAL HOURS -->
+          <div class="sub-section-title">Additional Hours</div>
+          <div class="form-grid-3">
+            <div class="form-group"><label>Engineering Hours</label><input type="number" id="q-eng-hrs" min="0" value="0"></div>
+            <div class="form-group"><label>Programming Hours</label><input type="number" id="q-prog-hrs" min="0" value="0"></div>
+            <div class="form-group"><label>FAT / Witness Hours</label><input type="number" id="q-fat-hrs" min="0" value="0"></div>
+          </div>
+
+          <!-- CALCULATE BUTTONS -->
+          <div class="calc-btn-row">
+            <button class="btn-calculate" onclick="calculateBid()">⚡ CALCULATE BID</button>
+            <button class="btn-clear" onclick="clearForm()">↺ Clear Form</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- QUOTE RESULTS -->
+      <div class="section-panel quote-results-panel" id="quote-results-panel">
+        <div class="section-header">
+          <span class="step-badge">✓</span>
+          QUOTE RESULTS
+        </div>
+        <div class="internal-notice">⚠ INTERNAL DOCUMENT ONLY — Not for customer distribution</div>
+        <div class="results-highlight" id="results-highlight">
+          <div class="result-metric">
+            <span class="val" id="r-hours">—</span>
+            <span class="lbl">Total Billable Hrs</span>
+          </div>
+          <div class="result-metric">
+            <span class="val" id="r-labor">—</span>
+            <span class="lbl">Labor Cost</span>
+          </div>
+          <div class="result-metric">
+            <span class="val" id="r-material">—</span>
+            <span class="lbl">Material (w/ margin)</span>
+          </div>
+          <div class="result-metric">
+            <span class="val" id="r-total">$0.00</span>
+            <span class="lbl">Total Quoted Price</span>
+          </div>
+        </div>
+        <div class="cost-breakdown">
+          <table class="breakdown-table" id="breakdown-table">
+            <tbody>
+              <tr class="sub-header"><td colspan="3">LABOR</td></tr>
+              <tr><td>Raw Labor Hours</td><td></td><td id="bd-raw-hrs">—</td></tr>
+              <tr><td>Complexity Multiplier</td><td></td><td id="bd-complexity">—</td></tr>
+              <tr><td>Technician Multiplier</td><td></td><td id="bd-tech">—</td></tr>
+              <tr><td>Calibration Factor</td><td></td><td id="bd-calib">—</td></tr>
+              <tr><td>Total Billable Hours</td><td></td><td id="bd-total-hrs">—</td></tr>
+              <tr><td>Labor Rate</td><td></td><td id="bd-rate">—</td></tr>
+              <tr><td>Labor Cost</td><td></td><td id="bd-labor-cost">—</td></tr>
+              <tr class="sub-header"><td colspan="3">MATERIALS</td></tr>
+              <tr><td>Material (raw)</td><td></td><td id="bd-mat-raw">—</td></tr>
+              <tr><td>Wire Cost</td><td></td><td id="bd-wire-cost">—</td></tr>
+              <tr><td>Heat Shrink Labels</td><td></td><td id="bd-labels">—</td></tr>
+              <tr><td>Material (w/ margin)</td><td></td><td id="bd-mat-margin">—</td></tr>
+              <tr class="sub-header"><td colspan="3">OVERHEAD &amp; FEES</td></tr>
+              <tr><td>Overhead (12%)</td><td></td><td id="bd-overhead">—</td></tr>
+              <tr><td>Expedite Surcharge</td><td></td><td id="bd-expedite">—</td></tr>
+              <tr class="total-row"><td colspan="2">TOTAL QUOTED PRICE</td><td id="bd-total">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="results-actions">
+          <button class="action-btn action-btn-primary" onclick="openQuoteView()">📄 View & Download Quote PDF</button>
+          <button class="action-btn action-btn-secondary" onclick="saveBid()">💾 Save Bid</button>
+          <button class="action-btn action-btn-secondary" onclick="exportBomPDF()">📦 Export BOM PDF</button>
+          <button class="action-btn action-btn-secondary" onclick="exportBomExcel()">📊 Export BOM Excel</button>
+        </div>
+      </div>
+
+    </div><!-- /page-new-bid -->
+
+    <!-- ============ BID HISTORY PAGE ============ -->
+    <div class="page-view" id="page-history">
+      <div class="section-panel bid-history-section">
+        <div class="history-header">
+          <span>📋 BID HISTORY — ALL SAVED QUOTES</span>
+          <button class="refresh-btn" onclick="loadHistory()">↺ Refresh</button>
+        </div>
+        <div class="history-table-wrap">
+          <table class="history-table" id="history-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Project</th>
+                <th>Complexity</th>
+                <th>Tech Level</th>
+                <th>Hours</th>
+                <th>Total Price</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody">
+              <tr><td colspan="8" style="text-align:center;padding:24px;color:#999;">Loading bid history...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div><!-- /page-history -->
+
+  </div><!-- /main-container -->
+</div><!-- /app-wrapper -->
+
+<!-- ============ QUOTE PRINT VIEW ============ -->
+<div id="quote-print-view">
+  <button class="close-quote-btn" onclick="closeQuoteView()">✕</button>
+  <div class="quote-doc" id="quote-doc-content">
+    <div class="internal-stamp">⚠ Internal Document Only — Not for Customer Distribution</div>
+
+    <div class="quote-doc-header">
+      <div class="quote-doc-company">
+        <h1>AAE AUTOMATION, INC.</h1>
+        <p>8528 SW 2nd Street</p>
+        <p>Oklahoma City, Oklahoma 73128</p>
+        <p>📞 405-210-1567 · mfellers@aaeok.com</p>
+        <p>www.aaeok.com</p>
+      </div>
+      <div class="quote-doc-meta">
+        <div class="quote-title">Quote</div>
+        <table class="quote-meta-table">
+          <thead><tr><td>Expires</td><td>Date</td><td>Quote #</td></tr></thead>
+          <tbody><tr>
+            <td id="qm-expires">—</td>
+            <td id="qm-date">—</td>
+            <td id="qm-num">—</td>
+          </tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="quote-address-row">
+      <div class="quote-address-box">
+        <div class="addr-header">Name / Address</div>
+        <div class="addr-body" id="qa-billto">—</div>
+      </div>
+      <div class="quote-address-box">
+        <div class="addr-header">Ship To</div>
+        <div class="addr-body" id="qa-shipto">—</div>
+      </div>
+    </div>
+
+    <table class="quote-line-table">
+      <thead>
+        <tr>
+          <th style="width:150px;">Item</th>
+          <th>Description</th>
+          <th style="width:50px;">Qty</th>
+          <th style="width:60px;">U/M</th>
+          <th style="width:90px;">Cost</th>
+          <th style="width:90px;">Total</th>
+        </tr>
+      </thead>
+      <tbody id="quote-line-items"></tbody>
+    </table>
+
+    <div class="quote-total-row">
+      <div class="quote-total-box">
+        <div class="tot-label">TOTAL</div>
+        <div class="tot-value" id="qt-total">$0.00</div>
+      </div>
+    </div>
+
+    <div class="quote-footer-row">
+      <div class="warranty-badge">
+        36 MONTH WARRANTY<br>ON ALL ROCKWELL<br>AUTOMATION<br>STANDARD PRODUCTS
+      </div>
+      <div class="quote-logos">
+        <img src="/static/aae_logo.jpg" class="quote-aae-logo" alt="AAE Automation"
+          onerror="this.style.display='none'">
+        <img src="data:image/png;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCANHB9ADASIAAhEBAxEB/8QAHAABAAEFAQEAAAAAAAAAAAAAAAcBAgMFBgQI/8QASxABAAEDAgEGBg0LBAIBBQAAAAECAwQFEQYHEiExQWETIlFxc4EUFhcyNlJTcpGTsbLRIzQ1QkNVkpShweEVYsLSJGODRVSC4vD/xAAcAQEAAQUBAQAAAAAAAAAAAAAAAgEDBAYHBQj/xABBEQEAAQIDBAYGCAYBBAMBAAAAAQIDBAURBiExURITQXGR0SJhgaGxwRQVFjIzUlPhIzVCcoLwFzaSouImNGLx/9oADAMBAAIRAxEAPwD4yAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP/9k=" class="quote-rockwell-logo" alt="Rockwell Gold OEM Partner">
+      </div>
+    </div>
+
+    <button class="quote-print-btn" onclick="window.print()">🖨 Print / Save as PDF</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  AAE AUTOMATION PANEL ESTIMATOR v2.0
+//  All logic: login, calculations, BOM export, history
+// ============================================================
+
+// ── USERS / AUTH ──────────────────────────────────────────
+const USERS = [
+  { username: "admin",     password: "aae2025",  role: "admin",     display: "Admin" },
+  { username: "estimator", password: "panel123", role: "estimator", display: "Estimator" },
+  { username: "mfellers",  password: "aae2025",  role: "admin",     display: "M. Fellers" }
+];
+
+let currentUser = null;
+
+function doLogin() {
+  const u = document.getElementById("login-user").value.trim().toLowerCase();
+  const p = document.getElementById("login-pass").value;
+  const user = USERS.find(x => x.username === u && x.password === p);
+  if (user) {
+    currentUser = user;
+    document.getElementById("login-page").classList.remove("active");
+    document.getElementById("app-wrapper").classList.add("active");
+    document.getElementById("user-display").textContent = user.display;
+    document.getElementById("estimator").value = user.display + " — AAE Automation";
+    loadHistory();
+    loadCalibration();
+  } else {
+    document.getElementById("login-error").style.display = "block";
+  }
+}
+
+// Allow Enter key on login
+document.addEventListener("DOMContentLoaded", () => {
+  ["login-user","login-pass"].forEach(id => {
+    document.getElementById(id).addEventListener("keydown", e => {
+      if (e.key === "Enter") doLogin();
+    });
+  });
+});
+
+function doLogout() {
+  currentUser = null;
+  document.getElementById("app-wrapper").classList.remove("active");
+  document.getElementById("login-page").classList.add("active");
+  document.getElementById("login-pass").value = "";
+  document.getElementById("login-error").style.display = "none";
+}
+
+// ── NAVIGATION ────────────────────────────────────────────
+function showPage(page) {
+  document.querySelectorAll(".page-view").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".nav-btn").forEach(el => el.classList.remove("active"));
+  document.getElementById("page-" + page).classList.add("active");
+  if (page === "new-bid") document.getElementById("nav-new").classList.add("active");
+  if (page === "history") {
+    document.getElementById("nav-history").classList.add("active");
+    loadHistory();
+  }
+}
+
+// ── MARKUP / MARGIN ───────────────────────────────────────
+let currentMarkupType = "margin";
+let currentMarkupValue = 0.25;
+
+function setMarkup(type, val, el) {
+  document.querySelectorAll(".markup-pill").forEach(p => p.classList.remove("active"));
+  el.classList.add("active");
+  const customRow = document.getElementById("custom-markup-row");
+  if (type === "custom") {
+    customRow.style.display = "flex";
+    document.getElementById("markup-hint").textContent = "Enter custom % and type above";
+  } else {
+    customRow.style.display = "none";
+    currentMarkupType = type;
+    currentMarkupValue = val;
+    updateMarkupHint();
+  }
+}
+
+document.addEventListener("input", e => {
+  if (e.target.id === "custom-markup-val" || e.target.id === "custom-markup-type") {
+    const v = parseFloat(document.getElementById("custom-markup-val").value) / 100;
+    const t = document.getElementById("custom-markup-type").value;
+    if (!isNaN(v) && v > 0) {
+      currentMarkupType = t;
+      currentMarkupValue = v;
+      updateMarkupHint();
+    }
+  }
+});
+
+function updateMarkupHint() {
+  const pct = (currentMarkupValue * 100).toFixed(0);
+  const hint = document.getElementById("markup-hint");
+  if (currentMarkupType === "margin") {
+    const divisor = (1 - currentMarkupValue).toFixed(2);
+    hint.textContent = `Current: Profit margin ${pct}% — divides raw material cost by ${divisor}`;
+  } else {
+    hint.textContent = `Current: Markup ${pct}% — multiplies raw material cost by ${(1 + currentMarkupValue).toFixed(2)}`;
+  }
+}
+
+function applyMarkup(rawCost) {
+  if (currentMarkupType === "margin") {
+    return rawCost / (1 - currentMarkupValue);
+  } else {
+    return rawCost * (1 + currentMarkupValue);
+  }
+}
+
+// ── LABOR CALIBRATION ─────────────────────────────────────
+let calibrationData = [];
+let calibrationFactor = 1.0;
+
+function loadCalibration() {
+  const stored = localStorage.getItem("aae_calibration");
+  if (stored) {
+    calibrationData = JSON.parse(stored);
+    recalcCalibrationFactor();
+    renderCalibHistory();
+  }
+}
+
+function logCalibration() {
+  const desc = document.getElementById("calib-desc").value.trim();
+  const actual = parseFloat(document.getElementById("calib-actual").value);
+  if (!desc || isNaN(actual) || actual <= 0) {
+    alert("Please enter a panel description and actual hours.");
+    return;
+  }
+  // Get the current estimate's raw hours for comparison
+  const estHours = parseFloat(document.getElementById("r-hours").textContent) || null;
+  calibrationData.push({ desc, actual, estimated: estHours, date: new Date().toLocaleDateString() });
+  localStorage.setItem("aae_calibration", JSON.stringify(calibrationData));
+  recalcCalibrationFactor();
+  renderCalibHistory();
+  document.getElementById("calib-desc").value = "";
+  document.getElementById("calib-actual").value = "";
+  alert(`Logged: ${desc} — ${actual} actual hours. Calibration factor updated.`);
+}
+
+function recalcCalibrationFactor() {
+  const pairs = calibrationData.filter(d => d.estimated && d.estimated > 0);
+  if (pairs.length === 0) {
+    calibrationFactor = 1.0;
+    document.getElementById("calib-factor-display").innerHTML =
+      `Calibration factor: <strong>1.00×</strong> (no paired data yet)`;
+    return;
+  }
+  // Average of actual/estimated ratios
+  const sum = pairs.reduce((s, d) => s + (d.actual / d.estimated), 0);
+  calibrationFactor = sum / pairs.length;
+  const pct = ((calibrationFactor - 1) * 100).toFixed(1);
+  const sign = calibrationFactor < 1 ? "" : "+";
+  document.getElementById("calib-factor-display").innerHTML =
+    `Calibration factor: <strong>${calibrationFactor.toFixed(3)}×</strong> ` +
+    `(${sign}${pct}% adjustment applied to estimates) · Based on ${pairs.length} paired job(s)`;
+}
+
+function renderCalibHistory() {
+  const el = document.getElementById("calib-history");
+  if (calibrationData.length === 0) { el.innerHTML = ""; return; }
+  const last5 = calibrationData.slice(-5).reverse();
+  el.innerHTML = "<strong>Recent logs:</strong> " +
+    last5.map(d => `${d.date}: <em>${d.desc}</em> — ${d.actual} actual hrs${d.estimated ? ` vs ${d.estimated.toFixed(1)} estimated` : ""}`).join(" · ");
+}
+
+// ── WIRE PRICING TABLE (Note e) ───────────────────────────
+const WIRE_PRICES = {
+  "0.40": 0.40, "0.65": 0.65, "1.10": 1.10, "1.75": 1.75,
+  "3.00": 3.00, "3.50": 3.50, "5.25": 5.25, "5.50": 5.50,
+  "6.36": 6.36, "7.50": 7.50, "13.00": 13.00
+};
+const HEAT_SHRINK_COST_PER_LABEL = 275 / 850; // $275/roll, 850 usable labels
+
+// ── COMPONENT HOUR TABLE ──────────────────────────────────
+const COMPONENT_HOURS = {
+  enclosures: 1.5, dinRail: 0.25, wireDuct: 0.30, encAcc: 0.10,
+  mainAmp: 0.80, bb1p: 0.20, bb2p: 0.30, bb3p: 0.40,
+  fusedDisc: 0.60, cpt: 2.5, pdb: 0.25,
+  contSm: 0.75, contLg: 1.25, overload: 0.40,
+  vfdSm: 2.0, vfdMd: 3.0, vfdLg: 5.0,
+  ssSm: 1.5, ssLg: 2.5,
+  relayIc: 0.25, relayDin: 0.30, ssr: 0.35,
+  timers: 0.30, pilots: 0.15, selectors: 0.20, pushbtns: 0.15, estops: 0.30,
+  plc: 4.0, di: 0.10, do_: 0.12, ai: 0.20, ao: 0.25,
+  hmi: 3.0, safety: 2.5, ethSwitch: 1.0, ethCables: 0.20,
+  tbStd: 0.10, tbGnd: 0.12, tbFused: 0.18, tbDisc: 0.20,
+  termMarkers: 0.02, ferrules: 0.05
+};
+
+const COMPONENT_COSTS = {
+  enclosures: 450, dinRail: 12, wireDuct: 18, encAcc: 15,
+  mainAmp: 180, bb1p: 25, bb2p: 45, bb3p: 65,
+  fusedDisc: 85, cpt: 220, pdb: 28,
+  contSm: 65, contLg: 140, overload: 45,
+  vfdSm: 380, vfdMd: 680, vfdLg: 1400,
+  ssSm: 280, ssLg: 520,
+  relayIc: 18, relayDin: 28, ssr: 45,
+  timers: 55, pilots: 22, selectors: 28, pushbtns: 22, estops: 48,
+  plc: 600, di: 8, do_: 10, ai: 18, ao: 22,
+  hmi: 800, safety: 450, ethSwitch: 180, ethCables: 12,
+  tbStd: 3.50, tbGnd: 4.20, tbFused: 8.50, tbDisc: 9.80
+};
+
+// ── CALCULATE BID ─────────────────────────────────────────
+let lastBidData = null;
+
+function gv(id) { return parseFloat(document.getElementById(id).value) || 0; }
+function grv(name) { const el = document.querySelector(`input[name=${name}]:checked`); return el ? parseFloat(el.value) : 0; }
+
+function calculateBid() {
+  const quantities = {
+    enclosures: gv("q-enclosures"), dinRail: gv("q-din-rail"), wireDuct: gv("q-wire-duct"), encAcc: gv("q-enc-acc"),
+    mainAmp: gv("q-main-amp") > 0 ? 1 : 0, bb1p: gv("q-bb-1p"), bb2p: gv("q-bb-2p"), bb3p: gv("q-bb-3p"),
+    fusedDisc: gv("q-fused-disc"), cpt: grv("cpt"), pdb: gv("q-pdb"),
+    contSm: gv("q-cont-sm"), contLg: gv("q-cont-lg"), overload: gv("q-overload"),
+    vfdSm: gv("q-vfd-sm"), vfdMd: gv("q-vfd-md"), vfdLg: gv("q-vfd-lg"),
+    ssSm: gv("q-ss-sm"), ssLg: gv("q-ss-lg"),
+    relayIc: gv("q-relay-ic"), relayDin: gv("q-relay-din"), ssr: gv("q-ssr"),
+    timers: gv("q-timers"), pilots: gv("q-pilots"), selectors: gv("q-selectors"),
+    pushbtns: gv("q-pushbtns"), estops: gv("q-estops"),
+    plc: grv("plc"), di: gv("q-di"), do_: gv("q-do"), ai: gv("q-ai"), ao: gv("q-ao"),
+    hmi: grv("hmi"), safety: grv("safety"), ethSwitch: grv("eth"), ethCables: gv("q-eth-cables"),
+    tbStd: gv("q-tb-std"), tbGnd: gv("q-tb-gnd"), tbFused: gv("q-tb-fused"), tbDisc: gv("q-tb-disc"),
+    termMarkers: grv("tm") ? gv("q-tb-std") + gv("q-tb-gnd") : 0,
+    ferrules: grv("ferrule") ? gv("q-wire-count") : 0
+  };
+
+  // Raw labor hours
+  let rawHours = 0;
+  for (const [key, qty] of Object.entries(quantities)) {
+    if (COMPONENT_HOURS[key]) rawHours += qty * COMPONENT_HOURS[key];
+  }
+  rawHours += gv("q-eng-hrs") + gv("q-prog-hrs") + gv("q-fat-hrs");
+
+  // UL listing and witness test add hours
+  if (document.querySelector("input[name=ul]:checked")?.value === "yes") rawHours += 4;
+  if (document.querySelector("input[name=witness]:checked")?.value === "yes") rawHours += 8;
+
+  const complexMult = parseFloat(document.getElementById("complexity").value);
+  const techMult = parseFloat(document.getElementById("tech-level").value);
+  const billableHours = rawHours * complexMult * techMult * calibrationFactor;
+  const laborRate = gv("labor-rate") || 95;
+  const laborCost = billableHours * laborRate;
+
+  // Wire cost (Note e: per-foot pricing)
+  const wireCount = gv("q-wire-count");
+  const wireLen = gv("q-wire-len") || 18;
+  const wireGaugeRate = parseFloat(document.getElementById("q-wire-gauge").value);
+  const wireFeet = (wireCount * wireLen) / 12;
+  const wireCost = wireFeet * wireGaugeRate;
+
+  // Heat shrink labels (Note e: H075X044H1T $275/roll, 850 usable)
+  const hslOn = document.querySelector("input[name=hsl]:checked")?.value === "1";
+  const labelCount = hslOn ? wireCount * 2 : 0;
+  const labelCost = labelCount * HEAT_SHRINK_COST_PER_LABEL;
+
+  // Raw material cost
+  let rawMaterial = 0;
+  for (const [key, qty] of Object.entries(quantities)) {
+    if (COMPONENT_COSTS[key]) rawMaterial += qty * COMPONENT_COSTS[key];
+  }
+  rawMaterial += wireCost + labelCost;
+
+  // Apply markup/margin
+  const materialWithMargin = applyMarkup(rawMaterial);
+
+  // Overhead 12%
+  const subtotal = laborCost + materialWithMargin;
+  const overhead = subtotal * 0.12;
+
+  // Expedite
+  let expedite = 0;
+  if (document.querySelector("input[name=expedite]:checked")?.value === "yes") {
+    expedite = subtotal * 0.15;
+  }
+
+  const totalPrice = subtotal + overhead + expedite;
+
+  // Update UI
+  const fmt = (n) => "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  document.getElementById("r-hours").textContent = billableHours.toFixed(2) + " hrs";
+  document.getElementById("r-labor").textContent = fmt(laborCost);
+  document.getElementById("r-material").textContent = fmt(materialWithMargin);
+  document.getElementById("r-total").textContent = fmt(totalPrice);
+
+  document.getElementById("bd-raw-hrs").textContent = rawHours.toFixed(2) + " hrs";
+  document.getElementById("bd-complexity").textContent = complexMult.toFixed(2) + "×";
+  document.getElementById("bd-tech").textContent = techMult.toFixed(2) + "×";
+  document.getElementById("bd-calib").textContent = calibrationFactor.toFixed(3) + "×";
+  document.getElementById("bd-total-hrs").textContent = billableHours.toFixed(2) + " hrs";
+  document.getElementById("bd-rate").textContent = fmt(laborRate) + "/hr";
+  document.getElementById("bd-labor-cost").textContent = fmt(laborCost);
+  document.getElementById("bd-mat-raw").textContent = fmt(rawMaterial - wireCost - labelCost);
+  document.getElementById("bd-wire-cost").textContent = fmt(wireCost);
+  document.getElementById("bd-labels").textContent = hslOn ? fmt(labelCost) + ` (${labelCount} labels)` : "$0.00";
+  document.getElementById("bd-mat-margin").textContent = fmt(materialWithMargin);
+  document.getElementById("bd-overhead").textContent = fmt(overhead);
+  document.getElementById("bd-expedite").textContent = expedite > 0 ? fmt(expedite) : "—";
+  document.getElementById("bd-total").textContent = fmt(totalPrice);
+
+  document.getElementById("quote-results-panel").classList.add("visible");
+  document.getElementById("quote-results-panel").scrollIntoView({ behavior: "smooth" });
+
+  // Store for BOM/quote export
+  lastBidData = {
+    customer: document.getElementById("customer").value || "—",
+    project: document.getElementById("project").value || "—",
+    estimator: document.getElementById("estimator").value || "—",
+    date: new Date().toLocaleDateString("en-US"),
+    quoteNum: "AAE" + new Date().toLocaleDateString("en-US").replace(/\//g,""),
+    quantities, rawHours, billableHours, laborRate, laborCost,
+    rawMaterial, wireCost, labelCost, materialWithMargin,
+    overhead, expedite, totalPrice,
+    complexMult, techMult, calibrationFactor,
+    wireCount, wireLen, wireFeet, wireGaugeRate,
+    labelCount, hslOn
+  };
+}
+
+// ── BOM GENERATION ────────────────────────────────────────
+function generateBomRows() {
+  if (!lastBidData) { alert("Please calculate a bid first."); return null; }
+  const d = lastBidData;
+  const q = d.quantities;
+  const fmt2 = n => parseFloat(n.toFixed(2));
+  const rows = [];
+  const add = (cat, item, desc, qty, unit, unitCost) => {
+    if (qty <= 0) return;
+    const totalCost = fmt2(qty * unitCost);
+    const withMargin = fmt2(applyMarkup(totalCost));
+    rows.push({ Category: cat, "Item / Part #": item, Description: desc, Qty: qty, Unit: unit, "Unit Cost": unitCost, "Total Cost": totalCost, "Cost w/ Margin": withMargin });
+  };
+  // Enclosure
+  add("Enclosure", "ENCLOSURE", "Panel Enclosure", q.enclosures, "ea", COMPONENT_COSTS.enclosures);
+  add("Enclosure", "DIN-RAIL", "DIN Rail Run", q.dinRail, "ea", COMPONENT_COSTS.dinRail);
+  add("Enclosure", "WIRE-DUCT", "Wire Duct Run", q.wireDuct, "ea", COMPONENT_COSTS.wireDuct);
+  add("Enclosure", "ENC-ACC", "Enclosure Accessory", q.encAcc, "ea", COMPONENT_COSTS.encAcc);
+  // Power
+  add("Power", "MAIN-DISC", "Main Disconnect", q.mainAmp > 0 ? 1 : 0, "ea", COMPONENT_COSTS.mainAmp);
+  add("Power", "BREAKER-1P", "1P Branch Breaker", q.bb1p, "ea", COMPONENT_COSTS.bb1p);
+  add("Power", "BREAKER-2P", "2P Branch Breaker", q.bb2p, "ea", COMPONENT_COSTS.bb2p);
+  add("Power", "BREAKER-3P", "3P Branch Breaker", q.bb3p, "ea", COMPONENT_COSTS.bb3p);
+  add("Power", "FUSED-DISC", "Fused Disconnect", q.fusedDisc, "ea", COMPONENT_COSTS.fusedDisc);
+  add("Power", "CPT", "Control Power Transformer", q.cpt, "ea", COMPONENT_COSTS.cpt);
+  add("Power", "PWR-DIST-BLK", "Power Distribution Block", q.pdb, "ea", COMPONENT_COSTS.pdb);
+  // Motor Control
+  add("Motor Ctrl", "CONT-SM", "Contactor ≤40A", q.contSm, "ea", COMPONENT_COSTS.contSm);
+  add("Motor Ctrl", "CONT-LG", "Contactor 41-100A", q.contLg, "ea", COMPONENT_COSTS.contLg);
+  add("Motor Ctrl", "OVERLOAD", "Overload Relay", q.overload, "ea", COMPONENT_COSTS.overload);
+  add("Motor Ctrl", "VFD-SM", "VFD ≤5HP", q.vfdSm, "ea", COMPONENT_COSTS.vfdSm);
+  add("Motor Ctrl", "VFD-MD", "VFD 6-25HP", q.vfdMd, "ea", COMPONENT_COSTS.vfdMd);
+  add("Motor Ctrl", "VFD-LG", "VFD 26-100HP", q.vfdLg, "ea", COMPONENT_COSTS.vfdLg);
+  add("Motor Ctrl", "SS-SM", "Soft Starter ≤50A", q.ssSm, "ea", COMPONENT_COSTS.ssSm);
+  add("Motor Ctrl", "SS-LG", "Soft Starter >50A", q.ssLg, "ea", COMPONENT_COSTS.ssLg);
+  // Control
+  add("Control", "RELAY-IC", "Ice Cube Relay", q.relayIc, "ea", COMPONENT_COSTS.relayIc);
+  add("Control", "RELAY-DIN", "DIN Mount Relay", q.relayDin, "ea", COMPONENT_COSTS.relayDin);
+  add("Control", "SSR", "Solid State Relay", q.ssr, "ea", COMPONENT_COSTS.ssr);
+  add("Control", "TIMER", "Timer Relay", q.timers, "ea", COMPONENT_COSTS.timers);
+  add("Control", "PILOT", "Pilot Light", q.pilots, "ea", COMPONENT_COSTS.pilots);
+  add("Control", "SEL-SW", "Selector Switch", q.selectors, "ea", COMPONENT_COSTS.selectors);
+  add("Control", "PUSH-BTN", "Push Button", q.pushbtns, "ea", COMPONENT_COSTS.pushbtns);
+  add("Control", "E-STOP", "E-Stop", q.estops, "ea", COMPONENT_COSTS.estops);
+  // PLC
+  if (q.plc) add("PLC", "PLC-CTRL", "PLC Controller", 1, "ea", COMPONENT_COSTS.plc);
+  add("PLC", "DI-CARD", "Digital Input", q.di, "pt", COMPONENT_COSTS.di);
+  add("PLC", "DO-CARD", "Digital Output", q.do_, "pt", COMPONENT_COSTS.do_);
+  add("PLC", "AI-CARD", "Analog Input", q.ai, "pt", COMPONENT_COSTS.ai);
+  add("PLC", "AO-CARD", "Analog Output", q.ao, "pt", COMPONENT_COSTS.ao);
+  if (q.hmi) add("PLC", "HMI", "HMI Display", 1, "ea", COMPONENT_COSTS.hmi);
+  if (q.safety) add("PLC", "SAFETY-CTRL", "Safety Relay/Controller", 1, "ea", COMPONENT_COSTS.safety);
+  if (q.ethSwitch) add("PLC", "ETH-SW", "Ethernet Switch", 1, "ea", COMPONENT_COSTS.ethSwitch);
+  add("PLC", "ETH-CABLE", "Internal Ethernet Cable", q.ethCables, "ea", COMPONENT_COSTS.ethCables);
+  // Terminals
+  add("Terminals", "TB-STD", "Standard Terminal Block", q.tbStd, "ea", COMPONENT_COSTS.tbStd);
+  add("Terminals", "TB-GND", "Ground Terminal Block", q.tbGnd, "ea", COMPONENT_COSTS.tbGnd);
+  add("Terminals", "TB-FUSED", "Fused Terminal Block", q.tbFused, "ea", COMPONENT_COSTS.tbFused);
+  add("Terminals", "TB-DISC", "Disconnect Terminal Block", q.tbDisc, "ea", COMPONENT_COSTS.tbDisc);
+  // Wire
+  if (d.wireCount > 0) {
+    add("Wiring", "WIRE", `Wire (${d.wireFeet.toFixed(0)} ft @ $${d.wireGaugeRate}/ft)`, Math.ceil(d.wireFeet), "ft", d.wireGaugeRate);
+  }
+  // Labels
+  if (d.hslOn && d.labelCount > 0) {
+    const rolls = Math.ceil(d.labelCount / 850);
+    add("Wiring", "H075X044H1T", `Heat Shrink Labels — ${d.labelCount} pcs (${rolls} roll${rolls>1?"s":""})`, rolls, "roll", 275);
+  }
+  return rows;
+}
+
+// ── BOM PDF EXPORT ────────────────────────────────────────
+function exportBomPDF() {
+  const rows = generateBomRows();
+  if (!rows) return;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "letter" });
+  const pageW = 279;
+  const margin = 14;
+
+  // Header
+  doc.setFillColor(155, 27, 27);
+  doc.rect(0, 0, pageW, 20, "F");
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(16); doc.setFont("helvetica","bold");
+  doc.text("AAE AUTOMATION, INC.", margin, 13);
+  doc.setFontSize(10); doc.setFont("helvetica","normal");
+  doc.text("BILL OF MATERIALS", pageW - margin, 13, { align: "right" });
+
+  // Subheader
+  doc.setTextColor(100,100,100); doc.setFontSize(9);
+  doc.text(`Customer: ${lastBidData?.customer || "—"}   Project: ${lastBidData?.project || "—"}   Date: ${new Date().toLocaleDateString()}`, margin, 26);
+  doc.text("⚠ INTERNAL DOCUMENT ONLY", pageW - margin, 26, { align: "right" });
+
+  // Table headers
+  const cols = ["Category","Item / Part #","Description","Qty","Unit","Unit Cost","Total Cost","Cost w/ Margin"];
+  const colWidths = [28, 32, 72, 14, 14, 24, 24, 28];
+  let x = margin, y = 34;
+  doc.setFillColor(50,50,50); doc.rect(margin, y-5, pageW - margin*2, 7, "F");
+  doc.setTextColor(255,255,255); doc.setFontSize(8); doc.setFont("helvetica","bold");
+  cols.forEach((c, i) => { doc.text(c, x+1, y); x += colWidths[i]; });
+  y += 4;
+
+  // Table rows
+  doc.setFont("helvetica","normal"); doc.setFontSize(8);
+  let lastCat = "";
+  rows.forEach((row, i) => {
+    if (y > 185) { doc.addPage(); y = 20; }
+    if (row.Category !== lastCat) {
+      lastCat = row.Category;
+      doc.setFillColor(240,235,230);
+      doc.rect(margin, y-3, pageW - margin*2, 5.5, "F");
+      doc.setTextColor(155,27,27); doc.setFont("helvetica","bold"); doc.setFontSize(7.5);
+      doc.text(row.Category.toUpperCase(), margin+1, y+1);
+      y += 6; doc.setFont("helvetica","normal"); doc.setFontSize(8);
+    }
+    if (i % 2 === 0) { doc.setFillColor(251,249,247); doc.rect(margin, y-3, pageW-margin*2, 5.5, "F"); }
+    doc.setTextColor(50,50,50);
+    x = margin;
+    [row["Item / Part #"], row.Description,
+     String(row.Qty), row.Unit,
+     "$"+row["Unit Cost"].toFixed(2), "$"+row["Total Cost"].toFixed(2), "$"+row["Cost w/ Margin"].toFixed(2)
+    ].forEach((val, ci) => {
+      if (ci === 0) { x += colWidths[0]; } // skip category col since it's grouped
+      doc.text(String(val), x+1, y+1, { maxWidth: colWidths[ci+1]-2 });
+      x += colWidths[ci+1];
+    });
+    y += 5.5;
+  });
+
+  // Total
+  y += 4;
+  doc.setFillColor(155,27,27); doc.rect(margin, y-3, pageW-margin*2, 7, "F");
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  const totalRaw = rows.reduce((s,r) => s + r["Total Cost"], 0);
+  const totalMargin = rows.reduce((s,r) => s + r["Cost w/ Margin"], 0);
+  doc.text("TOTAL MATERIAL COST:", pageW - margin - 60, y+1);
+  doc.text(`$${totalRaw.toFixed(2)} raw · $${totalMargin.toFixed(2)} w/ margin`, pageW - margin, y+1, { align: "right" });
+
+  doc.save(`BOM_${lastBidData?.project || "quote"}_${new Date().toLocaleDateString("en-US").replace(/\//g,"-")}.pdf`);
+}
+
+// ── BOM EXCEL EXPORT ──────────────────────────────────────
+function exportBomExcel() {
+  const rows = generateBomRows();
+  if (!rows) return;
+  const ws_data = [
+    ["AAE AUTOMATION, INC. — BILL OF MATERIALS"],
+    ["Customer:", lastBidData?.customer || "", "Project:", lastBidData?.project || "", "Date:", new Date().toLocaleDateString()],
+    ["*** INTERNAL DOCUMENT ONLY ***"],
+    [],
+    ["Category","Item / Part #","Description","Qty","Unit","Unit Cost","Total Cost","Cost w/ Margin"]
+  ];
+  rows.forEach(r => ws_data.push([r.Category, r["Item / Part #"], r.Description, r.Qty, r.Unit, r["Unit Cost"], r["Total Cost"], r["Cost w/ Margin"]]));
+  ws_data.push([]);
+  const totalRaw = rows.reduce((s,r) => s + r["Total Cost"], 0);
+  const totalMargin = rows.reduce((s,r) => s + r["Cost w/ Margin"], 0);
+  ws_data.push(["","","","","","TOTAL RAW COST:", totalRaw.toFixed(2)]);
+  ws_data.push(["","","","","","TOTAL W/ MARGIN:", totalMargin.toFixed(2)]);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  ws["!cols"] = [{wch:16},{wch:18},{wch:40},{wch:8},{wch:8},{wch:12},{wch:12},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, ws, "BOM");
+
+  // Labor Summary sheet
+  if (lastBidData) {
+    const d = lastBidData;
+    const ls = [
+      ["LABOR SUMMARY"],
+      ["Raw Hours", d.rawHours.toFixed(2)],
+      ["Complexity Mult", d.complexMult],
+      ["Tech Mult", d.techMult],
+      ["Calibration Factor", d.calibrationFactor.toFixed(3)],
+      ["Billable Hours", d.billableHours.toFixed(2)],
+      ["Labor Rate", "$"+d.laborRate+"/hr"],
+      ["Labor Cost", "$"+d.laborCost.toFixed(2)],
+      ["Material Raw", "$"+d.rawMaterial.toFixed(2)],
+      ["Material w/ Margin", "$"+d.materialWithMargin.toFixed(2)],
+      ["Overhead (12%)", "$"+d.overhead.toFixed(2)],
+      ["Expedite", d.expedite > 0 ? "$"+d.expedite.toFixed(2) : "—"],
+      ["TOTAL PRICE", "$"+d.totalPrice.toFixed(2)]
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(ls);
+    ws2["!cols"] = [{wch:20},{wch:16}];
+    XLSX.utils.book_append_sheet(wb, ws2, "Labor Summary");
+  }
+
+  XLSX.writeFile(wb, `BOM_${lastBidData?.project || "quote"}_${new Date().toLocaleDateString("en-US").replace(/\//g,"-")}.xlsx`);
+}
+
+// ── QUOTE VIEW ────────────────────────────────────────────
+function openQuoteView() {
+  if (!lastBidData) { alert("Calculate a bid first."); return; }
+  const d = lastBidData;
+  const fmt = n => "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const today = new Date();
+  const expires = new Date(today); expires.setDate(expires.getDate() + 30);
+  const fmtDate = dt => dt.toLocaleDateString("en-US", {month:"2-digit",day:"2-digit",year:"numeric"});
+
+  document.getElementById("qm-date").textContent = fmtDate(today);
+  document.getElementById("qm-expires").textContent = fmtDate(expires);
+  document.getElementById("qm-num").textContent = "AAE" + today.toLocaleDateString("en-US").replace(/\//g,"") + "-1";
+  document.getElementById("qa-billto").innerHTML = `<strong>${d.customer}</strong>`;
+  document.getElementById("qa-shipto").innerHTML = `<strong>${d.customer}</strong>`;
+  document.getElementById("quote-line-items").innerHTML = `
+    <tr>
+      <td><strong>${d.project}</strong></td>
+      <td>${d.project} — Custom Control Panel · ${d.billableHours.toFixed(1)} labor hrs</td>
+      <td style="text-align:center;">1</td>
+      <td style="text-align:center;">ea</td>
+      <td style="text-align:right;">${fmt(d.totalPrice)}</td>
+      <td style="text-align:right;">${fmt(d.totalPrice)}</td>
+    </tr>`;
+  document.getElementById("qt-total").textContent = fmt(d.totalPrice);
+  document.getElementById("quote-print-view").classList.add("open");
+}
+function closeQuoteView() { document.getElementById("quote-print-view").classList.remove("open"); }
+
+// ── SAVE & HISTORY ────────────────────────────────────────
+function saveBid() {
+  if (!lastBidData) { alert("Calculate a bid first."); return; }
+  const d = lastBidData;
+  const complexLabel = document.getElementById("complexity").options[document.getElementById("complexity").selectedIndex].text.split(" — ")[0].replace("PLC","").trim();
+  const techLabel = document.getElementById("tech-level").options[document.getElementById("tech-level").selectedIndex].text.split(" — ")[0];
+  const bids = JSON.parse(localStorage.getItem("aae_bids") || "[]");
+  bids.unshift({
+    id: Date.now(),
+    date: new Date().toLocaleDateString("en-US"),
+    customer: d.customer, project: d.project,
+    complexity: complexLabel, techLevel: techLabel,
+    hours: d.billableHours.toFixed(1), totalPrice: d.totalPrice.toFixed(2),
+    bidData: d
+  });
+  localStorage.setItem("aae_bids", JSON.stringify(bids));
+  alert("Bid saved to history!");
+  loadHistory();
+}
+
+function loadHistory() {
+  const bids = JSON.parse(localStorage.getItem("aae_bids") || "[]");
+  const tbody = document.getElementById("history-tbody");
+  if (bids.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:32px;color:#999;">No saved bids yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = bids.map(b => `
+    <tr>
+      <td>${b.date}</td>
+      <td><strong>${b.customer}</strong></td>
+      <td>${b.project}</td>
+      <td><span class="badge badge-standard">${b.complexity}</span></td>
+      <td><span class="badge badge-journeyman">${b.techLevel}</span></td>
+      <td>${b.hours} hrs</td>
+      <td class="price-cell">$${parseFloat(b.totalPrice).toLocaleString("en-US",{minimumFractionDigits:2})}</td>
+      <td style="white-space:nowrap;display:flex;gap:6px;">
+        <button class="history-action-btn hab-view" onclick="viewHistoryBid(${b.id})">👁 View</button>
+        <button class="history-action-btn hab-pdf" onclick="downloadHistoryQuote(${b.id})">📄 PDF</button>
+        <button class="history-action-btn hab-bom" onclick="downloadHistoryBOM(${b.id})">📦 BOM</button>
+      </td>
+    </tr>`).join("");
+}
+
+function viewHistoryBid(id) {
+  const bids = JSON.parse(localStorage.getItem("aae_bids") || "[]");
+  const bid = bids.find(b => b.id === id);
+  if (!bid) return;
+  lastBidData = bid.bidData;
+  openQuoteView();
+}
+
+function downloadHistoryQuote(id) {
+  const bids = JSON.parse(localStorage.getItem("aae_bids") || "[]");
+  const bid = bids.find(b => b.id === id);
+  if (!bid) return;
+  lastBidData = bid.bidData;
+  openQuoteView();
+  setTimeout(() => window.print(), 300);
+}
+
+function downloadHistoryBOM(id) {
+  const bids = JSON.parse(localStorage.getItem("aae_bids") || "[]");
+  const bid = bids.find(b => b.id === id);
+  if (!bid) return;
+  lastBidData = bid.bidData;
+  exportBomExcel();
+}
+
+// ── FILE UPLOAD (placeholder - needs backend) ─────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById("upload-zone").classList.remove("drag-over");
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+}
+function handleFile(file) {
+  if (!file || file.type !== "application/pdf") { alert("Please upload a PDF file."); return; }
+  const status = document.getElementById("upload-status");
+  status.className = "upload-status processing";
+  status.textContent = "⚙ Analyzing drawing set — classifying pages...";
+  // Simulate AI processing (replace with actual API call to backend)
+  setTimeout(() => {
+    status.className = "upload-status success";
+    status.textContent = `✓ Drawing "${file.name}" analyzed. Review auto-filled quantities in Step 3.`;
+  }, 2000);
+}
+
+// ── CLEAR FORM ────────────────────────────────────────────
+function clearForm() {
+  if (!confirm("Clear all form data?")) return;
+  document.querySelectorAll("input[type=number]").forEach(el => { el.value = el.id === "q-wire-len" ? "18" : "0"; });
+  document.querySelectorAll("input[type=text]").forEach(el => { el.value = ""; });
+  document.querySelectorAll("input[type=radio]").forEach(el => { el.checked = el.defaultChecked; });
+  document.getElementById("quote-results-panel").classList.remove("visible");
+  lastBidData = null;
+}
+
+// On page load — check if logged in via session
+window.addEventListener("load", () => {
+  // Auto-fill estimator with saved user
+});
+</script>
+</body>
+</html>
