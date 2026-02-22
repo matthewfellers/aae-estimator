@@ -538,6 +538,7 @@ body {
 
 <!-- Top Nav -->
 <!-- LOGIN OVERLAY -->
+<div id="js-error-banner" style="display:none;background:#c0392b;color:white;padding:10px 20px;font-family:monospace;font-size:13px;position:fixed;top:0;left:0;right:0;z-index:9999;"></div>
 <div id="login-overlay" class="visible">
   <div class="login-card">
     <img src="/static/aae_logo.jpg" alt="AAE Automation" onerror="this.style.display='none'">
@@ -911,6 +912,9 @@ body {
     <p>Labor rates, users, and vendor management — admin access only.</p>
   </div>
 
+  <!-- ── Debug strip — shows any render error ── -->
+  <div id="adminDebug" style="display:none;background:#7B1B00;border:1px solid #FF5722;border-radius:8px;padding:12px;margin-bottom:16px;font-family:monospace;font-size:12px;color:#FFCCBC;white-space:pre-wrap"></div>
+
   <!-- ── Labor Rates ── -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
@@ -982,6 +986,13 @@ body {
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
+// Global error handler — catches any JS crash and shows it
+window.onerror = function(msg, src, line, col, err) {
+  console.error("JS ERROR:", msg, "at line", line);
+  const d = document.getElementById("js-error-banner");
+  if (d) { d.style.display="block"; d.textContent = "JS Error (line "+line+"): "+msg; }
+  return false;
+};
 let currentCalcResults = null;
 let currentBidData = null;
 let lastScanBOM = [];
@@ -1709,42 +1720,44 @@ function saveLaborRatesLocal(rates) {
 
 async function loadLaborRates() {
   const div = document.getElementById("laborRatesTable");
-  if (!div) return;
-  div.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:13px">Loading...</p>';
-
-  // Start from defaults (always have complete data including unit labels)
-  let rates = DEFAULT_LABOR_RATES.map(r => ({...r}));
-
-  // Try to pull overrides from server — merge values only (keep our descriptions/units)
+  const dbg = document.getElementById("adminDebug");
   try {
-    const res = await fetch("/api/labor_rates");
-    if (res.ok) {
-      const serverData = await res.json();
-      if (Array.isArray(serverData) && serverData.length > 0 && !serverData.error) {
-        const serverMap = {};
-        serverData.forEach(r => { serverMap[r.rate_key] = r.rate_value; });
-        rates = rates.map(r => serverMap[r.rate_key] !== undefined
-          ? {...r, rate_value: serverMap[r.rate_key]}
-          : r
-        );
-      }
-    }
-  } catch(e) { /* server unavailable — use defaults */ }
+    if (!div) throw new Error("laborRatesTable div not found in DOM");
 
-  // Also apply any locally saved overrides
-  const localSaved = localStorage.getItem("aae_labor_rates_overrides");
-  if (localSaved) {
+    div.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:13px">Loading...</p>';
+
+    // Always start from hardcoded defaults — guarantees unit/description fields
+    let rates = DEFAULT_LABOR_RATES.map(r => ({...r}));
+    if (!rates || rates.length === 0) throw new Error("DEFAULT_LABOR_RATES is empty or undefined");
+
+    // Try server overrides (non-blocking, values only)
     try {
-      const overrides = JSON.parse(localSaved);
-      rates = rates.map(r => overrides[r.rate_key] !== undefined
-        ? {...r, rate_value: overrides[r.rate_key]}
-        : r
-      );
-    } catch(e) {}
-  }
+      const res = await fetch("/api/labor_rates");
+      if (res.ok) {
+        const sd = await res.json();
+        if (Array.isArray(sd) && sd.length > 0) {
+          const sm = {};
+          sd.forEach(r => { if (r.rate_key) sm[r.rate_key] = r.rate_value; });
+          rates = rates.map(r => sm[r.rate_key] !== undefined ? {...r, rate_value: sm[r.rate_key]} : r);
+        }
+      }
+    } catch(e) { /* server offline — use defaults */ }
 
-  laborRatesCache = rates;
-  renderLaborRatesTable(laborRatesCache);
+    // Apply localStorage overrides
+    try {
+      const ov = JSON.parse(localStorage.getItem("aae_labor_rates_overrides") || "{}");
+      rates = rates.map(r => ov[r.rate_key] !== undefined ? {...r, rate_value: ov[r.rate_key]} : r);
+    } catch(e) {}
+
+    laborRatesCache = rates;
+    renderLaborRatesTable(laborRatesCache);
+    if (dbg) dbg.style.display = "none";
+
+  } catch(err) {
+    console.error("loadLaborRates ERROR:", err);
+    if (div) div.innerHTML = '<p style="color:#F4A9A8;padding:12px">Error loading labor rates: ' + err.message + '</p>';
+    if (dbg) { dbg.style.display = "block"; dbg.textContent = "loadLaborRates error: " + err.message + "\n" + err.stack; }
+  }
 }
 
 function renderLaborRatesTable(rates) {
