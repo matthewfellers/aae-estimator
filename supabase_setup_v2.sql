@@ -1,28 +1,10 @@
 -- ════════════════════════════════════════════════════════════════════
 -- AAE Automation Estimator — Supabase Schema v2
--- Run this in Supabase SQL Editor to add new tables
+-- Run this in Supabase SQL Editor
+-- NOTE: User management is handled client-side (localStorage), not in DB
 -- ════════════════════════════════════════════════════════════════════
 
--- ── Users table (replaces hardcoded JS users) ───────────────────────
-CREATE TABLE IF NOT EXISTS aae_users (
-    id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    username    text UNIQUE NOT NULL,
-    password    text NOT NULL,
-    display_name text NOT NULL,
-    role        text DEFAULT 'estimator',  -- 'admin' or 'estimator'
-    active      boolean DEFAULT true,
-    created_at  timestamptz DEFAULT now(),
-    updated_at  timestamptz DEFAULT now()
-);
 
--- Seed default users
-INSERT INTO aae_users (username, password, display_name, role) VALUES
-    ('mfellers',  'aae2025',  'M. Fellers',  'admin'),
-    ('admin',     'aae2025',  'Admin',        'admin'),
-    ('estimator', 'panel123', 'Estimator',    'estimator')
-ON CONFLICT (username) DO NOTHING;
-
--- ── Labor rates table (editable by admin) ───────────────────────────
 CREATE TABLE IF NOT EXISTS aae_labor_rates (
     id          serial PRIMARY KEY,
     rate_key    text UNIQUE NOT NULL,
@@ -143,10 +125,8 @@ INSERT INTO aae_vendors (vendor_name, manufacturer) VALUES
 ON CONFLICT (manufacturer) DO NOTHING;
 
 -- ── RLS: allow anon key full access (adjust for prod) ───────────────
-ALTER TABLE aae_users       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE aae_labor_rates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE aae_vendors     ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "allow_all_aae_users"       ON aae_users       FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all_aae_labor"       ON aae_labor_rates FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all_aae_vendors"     ON aae_vendors     FOR ALL USING (true) WITH CHECK (true);
