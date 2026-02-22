@@ -1,7 +1,10 @@
 import os, json, base64, re
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from anthropic import Anthropic
-from supabase import create_client
+try:
+    from supabase import create_client
+except Exception:
+    create_client = None
 import io
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
@@ -17,7 +20,11 @@ app = Flask(__name__)
 claude_client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 _sb_url = os.environ.get("SUPABASE_URL", "")
 _sb_key = os.environ.get("SUPABASE_ANON_KEY", "")
-supabase = create_client(_sb_url, _sb_key) if _sb_url and _sb_key else None
+try:
+    supabase = create_client(_sb_url, _sb_key) if (create_client and _sb_url and _sb_key) else None
+except Exception as e:
+    print(f"Supabase init failed (continuing without DB): {e}")
+    supabase = None
 
 # ── Labor rates (minutes per unit) ────────────────────────────────────────
 # Labor rates in MINUTES per unit — calibrated against AAE actual job history
@@ -424,10 +431,29 @@ Rules:
                 }]
             )
             raw = response.content[0].text.strip()
-            # Strip markdown if model wrapped it anyway
+            # Strip markdown code fences
             raw = re.sub(r"^```json\s*", "", raw)
+            raw = re.sub(r"^```\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
-            result = json.loads(raw)
+            raw = raw.strip()
+            # Extract just the JSON object if there's surrounding text
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if json_match:
+                raw = json_match.group(0)
+            # Fix common AI JSON mistakes: trailing commas before } or ]
+            raw = re.sub(r',\s*([}\]])', r'\1', raw)
+            try:
+                result = json.loads(raw)
+            except json.JSONDecodeError as je:
+                print(f"JSON parse error: {je} — attempting repair")
+                start = raw.find('{')
+                end = raw.rfind('}')
+                if start != -1 and end != -1:
+                    raw = raw[start:end+1]
+                    raw = re.sub(r',\s*([}\]])', r'\1', raw)
+                    result = json.loads(raw)
+                else:
+                    raise
             result["_model_used"] = model
             return result
 
