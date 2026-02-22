@@ -743,124 +743,194 @@ def bom_pdf():
 
 @app.route("/api/bom_excel", methods=["POST"])
 def bom_excel():
-    """Generate a BOM Excel file for download."""
+    """Generate post-calculation BOM Excel using the same premium format as bom_from_scan.
+    Builds BOM from calc data (includes wire + heat shrink). Uses vendor mapping.
+    """
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from collections import defaultdict
+
     data      = request.get_json()
     bid_data  = data.get("bid_data", {})
     calc_data = data.get("calc", {})
     quote_num = data.get("quote_num", f"AAE-{datetime.now().strftime('%Y%m%d')}")
+    customer  = bid_data.get("customer_name", "")
+    project   = bid_data.get("project_name", "")
 
+    # Build structured BOM items from bid + calc
+    bom_items = build_bom_items(bid_data, calc_data)
+    # Convert to scan-BOM format
+    vendor_map = get_vendor_map()
+    line_items = []
+    for i, itm in enumerate(bom_items, 1):
+        mfr    = itm.get("manufacturer", "")
+        vendor = vendor_map.get(mfr.lower(), "")
+        if not vendor:
+            for key, vname in vendor_map.items():
+                if key and (key in mfr.lower() or mfr.lower() in key):
+                    vendor = vname; break
+        line_items.append({
+            "item_num":    i,
+            "part_number": itm.get("part_num", ""),
+            "description": itm.get("description", ""),
+            "qty":         itm.get("qty", 1),
+            "unit":        itm.get("unit", "ea"),
+            "manufacturer": mfr,
+            "vendor":      vendor,
+            "aae_cost":    itm.get("unit_cost", 0.0),
+            "notes":       "",
+            "category":    itm.get("category", "Other"),
+        })
+
+    # ── Excel workbook ─────────────────────────────────────────────────────────
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "BOM"
+    ws.title = "Bill of Materials"
 
-    red_fill   = PatternFill("solid", fgColor="9B1B1B")
-    gray_fill  = PatternFill("solid", fgColor="E8E4E0")
-    white_font = Font(bold=True, color="FFFFFF", name="Calibri")
-    head_font  = Font(bold=True, name="Calibri")
-    mono_font  = Font(name="Courier New", size=10)
-    thin       = Side(style="thin", color="CCCCCC")
-    border     = Border(bottom=Side(style="thin", color="CCCCCC"))
+    RED="9B1B1B"; DARK_RED="6B0A0A"; WHITE="FFFFFF"; LIGHT_RED="FDECEA"; MID_GRAY="F5F0F0"; DARK="2C2C2C"; TEAL="00897A"
 
-    # Title rows
-    ws.merge_cells("A1:G1")
-    ws["A1"] = "AAE AUTOMATION, INC. — BILL OF MATERIALS"
-    ws["A1"].font = Font(bold=True, size=14, color="9B1B1B", name="Calibri")
-    ws.merge_cells("A2:G2")
-    ws["A2"] = f"Customer: {bid_data.get('customer_name','')}   |   Project: {bid_data.get('project_name','')}   |   Date: {datetime.now().strftime('%m/%d/%Y')}   |   Quote #: {quote_num}"
-    ws["A2"].font = Font(size=10, name="Calibri")
-    ws.merge_cells("A3:G3")
-    ws["A3"] = "*** INTERNAL DOCUMENT ONLY — Not for customer distribution ***"
-    ws["A3"].font = Font(bold=True, color="CC6600", name="Calibri")
+    def s(cell, bold=False, bg=None, fg=WHITE, sz=10, ha="left"):
+        cell.font = Font(name="Arial", bold=bold, color=fg, size=sz)
+        if bg: cell.fill = PatternFill("solid", fgColor=bg)
+        cell.alignment = Alignment(horizontal=ha, vertical="center", wrap_text=False)
+
+    thin = Side(style="thin", color="E0D0D0")
+    bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
+
+    # Column widths: A=Item, B=Part#, C=Description, D=Qty, E=Unit, F=Manufacturer, G=Vendor, H=AAE Cost, I=Notes
+    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",14),("I",20)]:
+        ws.column_dimensions[col].width = w
+
+    # Row 1: Banner
+    ws.merge_cells("A1:I1"); ws.row_dimensions[1].height = 14
+    ws["A1"] = "AAE AUTOMATION, INC.  |  UL-NNNY  |  UL-508A Certified Industrial Control Panel Specialists"
+    s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
+
+    # Row 2: Title | Quote#
+    ws.merge_cells("A2:E2"); ws.row_dimensions[2].height = 34
+    ws["A2"] = "BILL OF MATERIALS"
+    ws["A2"].font      = Font(name="Arial", bold=True, color=WHITE, size=18)
+    ws["A2"].fill      = PatternFill("solid", fgColor=DARK_RED)
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.merge_cells("F2:I2")
+    ws["F2"] = quote_num
+    s(ws["F2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
+
+    # Row 3: Customer | Project
     ws.row_dimensions[3].height = 18
+    ws.merge_cells("A3:B3"); ws["A3"] = "Customer:"
+    s(ws["A3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("C3:E3"); ws["C3"] = customer
+    s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
+    ws["F3"] = "Project:"
+    s(ws["F3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("G3:I3"); ws["G3"] = project
+    s(ws["G3"], bg=LIGHT_RED, fg=DARK, sz=10)
 
-    # Headers row 5
-    headers = ["Category", "Item / Part #", "Description", "Qty", "Unit", "Unit Cost ($)", "Total Cost ($)"]
-    for ci, h in enumerate(headers, 1):
-        cell = ws.cell(row=5, column=ci, value=h)
-        cell.fill = red_fill
-        cell.font = white_font
-        cell.alignment = Alignment(horizontal="center")
+    # Row 4: Date | Estimator
+    ws.row_dimensions[4].height = 16
+    ws.merge_cells("A4:B4"); ws["A4"] = "Date:"
+    s(ws["A4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("C4:E4"); ws["C4"] = datetime.now().strftime("%m/%d/%Y")
+    s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
+    ws["F4"] = "Estimator:"
+    s(ws["F4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("G4:I4"); ws["G4"] = bid_data.get("estimator_name", "AAE Automation")
+    s(ws["G4"], bg=MID_GRAY, fg=DARK, sz=9)
 
-    ws.column_dimensions["A"].width = 18
-    ws.column_dimensions["B"].width = 20
-    ws.column_dimensions["C"].width = 42
-    ws.column_dimensions["D"].width = 8
-    ws.column_dimensions["E"].width = 8
-    ws.column_dimensions["F"].width = 14
-    ws.column_dimensions["G"].width = 14
+    # Row 5: Internal notice
+    ws.merge_cells("A5:I5"); ws.row_dimensions[5].height = 15
+    ws["A5"] = "⚠  INTERNAL DOCUMENT ONLY — Not for Customer Distribution  ⚠"
+    s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
 
-    # Build BOM rows from calc data
-    bom_items = build_bom_items(bid_data, calc_data)
-    row = 6
-    last_cat = None
-    for item in bom_items:
-        if item["category"] != last_cat:
-            last_cat = item["category"]
-            ws.merge_cells(f"A{row}:G{row}")
-            c = ws.cell(row=row, column=1, value=item["category"].upper())
-            c.fill = PatternFill("solid", fgColor="2C2C2C")
-            c.font = Font(bold=True, color="FFFFFF", name="Calibri", size=9)
-            row += 1
-        fill = PatternFill("solid", fgColor="FAFAFA") if row % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
-        vals = [item["category"], item["part_num"], item["description"],
-                item["qty"], item["unit"], round(item["unit_cost"], 2), round(item["total_cost"], 2)]
-        for ci, v in enumerate(vals, 1):
-            c = ws.cell(row=row, column=ci, value=v)
-            c.fill = fill
-            c.font = mono_font if ci in (4, 6, 7) else Font(name="Calibri", size=10)
-            if ci in (6, 7):
-                c.number_format = '"$"#,##0.00'
-                c.alignment = Alignment(horizontal="right")
+    # Row 6: Column headers
+    ws.row_dimensions[6].height = 20
+    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","AAE COST","NOTES"], 1):
+        c = ws.cell(row=6, column=ci, value=h)
+        s(c, bold=True, bg=DARK, sz=9, ha="center")
+        c.border = Border(bottom=Side(style="medium", color=RED))
+
+    # Group by category
+    grouped = defaultdict(list)
+    cat_order = ["Enclosure","Power","Motor Ctrl","Control","PLC/Network","Terminals","Wiring","Other"]
+    for item in line_items:
+        cat = item.get("category", "Other")
+        if cat not in cat_order: cat = "Other"
+        grouped[cat].append(item)
+
+    row = 7; item_counter = 0
+    even_fill = PatternFill("solid", fgColor="FDF8F8")
+    odd_fill  = PatternFill("solid", fgColor=WHITE)
+
+    for cat in [c for c in cat_order if grouped[c]]:
+        # Section header
+        ws.merge_cells(f"A{row}:I{row}")
+        hc = ws.cell(row=row, column=1, value=f"  {cat.upper()}")
+        hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
+        hc.fill = PatternFill("solid", fgColor=RED)
+        hc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws.row_dimensions[row].height = 16
         row += 1
 
-    # Totals
-    total_raw = sum(i["total_cost"] for i in bom_items)
-    ws.cell(row=row+1, column=5, value="TOTAL RAW COST:").font = Font(bold=True, name="Calibri")
-    tc = ws.cell(row=row+1, column=7, value=round(total_raw, 2))
-    tc.font = Font(bold=True, color="9B1B1B", name="Calibri")
-    tc.number_format = '"$"#,##0.00'
+        for itm in grouped[cat]:
+            item_counter += 1
+            fill = even_fill if item_counter % 2 == 0 else odd_fill
+            ws.row_dimensions[row].height = 15
+            vals = [itm["item_num"], itm["part_number"], itm["description"],
+                    itm["qty"], itm["unit"], itm["manufacturer"],
+                    itm.get("vendor",""), itm["aae_cost"], itm["notes"]]
+            for ci, val in enumerate(vals, 1):
+                c = ws.cell(row=row, column=ci, value=val)
+                c.fill = fill; c.border = bdr
+                c.font = Font(name="Arial", size=9, color=DARK)
+                if ci in (1, 4):
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif ci == 7:  # Vendor — teal
+                    c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif ci == 8:  # AAE Cost
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                    c.number_format = '"$"#,##0.00'
+                    c.font = Font(name="Arial", size=9, color="008800")
+                else:
+                    c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
+            row += 1
+        row += 1  # spacer
 
-    # Labor summary sheet
-    ws2 = wb.create_sheet("Labor Summary")
-    labor_rows = [
-        ("Raw Labor Hours", f"{calc_data.get('raw_hours', 0):.2f} hrs"),
-        ("Complexity Multiplier", f"{calc_data.get('complexity_mult', 1.0)}×"),
-        ("Tech Multiplier", f"{calc_data.get('tech_mult', 1.0)}×"),
-        ("Calibration Factor", f"{calc_data.get('calib_factor', 1.0):.3f}×"),
-        ("Total Billable Hours", f"{calc_data.get('total_hours', 0):.2f} hrs"),
-        ("Labor Rate", f"${calc_data.get('labor_rate_used', 0):.2f}/hr"),
-        ("Labor Cost", calc_data.get("labor_cost", 0)),
-        ("Material (raw)", calc_data.get("mat_cost_raw", 0)),
-        ("Wire Cost", calc_data.get("wire_cost", 0)),
-        ("Heat Shrink Cost", calc_data.get("hs_cost", 0)),
-        ("Material w/ Margin", calc_data.get("mat_cost_markup", 0)),
-        ("Overhead (12%)", calc_data.get("overhead_cost", 0)),
-        ("Expedite", calc_data.get("expedite_cost", 0)),
-        ("TOTAL QUOTED PRICE", calc_data.get("total_price", 0)),
-    ]
-    ws2.column_dimensions["A"].width = 26
-    ws2.column_dimensions["B"].width = 18
-    for ri, (label, val) in enumerate(labor_rows, 1):
-        lc = ws2.cell(row=ri, column=1, value=label)
-        vc = ws2.cell(row=ri, column=2, value=val)
-        lc.font = Font(bold=(ri == len(labor_rows)), name="Calibri")
-        if isinstance(val, float):
-            vc.number_format = '"$"#,##0.00'
-            vc.font = Font(bold=(ri == len(labor_rows)),
-                           color=("9B1B1B" if ri == len(labor_rows) else "000000"), name="Calibri")
-        if ri == len(labor_rows):
-            lc.font = Font(bold=True, color="9B1B1B", name="Calibri")
+    # Total row
+    ws.merge_cells(f"A{row}:G{row}")
+    tl = ws.cell(row=row, column=1, value="TOTAL MATERIAL COST (AAE Cost):")
+    tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
+    tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tl.alignment = Alignment(horizontal="right", vertical="center")
+    tv = ws.cell(row=row, column=8, value=f"=SUM(H7:H{row-1})")
+    tv.font = Font(name="Arial", bold=True, color="008800", size=11)
+    tv.number_format = '"$"#,##0.00'
+    tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tv.alignment = Alignment(horizontal="right", vertical="center")
+    ws.cell(row=row, column=9).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.row_dimensions[row].height = 20
+    row += 2
+
+    # Footer
+    ws.merge_cells(f"A{row}:I{row}")
+    ft = ws.cell(row=row, column=1,
+        value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
+    ft.font = Font(name="Arial", size=8, color="888080", italic=True)
+    ft.alignment = Alignment(horizontal="center")
+
+    ws.freeze_panes = "A7"
+    ws.auto_filter.ref = f"A6:I{row-3}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
+    ws.print_title_rows = "1:6"
 
     buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
+    wb.save(buf); buf.seek(0)
     return send_file(buf,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True,
-                     download_name=f"AAE_BOM_{quote_num}.xlsx")
-
+                     download_name=f"AAE_BOM_{project.replace(' ','_') or quote_num}.xlsx")
 
 @app.route("/api/bid_quote_pdf/<int:bid_id>", methods=["GET"])
 def bid_quote_pdf(bid_id):
@@ -888,11 +958,11 @@ def bid_quote_pdf(bid_id):
 def build_bom_items(bid_data, calc_data):
     """Build a structured BOM item list from bid + calc data."""
     items = []
-    def add(cat, part, desc, qty, unit, unit_cost):
+    def add(cat, part, desc, qty, unit, unit_cost, mfr=""):
         if qty <= 0: return
         items.append({"category": cat, "part_num": part, "description": desc,
                        "qty": qty, "unit": unit, "unit_cost": unit_cost,
-                       "total_cost": qty * unit_cost})
+                       "total_cost": qty * unit_cost, "manufacturer": mfr})
 
     enc  = int(bid_data.get("enc_qty", 1))
     add("Enclosure", "ENCLOSURE", "Panel Enclosure", enc, "ea", 450)
@@ -934,20 +1004,20 @@ def build_bom_items(bid_data, calc_data):
     if str(bid_data.get("eth_switch","N")).upper() == "Y":
         add("PLC/Network", "ETH-SW", "Ethernet Switch", 1, "ea", 180)
     add("PLC/Network", "ETH-CBL", "Internal Ethernet Cable", int(bid_data.get("eth_cables", 0)), "ea", 12)
-    add("Terminals", "TB-STD", "Standard Terminal Block", int(bid_data.get("tb_standard", 0)), "ea", 3.50)
-    add("Terminals", "TB-GND", "Ground Terminal Block", int(bid_data.get("tb_ground", 0)), "ea", 4.20)
-    add("Terminals", "TB-FUSED", "Fused Terminal Block", int(bid_data.get("tb_fused", 0)), "ea", 8.50)
+    add("Terminals", "TB-STD", "Standard Terminal Block", int(bid_data.get("tb_standard", 0)), "ea", 3.50, "Phoenix Contact")
+    add("Terminals", "TB-GND", "Ground Terminal Block", int(bid_data.get("tb_ground", 0)), "ea", 4.20, "Phoenix Contact")
+    add("Terminals", "TB-FUSED", "Fused Terminal Block", int(bid_data.get("tb_fused", 0)), "ea", 8.50, "Phoenix Contact")
     add("Terminals", "TB-DISC", "Disconnect Terminal Block", int(bid_data.get("tb_disconnect", 0)), "ea", 9.80)
     # Wire
     ctrl_ft = calc_data.get("ctrl_wire_ft", 0)
     pwr_ft  = calc_data.get("pwr_wire_ft", 0)
     wrate   = calc_data.get("wire_cost_per_ft", 0.40)
     if ctrl_ft + pwr_ft > 0:
-        add("Wiring", "WIRE", f"Control/Power Wire ({ctrl_ft+pwr_ft} ft total)", ctrl_ft + pwr_ft, "ft", wrate)
+        add("Wiring", "WIRE", f"Control/Power Wire ({ctrl_ft+pwr_ft} ft total)", ctrl_ft + pwr_ft, "ft", wrate, "Panduit")
     # Heat shrink labels
     hs_rolls = calc_data.get("hs_rolls", 0)
     if hs_rolls > 0:
-        add("Wiring", "H075X044H1T", f"Heat Shrink Labels — {calc_data.get('hs_labels_qty',0)} pcs ({hs_rolls} roll{'s' if hs_rolls>1 else ''})", hs_rolls, "roll", 275)
+        add("Wiring", "H075X044H1T", f"Heat Shrink Labels — {calc_data.get('hs_labels_qty',0)} pcs ({hs_rolls} roll{'s' if hs_rolls>1 else ''})", hs_rolls, "roll", 275, "Rexel")
     return items
 
 
@@ -1550,37 +1620,46 @@ def hours_report():
     data_row("► SECTION TOTAL", bd.get("ul_qc_hrs",0))
 
     # Summary block
-    r+=1
+    r += 1
     ws.merge_cells(f"A{r}:D{r}")
-    ws.cell(row=r,column=1,value="  SUMMARY").fill=PatternFill("solid",fgColor=DARK_RED)
-    ws.cell(row=r,column=1).font=Font(name="Arial",bold=True,color=WHITE,size=10)
-    ws.cell(row=r,column=1).alignment=Alignment(horizontal="left",vertical="center",indent=1)
-    ws.row_dimensions[r].height=18; r+=1
+    sc = ws.cell(row=r, column=1, value="  SUMMARY")
+    sc.fill = PatternFill("solid", fgColor=DARK_RED)
+    sc.font = Font(name="Arial", bold=True, color=WHITE, size=10)
+    sc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[r].height = 18
+    r += 1
 
-    fat_hrs=float(bid.get("fat_hours",0)); eng_hrs=float(bid.get("eng_hours",0)); prog_hrs=float(bid.get("prog_hours",0))
-    data_row("RAW HOURS (sum of all sections)", calc.get("raw_hours",0))
-    data_row(f"Complexity multiplier ({bid.get('complexity','STANDARD')})", calc.get("raw_hours",0)*(calc.get("complexity_mult",1)-1), f"× {calc.get('complexity_mult',1.0):.2f}")
-    data_row(f"Tech level multiplier ({bid.get('tech_level','JOURNEYMAN')})", 0, f"× {calc.get('tech_mult',1.0):.2f}")
-    data_row(f"Calibration factor", 0, f"× {calc.get('calib_factor',1.0):.3f}")
+    fat_hrs  = float(bid.get("fat_hours", 0))
+    eng_hrs  = float(bid.get("eng_hours", 0))
+    prog_hrs = float(bid.get("prog_hours", 0))
+    data_row("RAW HOURS (sum of all sections)", calc.get("raw_hours", 0))
+    data_row(f"Complexity multiplier ({bid.get('complexity','STANDARD')})",
+             calc.get("raw_hours",0) * (calc.get("complexity_mult",1.0) - 1.0),
+             f"x {calc.get('complexity_mult',1.0):.2f}")
+    data_row(f"Tech level multiplier ({bid.get('tech_level','JOURNEYMAN')})", 0,
+             f"x {calc.get('tech_mult',1.0):.2f}")
+    data_row("Calibration factor", 0, f"x {calc.get('calib_factor',1.0):.3f}")
     data_row("FAT / witness testing hours", fat_hrs)
     data_row("Engineering hours", eng_hrs)
     data_row("Programming hours", prog_hrs)
 
-    r+=1
-    ws.merge_cells(f"A{r}:C{r}")
-    tc=ws.cell(row=r,column=1,value="TOTAL BILLABLE HOURS")
-    tc.font=Font(name="Arial",bold=True,color=WHITE,size=12)
-    tc.fill=PatternFill("solid",fgColor=RED)
-    tc.alignment=Alignment(horizontal="left",vertical="center",indent=1)
-    tv=ws.cell(row=r,column=2,value=calc.get("total_hours",0))
-    tv.font=Font(name="Arial",bold=True,color=WHITE,size=12)
-    tv.fill=PatternFill("solid",fgColor=RED)
-    tv.alignment=Alignment(horizontal="right",vertical="center")
-    tv.number_format='0.00'
-    ws.cell(row=r,column=3).fill=PatternFill("solid",fgColor=RED)
-    ws.cell(row=r,column=4,value=f"@ ${calc.get('labor_rate_used',95)}/hr = ${calc.get('labor_cost',0):,.2f}")
-    ws.cell(row=r,column=4).font=Font(name="Arial",bold=True,color=DARK_RED,size=10)
-    ws.row_dimensions[r].height=22
+    # Total row — no merge conflicts: A=label, B=empty, C=value, D=note
+    r += 1
+    ws.merge_cells(f"A{r}:B{r}")
+    tc = ws.cell(row=r, column=1, value="  TOTAL BILLABLE HOURS")
+    tc.font = Font(name="Arial", bold=True, color=WHITE, size=12)
+    tc.fill = PatternFill("solid", fgColor=RED)
+    tc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    tv = ws.cell(row=r, column=3, value=calc.get("total_hours", 0))
+    tv.font = Font(name="Arial", bold=True, color=WHITE, size=12)
+    tv.fill = PatternFill("solid", fgColor=RED)
+    tv.alignment = Alignment(horizontal="center", vertical="center")
+    tv.number_format = '0.00'
+    td = ws.cell(row=r, column=4,
+                 value=f"@ ${calc.get('labor_rate_used',95):.0f}/hr = ${calc.get('labor_cost',0):,.2f}")
+    td.font = Font(name="Arial", bold=True, color="F4A9A8", size=10)
+    td.fill = PatternFill("solid", fgColor=RED)
+    ws.row_dimensions[r].height = 24
 
     ws.freeze_panes="A5"
     ws.page_setup.orientation="landscape"; ws.page_setup.fitToPage=True; ws.page_setup.fitToWidth=1
