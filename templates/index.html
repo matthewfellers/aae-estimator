@@ -533,6 +533,8 @@ body {
 .hab-bom  { background:#1D6F42; color:white; border-color:#1D6F42; }
 .hab-bom:hover { background:#155232; }
 </style>
+<!-- Supabase JS client for authentication -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 
@@ -545,11 +547,13 @@ body {
     <div class="login-logo-name">AAE AUTOMATION</div>
     <div class="login-tagline">Panel Estimating System</div>
     <h2>Sign In</h2>
-    <div class="login-field"><label>Username</label><input type="text" id="login_user" placeholder="username" autocomplete="username"></div>
+    <div class="login-field"><label>Email</label><input type="email" id="login_email" placeholder="you@aaeautomation.com" autocomplete="username"></div>
     <div class="login-field"><label>Password</label><input type="password" id="login_pass" placeholder="password" autocomplete="current-password"></div>
+    <div id="mfa-section" style="display:none">
+      <div class="login-field"><label>MFA Code</label><input type="text" id="login_mfa" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" inputmode="numeric"></div>
+    </div>
     <button class="login-submit" onclick="doLogin()">SIGN IN</button>
-    <div class="login-err" id="login_err">Invalid username or password.</div>
-    <div class="login-demo">Demo: <b>admin / aae2025</b> &nbsp;|&nbsp; <b>mfellers / aae2025</b></div>
+    <div class="login-err" id="login_err"></div>
   </div>
 </div>
 
@@ -905,11 +909,10 @@ body {
       </div>
     </div>
   </div>
-</div>
 <!-- ══ TAB: ADMIN ══ -->
 <div id="tab-admin" class="tab-panel">
   <div class="page-header">
-    <h1>⚙️ ADMIN PANEL <span style="font-size:11px;color:rgba(255,255,255,0.3);font-weight:normal">v1771738939</span></h1>
+    <h1>⚙️ ADMIN PANEL</h1>
     <p>Labor rates, users, and vendor management — admin access only.</p>
   </div>
 
@@ -986,7 +989,6 @@ body {
 <!-- Toast container -->
 <div class="toast-container" id="toastContainer"></div>
 
-<!-- v1771738939 -->
 <script>
 // Global error handler — catches any JS crash and shows it
 window.onerror = function(msg, src, line, col, err) {
@@ -1000,144 +1002,16 @@ let currentBidData = null;
 let lastScanBOM = [];
 let lastScanMeta = {};
 
-// ═══════════════════════════════════════════════════════════
-
-const DEFAULT_LABOR_RATES = [
-  // Enclosure & Mechanical
-  {rate_key:"enclosure_prep",    rate_value:20,   category:"Enclosure",   description:"Enclosure prep",                        unit:"min/enclosure"},
-  {rate_key:"subpanel_mount",    rate_value:15,   category:"Enclosure",   description:"Sub-panel mounting",                    unit:"min/enclosure"},
-  {rate_key:"panel_layout",      rate_value:25,   category:"Enclosure",   description:"Panel layout planning",                 unit:"min/enclosure"},
-  {rate_key:"din_rail",          rate_value:6,    category:"Enclosure",   description:"DIN rail installation",                 unit:"min/run"},
-  {rate_key:"wire_duct",         rate_value:4,    category:"Enclosure",   description:"Wire duct installation",                unit:"min/section"},
-  {rate_key:"enc_accessory",     rate_value:8,    category:"Enclosure",   description:"Enclosure accessory (fan, light...)",   unit:"min/item"},
-  {rate_key:"door_component",    rate_value:12,   category:"Enclosure",   description:"Door-mounted component",                unit:"min/item"},
-  // Power
-  {rate_key:"main_breaker_small",rate_value:15,   category:"Power",       description:"Main breaker ≤100A",                    unit:"min/breaker"},
-  {rate_key:"main_breaker_large",rate_value:30,   category:"Power",       description:"Main breaker >100A",                    unit:"min/breaker"},
-  {rate_key:"branch_breaker_1p", rate_value:6,    category:"Power",       description:"1-pole branch breaker",                 unit:"min/breaker"},
-  {rate_key:"branch_breaker_23p",rate_value:10,   category:"Power",       description:"2/3-pole branch breaker",               unit:"min/breaker"},
-  {rate_key:"fused_disconnect",  rate_value:15,   category:"Power",       description:"Fused disconnect",                      unit:"min/unit"},
-  {rate_key:"cpt",               rate_value:20,   category:"Power",       description:"Control power transformer",             unit:"min/unit"},
-  {rate_key:"pdb",               rate_value:12,   category:"Power",       description:"Power distribution block",              unit:"min/unit"},
-  // Motor Control
-  {rate_key:"relay_icecube",     rate_value:8,    category:"Motor Ctrl",  description:"Ice cube relay",                        unit:"min/relay"},
-  {rate_key:"relay_din",         rate_value:6,    category:"Motor Ctrl",  description:"DIN mount relay",                       unit:"min/relay"},
-  {rate_key:"contactor_small",   rate_value:15,   category:"Motor Ctrl",  description:"Contactor ≤40A",                        unit:"min/contactor"},
-  {rate_key:"contactor_large",   rate_value:25,   category:"Motor Ctrl",  description:"Contactor >40A",                        unit:"min/contactor"},
-  {rate_key:"overload",          rate_value:10,   category:"Motor Ctrl",  description:"Overload relay",                        unit:"min/unit"},
-  {rate_key:"timer",             rate_value:8,    category:"Motor Ctrl",  description:"Timer relay",                           unit:"min/unit"},
-  {rate_key:"ssr",               rate_value:10,   category:"Motor Ctrl",  description:"Solid state relay",                     unit:"min/unit"},
-  {rate_key:"vfd_small",         rate_value:40,   category:"Motor Ctrl",  description:"VFD ≤5HP",                              unit:"min/VFD"},
-  {rate_key:"vfd_med",           rate_value:65,   category:"Motor Ctrl",  description:"VFD 6–25HP",                            unit:"min/VFD"},
-  {rate_key:"vfd_large",         rate_value:100,  category:"Motor Ctrl",  description:"VFD 26–100HP",                          unit:"min/VFD"},
-  {rate_key:"soft_starter_small",rate_value:50,   category:"Motor Ctrl",  description:"Soft starter ≤50A",                     unit:"min/unit"},
-  {rate_key:"soft_starter_large",rate_value:80,   category:"Motor Ctrl",  description:"Soft starter >50A",                     unit:"min/unit"},
-  // Control Devices
-  {rate_key:"pilot_light",       rate_value:6,    category:"Control",     description:"Pilot light",                           unit:"min/item"},
-  {rate_key:"selector",          rate_value:8,    category:"Control",     description:"Selector switch",                       unit:"min/item"},
-  {rate_key:"pushbutton",        rate_value:6,    category:"Control",     description:"Push button",                           unit:"min/item"},
-  {rate_key:"estop",             rate_value:12,   category:"Control",     description:"E-stop button",                         unit:"min/item"},
-  // PLC / Networking
-  {rate_key:"plc_rack",          rate_value:35,   category:"PLC/Network", description:"PLC rack/controller mounting",          unit:"min/rack"},
-  {rate_key:"plc_di_do",         rate_value:2.5,  category:"PLC/Network", description:"Digital I/O point wiring",              unit:"min/point"},
-  {rate_key:"plc_ai_ao",         rate_value:3.5,  category:"PLC/Network", description:"Analog I/O point wiring",               unit:"min/point"},
-  {rate_key:"hmi",               rate_value:30,   category:"PLC/Network", description:"HMI mounting & cabling",                unit:"min/HMI"},
-  {rate_key:"safety_relay",      rate_value:20,   category:"PLC/Network", description:"Safety relay",                          unit:"min/unit"},
-  {rate_key:"eth_switch",        rate_value:15,   category:"PLC/Network", description:"Ethernet switch",                       unit:"min/switch"},
-  {rate_key:"eth_cable",         rate_value:5,    category:"PLC/Network", description:"Ethernet cable routing & landing",      unit:"min/cable"},
-  // Terminals
-  {rate_key:"tb_standard",       rate_value:2.5,  category:"Terminals",   description:"Standard terminal block",               unit:"min/TB"},
-  {rate_key:"tb_ground",         rate_value:2.5,  category:"Terminals",   description:"Ground terminal block",                 unit:"min/TB"},
-  {rate_key:"tb_fused",          rate_value:4,    category:"Terminals",   description:"Fused terminal block",                  unit:"min/TB"},
-  {rate_key:"tb_disconnect",     rate_value:4,    category:"Terminals",   description:"Disconnect terminal block",             unit:"min/TB"},
-  {rate_key:"tb_accessories",    rate_value:3,    category:"Terminals",   description:"TB accessories (end caps, markers...)", unit:"min/set"},
-  {rate_key:"terminal_markers",  rate_value:3,    category:"Terminals",   description:"Terminal marker strip labeling",         unit:"min/strip"},
-  // Wiring
-  {rate_key:"wire_land_control", rate_value:1.2,  category:"Wiring",      description:"Wire landing — both ends",              unit:"min/wire"},
-  {rate_key:"ferrule",           rate_value:0.25, category:"Wiring",      description:"Ferrule crimping — both ends",          unit:"min/wire"},
-  {rate_key:"wire_route",        rate_value:0.35, category:"Wiring",      description:"Wire routing through duct",             unit:"min/wire"},
-  {rate_key:"heat_shrink_label", rate_value:0.25, category:"Wiring",      description:"Heat shrink label application",         unit:"min/label"},
-  {rate_key:"heat_shrink_batch", rate_value:2,    category:"Wiring",      description:"Heat shrink batch setup",               unit:"min/50 labels"},
-  // UL / QC
-  {rate_key:"ul_labels",         rate_value:15,   category:"UL/QC",       description:"UL component labeling",                 unit:"min/enclosure"},
-  {rate_key:"continuity_check",  rate_value:0.4,  category:"UL/QC",       description:"Continuity check per wire",             unit:"min/wire"},
-  {rate_key:"hipot",             rate_value:12,   category:"UL/QC",       description:"Hi-pot test",                           unit:"min/enclosure"},
-  {rate_key:"as_built",          rate_value:25,   category:"UL/QC",       description:"As-built drawing update",               unit:"min/enclosure"},
-  {rate_key:"qc_signoff",        rate_value:12,   category:"UL/QC",       description:"QC sign-off",                           unit:"min/enclosure"},
-];
-
-
-const DEFAULT_VENDORS = [
-  {id:1,  vendor_name:"Rexel",     manufacturer:"Allen Bradley",               notes:""},
-  {id:2,  vendor_name:"Rexel",     manufacturer:"Rockwell Automation",         notes:"Same as Allen Bradley"},
-  {id:3,  vendor_name:"Rexel",     manufacturer:"Hammond Power",               notes:""},
-  {id:4,  vendor_name:"Rexel",     manufacturer:"Panduit",                     notes:"Wire duct, labels"},
-  {id:5,  vendor_name:"Rexel",     manufacturer:"Mersen",                      notes:"Fuses"},
-  {id:6,  vendor_name:"Rexel",     manufacturer:"Hoffman",                     notes:"Enclosure accessories"},
-  {id:7,  vendor_name:"Rexel",     manufacturer:"N-Tron",                      notes:"Ethernet switches"},
-  {id:8,  vendor_name:"Rexel",     manufacturer:"Corning",                     notes:"Fiber"},
-  {id:9,  vendor_name:"AWC",       manufacturer:"Phoenix Contact",             notes:"Terminal blocks"},
-  {id:10, vendor_name:"AWC",       manufacturer:"Rittal",                      notes:"Enclosures"},
-  {id:11, vendor_name:"AWC",       manufacturer:"Hammond Enclosures",          notes:""},
-  {id:12, vendor_name:"AWC",       manufacturer:"Siemens",                     notes:""},
-  {id:13, vendor_name:"AWC",       manufacturer:"Solar Shield",                notes:"HMIs"},
-  {id:14, vendor_name:"AWC",       manufacturer:"Bussmann",                    notes:"Fuses"},
-  {id:15, vendor_name:"AWC",       manufacturer:"Marathon Special Products",   notes:"Terminal blocks"},
-  {id:16, vendor_name:"AWC",       manufacturer:"Tripp Lite",                  notes:"UPS / power"},
-  {id:17, vendor_name:"A-Tech",    manufacturer:"Turck",                       notes:"Sensors, connectors"},
-  {id:18, vendor_name:"A-Tech",    manufacturer:"Red Lion",                    notes:"HMI, comm"},
-  {id:19, vendor_name:"Graybar",   manufacturer:"Square D",                    notes:""},
-  {id:20, vendor_name:"Graybar",   manufacturer:"Schneider Electric",          notes:"Same as Square D"},
-  {id:21, vendor_name:"TD Synnex", manufacturer:"Cisco",                       notes:"Networking"},
-  {id:22, vendor_name:"Saginaw",   manufacturer:"Saginaw Control Engineering", notes:"Custom enclosures"},
-  {id:23, vendor_name:"Saginaw",   manufacturer:"SCE",                         notes:"Short name for Saginaw"},
-];
-
-
-
 // ── Tab switching ──────────────────────────────────────────────────────────
 function showTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   const panel = document.getElementById('tab-' + name);
   if (panel) panel.classList.add('active');
+  // Highlight the clicked button if called from a click event
   try { if (event && event.target) event.target.classList.add('active'); } catch(e) {}
   if (name === 'history') loadHistory();
-  if (name === 'admin') renderAdminTab();
-}
-
-function renderAdminTab() {
-  try {
-    // Labor rates — always from hardcoded defaults + localStorage overrides
-    const overrides = JSON.parse(localStorage.getItem('aae_labor_rates_overrides') || '{}');
-    const rates = DEFAULT_LABOR_RATES.map(r => ({
-      ...r, rate_value: overrides[r.rate_key] !== undefined ? overrides[r.rate_key] : r.rate_value
-    }));
-    laborRatesCache = rates;
-    renderLaborRatesTable(rates);
-  } catch(e) {
-    const d = document.getElementById('laborRatesTable');
-    if (d) d.innerHTML = '<p style="color:#F4A9A8">Error: ' + e.message + '</p>';
-  }
-  try {
-    loadUsers();
-  } catch(e) {}
-  try {
-    renderVendorsTable(getVendors());
-  } catch(e) {
-    const d = document.getElementById('vendorsTable');
-    if (d) d.innerHTML = '<p style="color:#F4A9A8">Error: ' + e.message + '</p>';
-  }
-  // Background sync — does not block rendering
-  fetch('/api/labor_rates').then(r => r.ok ? r.json() : null).then(sd => {
-    if (!sd || !Array.isArray(sd) || sd.length === 0) return;
-    const sm = {};
-    sd.forEach(r => { if (r.rate_key) sm[r.rate_key] = r.rate_value; });
-    laborRatesCache = laborRatesCache.map(r =>
-      sm[r.rate_key] !== undefined ? {...r, rate_value: sm[r.rate_key]} : r
-    );
-    renderLaborRatesTable(laborRatesCache);
-  }).catch(() => {});
+  if (name === 'admin') { loadLaborRates(); loadUsers(); loadVendors(); }
 }
 
 // ── Toast notifications ────────────────────────────────────────────────────
@@ -1200,7 +1074,7 @@ async function startScan(file) {
   try {
     const form = new FormData();
     form.append('drawing', file);
-    const res  = await fetch('/api/scan', { method: 'POST', body: form });
+    const res  = await apiFetch('/api/scan', { method: 'POST', body: form });
     const data = await res.json();
     clearInterval(interval);
     status.classList.remove('visible');
@@ -1371,7 +1245,7 @@ function collectFormData() {
 async function calculateBid() {
   const data = collectFormData();
   try {
-    const res  = await fetch('/api/calculate', {
+    const res  = await apiFetch('/api/calculate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -1429,7 +1303,7 @@ async function calculateBid() {
 async function downloadPDF() {
   if (!currentCalcResults || !currentBidData) { toast('Calculate bid first', 'error'); return; }
   try {
-    const res = await fetch('/api/quote_pdf', {
+    const res = await apiFetch('/api/quote_pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bid_data: currentBidData, calc: currentCalcResults })
@@ -1450,7 +1324,7 @@ async function downloadPDF() {
 async function saveBid() {
   if (!currentCalcResults || !currentBidData) { toast('Calculate bid first', 'error'); return; }
   try {
-    const res = await fetch('/api/save_bid', {
+    const res = await apiFetch('/api/save_bid', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...currentBidData, calc: currentCalcResults })
@@ -1468,7 +1342,7 @@ async function loadHistory() {
   const el = document.getElementById('historyContent');
   el.innerHTML = '<p style="color:var(--muted)">Loading...</p>';
   try {
-    const res  = await fetch('/api/bids');
+    const res  = await apiFetch('/api/bids');
     const bids = await res.json();
     if (!bids.length) {
       el.innerHTML = '<p style="color:var(--muted);font-size:0.88rem">No bids saved yet. Calculate and save your first bid.</p>';
@@ -1523,54 +1397,102 @@ function clearForm() {
   toast('Form cleared', 'info');
 }
 
-// ── USERS / AUTH ──────────────────────────────────────────────────────────
-let currentUser = null;
+// ══════════════════════════════════════════════════════════════════════════
+// AUTHENTICATION — Supabase Auth (server-side JWT verification)
+// Passwords never stored in browser. Roles verified server-side only.
+// ══════════════════════════════════════════════════════════════════════════
+let currentUser = null;   // { id, email, role, display_name, aal }
+let _accessToken = null;  // In-memory only — never written to localStorage/sessionStorage
 
-// ── User store — localStorage-backed, editable by mfellers ─────────────────
-function getUsers() {
-  const stored = localStorage.getItem("aae_users");
-  if (stored) { try { return JSON.parse(stored); } catch(e) {} }
-  // Default users — mfellers can add/edit/remove from Admin panel
-  return [
-    {username:"mfellers",  password:"aae2025",  display:"M. Fellers",  role:"admin"},
-    {username:"admin",     password:"aae2025",  display:"Admin",        role:"admin"},
-    {username:"estimator", password:"panel123", display:"Estimator",    role:"estimator"}
-  ];
-}
-function saveUsers(users) {
-  localStorage.setItem("aae_users", JSON.stringify(users));
+// Supabase client used only for Auth flows (not direct data access)
+const SUPABASE_URL  = "{{ supabase_url }}";
+const SUPABASE_ANON = "{{ supabase_anon_key }}";
+let _sbClient = null;
+if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undefined") {
+  _sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { persistSession: false, detectSessionInUrl: false }
+  });
 }
 
-function doLogin() {
-  const u    = document.getElementById("login_user").value.trim().toLowerCase();
-  const p    = document.getElementById("login_pass").value;
-  const user = getUsers().find(x => x.username === u && x.password === p);
-  if (user) {
-    // Ensure role is always set (handles stale localStorage data without role field)
-    if (!user.role) user.role = (u === 'mfellers' || u === 'admin') ? 'admin' : 'estimator';
-    currentUser = user;
-    // Clear stale localStorage keys from old app versions that could break settings tab
-    ['aae_labor_rates', 'aae_vendors_old'].forEach(k => localStorage.removeItem(k));
-    document.getElementById("login-overlay").classList.remove("visible");
-    document.getElementById("user_pill").textContent = "👤 " + user.display;
-    document.getElementById("estimator_name").value   = user.display + " — AAE Automation";
-    const adminBtn = document.getElementById("adminTabBtn");
-    if (adminBtn) adminBtn.style.display = (user.role === "admin") ? "inline-flex" : "none";
-    loadHistory();
-    loadCalibration();
-  } else {
-    document.getElementById("login_err").style.display = "block";
+/** Always attach Bearer token to backend API calls */
+function authHeaders() {
+  return _accessToken ? { "Authorization": "Bearer " + _accessToken } : {};
+}
+
+/** Wrapper: fetch with auth headers; redirect to login on 401 */
+async function apiFetch(url, options = {}) {
+  options.headers = Object.assign({}, options.headers || {}, authHeaders());
+  const resp = await fetch(url, options);
+  if (resp.status === 401) {
+    doLogout();
+    showLoginErr("Session expired. Please sign in again.");
+    throw new Error("Unauthenticated");
+  }
+  return resp;
+}
+
+function showLoginErr(msg) {
+  const el = document.getElementById("login_err");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+async function doLogin() {
+  const email = document.getElementById("login_email").value.trim();
+  const pass  = document.getElementById("login_pass").value;
+  const btn   = document.querySelector(".login-submit");
+  btn.disabled = true;
+  btn.textContent = "Signing in…";
+  document.getElementById("login_err").style.display = "none";
+
+  if (!_sbClient) {
+    showLoginErr("Auth service not available. Contact your administrator.");
+    btn.disabled = false; btn.textContent = "SIGN IN"; return;
+  }
+
+  try {
+    const { data, error } = await _sbClient.auth.signInWithPassword({ email, password: pass });
+    if (error) throw error;
+
+    _accessToken = data.session.access_token;
+
+    // Fetch server-verified profile (role comes from server, never trusted from client)
+    const profileResp = await apiFetch("/api/me");
+    if (!profileResp.ok) throw new Error("Could not load user profile");
+    const profile = await profileResp.json();
+
+    currentUser = profile;
+    onLoginSuccess();
+  } catch (err) {
+    _accessToken = null;
+    showLoginErr(err.message || "Sign-in failed. Check your credentials.");
+  } finally {
+    btn.disabled = false; btn.textContent = "SIGN IN";
   }
 }
-function doLogout() {
-  currentUser = null;
+
+function onLoginSuccess() {
+  document.getElementById("login-overlay").classList.remove("visible");
+  document.getElementById("user_pill").textContent = "👤 " + (currentUser.display_name || currentUser.email);
+  document.getElementById("estimator_name").value = (currentUser.display_name || currentUser.email) + " — AAE Automation";
+  const adminBtn = document.getElementById("adminTabBtn");
+  if (adminBtn) adminBtn.style.display = (currentUser.role === "admin") ? "inline-flex" : "none";
+  loadHistory();
+  loadCalibration();
+}
+
+async function doLogout() {
+  if (_sbClient) { try { await _sbClient.auth.signOut(); } catch(e) {} }
+  _accessToken = null;
+  currentUser  = null;
   document.getElementById("login-overlay").classList.add("visible");
   document.getElementById("login_pass").value = "";
   document.getElementById("login_err").style.display = "none";
   const adminBtn = document.getElementById("adminTabBtn");
   if (adminBtn) adminBtn.style.display = "none";
 }
-["login_user","login_pass"].forEach(id => {
+
+["login_email","login_pass"].forEach(id => {
   document.getElementById(id)?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
 });
 
@@ -1667,7 +1589,7 @@ async function downloadScanBOM() {
   lastScanMeta.project_name  = document.getElementById('project_name').value  || lastScanMeta.project_name;
 
   try {
-    const res = await fetch('/api/bom_from_scan', {
+    const res = await apiFetch('/api/bom_from_scan', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -1692,7 +1614,7 @@ async function downloadScanBOM() {
 async function exportBomPDF() {
   if (!currentCalcResults || !currentBidData) { toast("Calculate a bid first","error"); return; }
   try {
-    const res = await fetch("/api/bom_pdf", {
+    const res = await apiFetch("/api/bom_pdf", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({bid_data: currentBidData, calc: currentCalcResults,
                             quote_num: "AAE-"+Date.now()})
@@ -1708,7 +1630,7 @@ async function exportBomPDF() {
 async function exportBomExcel() {
   if (!currentCalcResults || !currentBidData) { toast("Calculate a bid first","error"); return; }
   try {
-    const res = await fetch("/api/bom_excel", {
+    const res = await apiFetch("/api/bom_excel", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({bid_data: currentBidData, calc: currentCalcResults,
                             quote_num: "AAE-"+Date.now()})
@@ -1724,13 +1646,13 @@ async function exportBomExcel() {
 async function downloadHistoryBOM(bidId) {
   try {
     // fetch the bid then export BOM excel
-    const res  = await fetch("/api/bids");
+    const res  = await apiFetch("/api/bids");
     const bids = await res.json();
     const bid  = bids.find(b => b.id === bidId);
     if (!bid) { toast("Bid not found","error"); return; }
     const bidData = JSON.parse(bid.bid_data||"{}");
     const calcData = bidData.calc || {};
-    const r2 = await fetch("/api/bom_excel", {
+    const r2 = await apiFetch("/api/bom_excel", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({bid_data: bidData, calc: calcData,
                             quote_num: `AAE-${bid.created_at?.slice(0,10).replace(/-/g,"")}-${bidId}`})
@@ -1749,7 +1671,7 @@ async function downloadHistoryBOM(bidId) {
 async function downloadHoursReport() {
   if (!currentCalcResults || !currentBidData) { toast("Calculate a bid first","error"); return; }
   try {
-    const res = await fetch("/api/hours_report", {
+    const res = await apiFetch("/api/hours_report", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({calc: currentCalcResults, bid_data: currentBidData})
     });
@@ -1765,6 +1687,71 @@ async function downloadHoursReport() {
 
 // ═══════════════════════════════════════════════════════════
 // ADMIN: LABOR RATES  (localStorage-first, syncs to Supabase if available)
+// ═══════════════════════════════════════════════════════════
+
+const DEFAULT_LABOR_RATES = [
+  // Enclosure & Mechanical
+  {rate_key:"enclosure_prep",    rate_value:20,   category:"Enclosure",   description:"Enclosure prep",                        unit:"min/enclosure"},
+  {rate_key:"subpanel_mount",    rate_value:15,   category:"Enclosure",   description:"Sub-panel mounting",                    unit:"min/enclosure"},
+  {rate_key:"panel_layout",      rate_value:25,   category:"Enclosure",   description:"Panel layout planning",                 unit:"min/enclosure"},
+  {rate_key:"din_rail",          rate_value:6,    category:"Enclosure",   description:"DIN rail installation",                 unit:"min/run"},
+  {rate_key:"wire_duct",         rate_value:4,    category:"Enclosure",   description:"Wire duct installation",                unit:"min/section"},
+  {rate_key:"enc_accessory",     rate_value:8,    category:"Enclosure",   description:"Enclosure accessory (fan, light...)",   unit:"min/item"},
+  {rate_key:"door_component",    rate_value:12,   category:"Enclosure",   description:"Door-mounted component",                unit:"min/item"},
+  // Power
+  {rate_key:"main_breaker_small",rate_value:15,   category:"Power",       description:"Main breaker ≤100A",                    unit:"min/breaker"},
+  {rate_key:"main_breaker_large",rate_value:30,   category:"Power",       description:"Main breaker >100A",                    unit:"min/breaker"},
+  {rate_key:"branch_breaker_1p", rate_value:6,    category:"Power",       description:"1-pole branch breaker",                 unit:"min/breaker"},
+  {rate_key:"branch_breaker_23p",rate_value:10,   category:"Power",       description:"2/3-pole branch breaker",               unit:"min/breaker"},
+  {rate_key:"fused_disconnect",  rate_value:15,   category:"Power",       description:"Fused disconnect",                      unit:"min/unit"},
+  {rate_key:"cpt",               rate_value:20,   category:"Power",       description:"Control power transformer",             unit:"min/unit"},
+  {rate_key:"pdb",               rate_value:12,   category:"Power",       description:"Power distribution block",              unit:"min/unit"},
+  // Motor Control
+  {rate_key:"relay_icecube",     rate_value:8,    category:"Motor Ctrl",  description:"Ice cube relay",                        unit:"min/relay"},
+  {rate_key:"relay_din",         rate_value:6,    category:"Motor Ctrl",  description:"DIN mount relay",                       unit:"min/relay"},
+  {rate_key:"contactor_small",   rate_value:15,   category:"Motor Ctrl",  description:"Contactor ≤40A",                        unit:"min/contactor"},
+  {rate_key:"contactor_large",   rate_value:25,   category:"Motor Ctrl",  description:"Contactor >40A",                        unit:"min/contactor"},
+  {rate_key:"overload",          rate_value:10,   category:"Motor Ctrl",  description:"Overload relay",                        unit:"min/unit"},
+  {rate_key:"timer",             rate_value:8,    category:"Motor Ctrl",  description:"Timer relay",                           unit:"min/unit"},
+  {rate_key:"ssr",               rate_value:10,   category:"Motor Ctrl",  description:"Solid state relay",                     unit:"min/unit"},
+  {rate_key:"vfd_small",         rate_value:40,   category:"Motor Ctrl",  description:"VFD ≤5HP",                              unit:"min/VFD"},
+  {rate_key:"vfd_med",           rate_value:65,   category:"Motor Ctrl",  description:"VFD 6–25HP",                            unit:"min/VFD"},
+  {rate_key:"vfd_large",         rate_value:100,  category:"Motor Ctrl",  description:"VFD 26–100HP",                          unit:"min/VFD"},
+  {rate_key:"soft_starter_small",rate_value:50,   category:"Motor Ctrl",  description:"Soft starter ≤50A",                     unit:"min/unit"},
+  {rate_key:"soft_starter_large",rate_value:80,   category:"Motor Ctrl",  description:"Soft starter >50A",                     unit:"min/unit"},
+  // Control Devices
+  {rate_key:"pilot_light",       rate_value:6,    category:"Control",     description:"Pilot light",                           unit:"min/item"},
+  {rate_key:"selector",          rate_value:8,    category:"Control",     description:"Selector switch",                       unit:"min/item"},
+  {rate_key:"pushbutton",        rate_value:6,    category:"Control",     description:"Push button",                           unit:"min/item"},
+  {rate_key:"estop",             rate_value:12,   category:"Control",     description:"E-stop button",                         unit:"min/item"},
+  // PLC / Networking
+  {rate_key:"plc_rack",          rate_value:35,   category:"PLC/Network", description:"PLC rack/controller mounting",          unit:"min/rack"},
+  {rate_key:"plc_di_do",         rate_value:2.5,  category:"PLC/Network", description:"Digital I/O point wiring",              unit:"min/point"},
+  {rate_key:"plc_ai_ao",         rate_value:3.5,  category:"PLC/Network", description:"Analog I/O point wiring",               unit:"min/point"},
+  {rate_key:"hmi",               rate_value:30,   category:"PLC/Network", description:"HMI mounting & cabling",                unit:"min/HMI"},
+  {rate_key:"safety_relay",      rate_value:20,   category:"PLC/Network", description:"Safety relay",                          unit:"min/unit"},
+  {rate_key:"eth_switch",        rate_value:15,   category:"PLC/Network", description:"Ethernet switch",                       unit:"min/switch"},
+  {rate_key:"eth_cable",         rate_value:5,    category:"PLC/Network", description:"Ethernet cable routing & landing",      unit:"min/cable"},
+  // Terminals
+  {rate_key:"tb_standard",       rate_value:2.5,  category:"Terminals",   description:"Standard terminal block",               unit:"min/TB"},
+  {rate_key:"tb_ground",         rate_value:2.5,  category:"Terminals",   description:"Ground terminal block",                 unit:"min/TB"},
+  {rate_key:"tb_fused",          rate_value:4,    category:"Terminals",   description:"Fused terminal block",                  unit:"min/TB"},
+  {rate_key:"tb_disconnect",     rate_value:4,    category:"Terminals",   description:"Disconnect terminal block",             unit:"min/TB"},
+  {rate_key:"tb_accessories",    rate_value:3,    category:"Terminals",   description:"TB accessories (end caps, markers...)", unit:"min/set"},
+  {rate_key:"terminal_markers",  rate_value:3,    category:"Terminals",   description:"Terminal marker strip labeling",         unit:"min/strip"},
+  // Wiring
+  {rate_key:"wire_land_control", rate_value:1.2,  category:"Wiring",      description:"Wire landing — both ends",              unit:"min/wire"},
+  {rate_key:"ferrule",           rate_value:0.25, category:"Wiring",      description:"Ferrule crimping — both ends",          unit:"min/wire"},
+  {rate_key:"wire_route",        rate_value:0.35, category:"Wiring",      description:"Wire routing through duct",             unit:"min/wire"},
+  {rate_key:"heat_shrink_label", rate_value:0.25, category:"Wiring",      description:"Heat shrink label application",         unit:"min/label"},
+  {rate_key:"heat_shrink_batch", rate_value:2,    category:"Wiring",      description:"Heat shrink batch setup",               unit:"min/50 labels"},
+  // UL / QC
+  {rate_key:"ul_labels",         rate_value:15,   category:"UL/QC",       description:"UL component labeling",                 unit:"min/enclosure"},
+  {rate_key:"continuity_check",  rate_value:0.4,  category:"UL/QC",       description:"Continuity check per wire",             unit:"min/wire"},
+  {rate_key:"hipot",             rate_value:12,   category:"UL/QC",       description:"Hi-pot test",                           unit:"min/enclosure"},
+  {rate_key:"as_built",          rate_value:25,   category:"UL/QC",       description:"As-built drawing update",               unit:"min/enclosure"},
+  {rate_key:"qc_signoff",        rate_value:12,   category:"UL/QC",       description:"QC sign-off",                           unit:"min/enclosure"},
+];
 
 let laborRatesCache = [];
 
@@ -1797,7 +1784,7 @@ async function loadLaborRates() {
 
     // Try server overrides (non-blocking, values only)
     try {
-      const res = await fetch("/api/labor_rates");
+      const res = await apiFetch("/api/labor_rates");
       if (res.ok) {
         const sd = await res.json();
         if (Array.isArray(sd) && sd.length > 0) {
@@ -1877,118 +1864,86 @@ async function saveAllLaborRates() {
   const updates = {};
   inputs.forEach(inp => { updates[inp.dataset.key] = parseFloat(inp.value); });
 
-  // Save as overrides map in localStorage (preserves descriptions/units from defaults)
-  const existing = JSON.parse(localStorage.getItem("aae_labor_rates_overrides")||'{}');
-  Object.assign(existing, updates);
-  localStorage.setItem("aae_labor_rates_overrides", JSON.stringify(existing));
-
-  // Also update the live cache
-  laborRatesCache = laborRatesCache.map(r =>
-    updates[r.rate_key] !== undefined ? {...r, rate_value: updates[r.rate_key]} : r
-  );
-
-  // Reset yellow highlight
-  inputs.forEach(i => { i.style.borderColor=""; i.style.color="white"; i.style.fontWeight=""; });
-  toast(`✓ Saved ${Object.keys(updates).length} labor rates`, "success");
-
-  // Background sync to server (non-blocking)
-  fetch("/api/labor_rates/bulk", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({rates: updates, username: currentUser?.username || "mfellers"})
-  }).then(r=>r.json()).then(d=>{
-    if(d.success) toast("Also synced to database ✓","info");
-  }).catch(()=>{});
+  // Sync to server — admin+MFA required (enforced server-side)
+  try {
+    const resp = await apiFetch("/api/labor_rates/bulk", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({rates: updates})
+    });
+    const d = await resp.json();
+    if (d.success) {
+      // Update live cache
+      laborRatesCache = laborRatesCache.map(r =>
+        updates[r.rate_key] !== undefined ? {...r, rate_value: updates[r.rate_key]} : r
+      );
+      inputs.forEach(i => { i.style.borderColor=""; i.style.color="white"; i.style.fontWeight=""; });
+      toast(`✓ Saved ${Object.keys(updates).length} labor rates to database`, "success");
+    } else {
+      toast(d.error || "Save failed", "error");
+    }
+  } catch(e) {
+    toast("Failed to save rates: " + e.message, "error");
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
-// ADMIN: USERS  (localStorage — no server needed)
+// ADMIN: USERS  (managed via Supabase Auth — use Supabase dashboard)
 // ═══════════════════════════════════════════════════════════
 function loadUsers() {
-  const div   = document.getElementById("usersTable");
+  const div = document.getElementById("usersTable");
   if (!div) return;
-  const users = getUsers();
-  const thStyle = "text-align:left;padding:8px 12px;background:#2C2C2C;color:white";
-  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
-    <thead><tr>
-      <th style="${thStyle}">USERNAME</th>
-      <th style="${thStyle}">DISPLAY NAME</th>
-      <th style="${thStyle}">ROLE</th>
-      <th style="${thStyle}">NEW PASSWORD</th>
-      <th style="text-align:center;padding:8px 12px;background:#2C2C2C;color:white">ACTIONS</th>
-    </tr></thead><tbody>`;
-  users.forEach((u, i) => {
-    const bg = i%2===0 ? "#1A0505" : "#200808";
-    html += `<tr style="background:${bg}">
-      <td style="padding:8px 12px;color:white;font-weight:bold">${u.username}</td>
-      <td style="padding:8px 12px;color:rgba(255,255,255,0.8)">${u.display}</td>
-      <td style="padding:8px 12px"><span style="background:${u.role==='admin'?'#9B1B1B':'#2C2C2C'};
-        color:white;padding:2px 8px;border-radius:10px;font-size:11px">${u.role}</span></td>
-      <td style="padding:6px 8px">
-        <input type="text" id="pw_${i}" placeholder="enter new password..."
-          style="background:#2C0A0A;border:1px solid rgba(155,27,27,0.4);color:white;
-                 border-radius:4px;padding:4px 8px;font-size:11px;width:160px">
-      </td>
-      <td style="padding:6px 8px;text-align:center;display:flex;gap:6px;justify-content:center">
-        <button onclick="saveUserPassword(${i})"
-          style="background:#9B1B1B;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">
-          💾 Save PW</button>
-        ${u.username !== 'mfellers' ?
-          `<button onclick="removeUser(${i})"
-            style="background:rgba(155,27,27,0.3);color:#F4A9A8;border:1px solid rgba(155,27,27,0.4);
-                   border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">Remove</button>` : ''}
-      </td>
-    </tr>`;
-  });
-  html += '</tbody></table>';
-  div.innerHTML = html;
+  div.innerHTML = `
+    <div style="background:#1A0505;border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:20px;color:rgba(255,255,255,0.8);font-size:13px">
+      <p style="margin:0 0 10px;color:#F4A9A8;font-weight:bold">👤 User Management — Supabase Auth</p>
+      <p style="margin:0 0 8px">Users are now managed through <strong>Supabase Authentication</strong> for enterprise-grade security.</p>
+      <p style="margin:0 0 8px">To add, remove, or reset user passwords:</p>
+      <ol style="margin:8px 0 8px 20px;line-height:1.8">
+        <li>Go to your <strong>Supabase project dashboard</strong></li>
+        <li>Navigate to <strong>Authentication → Users</strong></li>
+        <li>Add/invite users with their email address</li>
+        <li>After they create an account, set their role in the <strong>profiles</strong> table</li>
+      </ol>
+      <p style="margin:0;color:rgba(255,255,255,0.5);font-size:11px">Roles: estimator (default) | admin (requires MFA enrollment)</p>
+    </div>`;
 }
 
 function showAddUserForm() {
-  const f = document.getElementById("addUserForm");
-  f.style.display = f.style.display === "none" ? "block" : "none";
+  loadUsers(); // Re-renders the Supabase info panel
 }
+function createUser() { loadUsers(); }
+function saveUserPassword(idx) { loadUsers(); }
+function removeUser(idx) { loadUsers(); }
 
-function createUser() {
-  const username = document.getElementById("newUsername").value.trim().toLowerCase();
-  const display  = document.getElementById("newDisplayName").value.trim();
-  const password = document.getElementById("newPassword").value;
-  const role     = document.getElementById("newRole").value;
-  if (!username || !password) { toast("Username and password required", "error"); return; }
-  const users = getUsers();
-  if (users.find(u => u.username === username)) { toast("Username already exists", "error"); return; }
-  users.push({username, password, display: display || username, role});
-  saveUsers(users);
-  toast("User created: " + username, "success");
-  document.getElementById("addUserForm").style.display = "none";
-  ["newUsername","newDisplayName","newPassword"].forEach(id => document.getElementById(id).value = "");
-  loadUsers();
-}
-
-function saveUserPassword(idx) {
-  const pw = document.getElementById("pw_" + idx)?.value.trim();
-  if (!pw) { toast("Enter a new password first", "error"); return; }
-  const users = getUsers();
-  if (!users[idx]) return;
-  users[idx].password = pw;
-  saveUsers(users);
-  toast("Password updated for " + users[idx].username, "success");
-  document.getElementById("pw_" + idx).value = "";
-}
-
-function removeUser(idx) {
-  const users = getUsers();
-  if (!users[idx] || users[idx].username === 'mfellers') return;
-  if (!confirm(`Remove user "${users[idx].username}"?`)) return;
-  users.splice(idx, 1);
-  saveUsers(users);
-  toast("User removed", "success");
-  loadUsers();
-}
 
 // ═══════════════════════════════════════════════════════════
 // ADMIN: VENDORS  (localStorage-first, syncs to Supabase if available)
 // ═══════════════════════════════════════════════════════════
 
+const DEFAULT_VENDORS = [
+  {id:1,  vendor_name:"Rexel",     manufacturer:"Allen Bradley",               notes:""},
+  {id:2,  vendor_name:"Rexel",     manufacturer:"Rockwell Automation",         notes:"Same as Allen Bradley"},
+  {id:3,  vendor_name:"Rexel",     manufacturer:"Hammond Power",               notes:""},
+  {id:4,  vendor_name:"Rexel",     manufacturer:"Panduit",                     notes:"Wire duct, labels"},
+  {id:5,  vendor_name:"Rexel",     manufacturer:"Mersen",                      notes:"Fuses"},
+  {id:6,  vendor_name:"Rexel",     manufacturer:"Hoffman",                     notes:"Enclosure accessories"},
+  {id:7,  vendor_name:"Rexel",     manufacturer:"N-Tron",                      notes:"Ethernet switches"},
+  {id:8,  vendor_name:"Rexel",     manufacturer:"Corning",                     notes:"Fiber"},
+  {id:9,  vendor_name:"AWC",       manufacturer:"Phoenix Contact",             notes:"Terminal blocks"},
+  {id:10, vendor_name:"AWC",       manufacturer:"Rittal",                      notes:"Enclosures"},
+  {id:11, vendor_name:"AWC",       manufacturer:"Hammond Enclosures",          notes:""},
+  {id:12, vendor_name:"AWC",       manufacturer:"Siemens",                     notes:""},
+  {id:13, vendor_name:"AWC",       manufacturer:"Solar Shield",                notes:"HMIs"},
+  {id:14, vendor_name:"AWC",       manufacturer:"Bussmann",                    notes:"Fuses"},
+  {id:15, vendor_name:"AWC",       manufacturer:"Marathon Special Products",   notes:"Terminal blocks"},
+  {id:16, vendor_name:"AWC",       manufacturer:"Tripp Lite",                  notes:"UPS / power"},
+  {id:17, vendor_name:"A-Tech",    manufacturer:"Turck",                       notes:"Sensors, connectors"},
+  {id:18, vendor_name:"A-Tech",    manufacturer:"Red Lion",                    notes:"HMI, comm"},
+  {id:19, vendor_name:"Graybar",   manufacturer:"Square D",                    notes:""},
+  {id:20, vendor_name:"Graybar",   manufacturer:"Schneider Electric",          notes:"Same as Square D"},
+  {id:21, vendor_name:"TD Synnex", manufacturer:"Cisco",                       notes:"Networking"},
+  {id:22, vendor_name:"Saginaw",   manufacturer:"Saginaw Control Engineering", notes:"Custom enclosures"},
+  {id:23, vendor_name:"Saginaw",   manufacturer:"SCE",                         notes:"Short name for Saginaw"},
+];
 
 let _nextVendorId = 100;
 
@@ -2006,7 +1961,7 @@ async function loadVendors() {
   if (!div) return;
   div.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:13px">Loading...</p>';
   try {
-    const res = await fetch("/api/vendors");
+    const res = await apiFetch("/api/vendors");
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
@@ -2077,7 +2032,7 @@ function createVendor() {
   document.getElementById("addVendorForm").style.display="none";
   ["newMfr","newVendor","newVendorNotes"].forEach(id=>document.getElementById(id).value="");
   renderVendorsTable(getVendors());
-  fetch("/api/vendors",{method:"POST",headers:{"Content-Type":"application/json"},
+  apiFetch("/api/vendors",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({manufacturer:mfr,vendor_name:vendor,notes,
       updated_by:currentUser?.username||"mfellers"})}).catch(()=>{});
 }
@@ -2091,7 +2046,7 @@ function removeVendorLocal(id) {
   saveVendorsLocal(vendors);
   toast("Mapping removed","success");
   renderVendorsTable(getVendors());
-  fetch("/api/vendors/"+id,{method:"DELETE"}).catch(()=>{});
+  apiFetch("/api/vendors/"+id,{method:"DELETE"}).catch(()=>{});
 }
 const deleteVendor = removeVendorLocal;
 
@@ -2102,3 +2057,4 @@ const _origDownloadPDF = downloadPDF;
 </script>
 </body>
 </html>
+
