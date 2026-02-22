@@ -85,8 +85,49 @@ WIRE_GAUGE_COSTS = {
 }
 
 # ── Calculation engine ─────────────────────────────────────────────────────
+def get_labor_rates():
+    """Load labor rates from DB if available, fall back to defaults."""
+    if not supabase:
+        return LABOR_RATES.copy()
+    try:
+        rows = supabase.table("aae_labor_rates").select("rate_key,rate_value").execute()
+        if rows.data:
+            merged = LABOR_RATES.copy()
+            for row in rows.data:
+                merged[row["rate_key"]] = float(row["rate_value"])
+            return merged
+    except Exception:
+        pass
+    return LABOR_RATES.copy()
+
+def get_vendor_map():
+    """Load manufacturer->vendor mapping from DB."""
+    vendor_map = {
+        # defaults if DB unavailable
+        "allen bradley": "Rexel", "rockwell automation": "Rexel",
+        "hammond power": "Rexel", "panduit": "Rexel", "mersen": "Rexel",
+        "hoffman": "Rexel", "n-tron": "Rexel", "corning": "Rexel",
+        "phoenix contact": "AWC", "rittal": "AWC", "hammond enclosures": "AWC",
+        "siemens": "AWC", "solar shield": "AWC", "bussmann": "AWC",
+        "marathon special products": "AWC", "tripp lite": "AWC",
+        "turck": "A-Tech", "red lion": "A-Tech",
+        "square d": "Graybar", "schneider electric": "Graybar",
+        "cisco": "TD Synnex",
+        "saginaw control engineering": "Saginaw", "sce": "Saginaw",
+    }
+    if not supabase:
+        return vendor_map
+    try:
+        rows = supabase.table("aae_vendors").select("manufacturer,vendor_name").eq("active", True).execute()
+        if rows.data:
+            for row in rows.data:
+                vendor_map[row["manufacturer"].lower()] = row["vendor_name"]
+    except Exception:
+        pass
+    return vendor_map
+
 def calculate_bid(data):
-    r = LABOR_RATES
+    r = get_labor_rates()
     enc_qty  = max(1, int(data.get("enc_qty", 1)))
     din_runs = int(data.get("din_rail_runs", 3))
     duct_runs= int(data.get("wire_duct_runs", 4))
@@ -256,6 +297,22 @@ def calculate_bid(data):
         "tech_mult": t_mult,
         "calib_factor": calib_factor,
         "total_hours": round(total_hrs, 2),
+        # Full hour breakdown for transparency report
+        "hour_breakdown": {
+            "enclosure_hrs":    round(enc_min/60, 2),
+            "power_hrs":        round(pwr_min/60, 2),
+            "motor_ctrl_hrs":   round(mc_min/60, 2),
+            "control_dev_hrs":  round(cd_min/60, 2),
+            "plc_network_hrs":  round(plc_min/60, 2),
+            "terminals_wire_hrs": round(tb_min/60, 2),
+            "heat_shrink_hrs":  round(hs_min/60, 2),
+            "ul_qc_hrs":        round(ul_min/60, 2),
+            "fat_hrs":          fat_hrs,
+            "eng_hrs":          eng_hrs,
+            "prog_hrs":         prog_hrs,
+            "wire_count_used":  wire_cnt,
+            "raw_min_total":    round(raw_min, 1),
+        },
         "wire_count": wire_cnt,
         "hs_labels_qty": hs_labels_qty,
         "hs_rolls": hs_rolls_needed,
@@ -1056,17 +1113,28 @@ def bom_from_scan():
     ws.merge_cells("F4:H4"); ws["F4"] = "AAE Automation"; s(ws["F4"], bg=MID_GRAY, fg=DARK, sz=9)
     ws.row_dimensions[4].height = 16
 
-    # Row 5: internal notice
-    ws.merge_cells("A5:H5"); ws.row_dimensions[5].height = 15
+    # Load vendor map for auto-lookup
+    vendor_map = get_vendor_map()
+
+    # Row 5: internal notice (9 cols now)
+    ws.merge_cells("A5:I5"); ws.row_dimensions[5].height = 15
     ws["A5"] = "⚠  INTERNAL DOCUMENT ONLY — Not for Customer Distribution  ⚠"
     s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
 
-    # Row 6: headers
-    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","AAE COST","NOTES"], 1):
+    # Update header row merges to 9 cols
+    for merge in ["A2:D2","E2:I2","F3:I3","F4:I4"]:
+        try: ws.merge_cells(merge)
+        except: pass
+
+    # Row 6: headers — now 9 columns including VENDOR
+    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","AAE COST","NOTES"], 1):
         c = ws.cell(row=6, column=ci, value=h)
         s(c, bold=True, bg=DARK, sz=9, ha="center")
         c.border = Border(bottom=Side(style="medium", color=RED))
     ws.row_dimensions[6].height = 20
+    # set col widths for 9 cols
+    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",14),("I",20)]:
+        ws.column_dimensions[col].width = w
 
     # Group items by category
     from collections import defaultdict
@@ -1075,23 +1143,22 @@ def bom_from_scan():
                  "Terminals","Relays","HMI/Computer","Wiring","Markers","Other"]
     for item in line_items:
         cat = item.get("category","Other")
+        if cat not in cat_order: cat = "Other"
         grouped[cat].append(item)
-    # Also handle ungrouped
-    for item in line_items:
-        if item.get("category","Other") not in cat_order:
-            grouped["Other"].append(item)
 
     row = 7; item_counter = 0
     even_fill = PatternFill("solid", fgColor="FDF8F8")
     odd_fill  = PatternFill("solid", fgColor=WHITE)
+    thin      = Side(style="thin", color="E0D0D0")
+    bdr       = Border(bottom=thin, left=thin, right=thin, top=thin)
+    TEAL      = "00897A"
 
     cats_with_items = [c for c in cat_order if grouped[c]]
     for cat in cats_with_items:
         items = grouped[cat]
-        # Section header
-        ws.merge_cells(f"A{row}:H{row}")
-        ws.cell(row=row, column=1, value=f"  {cat.upper()}")
-        hc = ws.cell(row=row, column=1)
+        # Section header spanning 9 cols
+        ws.merge_cells(f"A{row}:I{row}")
+        hc = ws.cell(row=row, column=1, value=f"  {cat.upper()}")
         hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
         hc.fill = PatternFill("solid", fgColor=RED)
         hc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
@@ -1102,60 +1169,74 @@ def bom_from_scan():
             item_counter += 1
             fill = even_fill if item_counter % 2 == 0 else odd_fill
             ws.row_dimensions[row].height = 15
+            mfr    = itm.get("manufacturer", "")
+            vendor = vendor_map.get(mfr.lower(), "")
+            if not vendor:
+                for key, vname in vendor_map.items():
+                    if key and (key in mfr.lower() or mfr.lower() in key):
+                        vendor = vname; break
             vals = [
                 itm.get("item_num", item_counter),
                 itm.get("part_number", ""),
                 itm.get("description", ""),
                 itm.get("qty", 1),
                 itm.get("unit", "ea"),
-                itm.get("manufacturer", ""),
-                0.00,  # AAE cost — placeholder, will pull from QB eventually
+                mfr,
+                vendor,
+                0.00,  # AAE cost — will pull from QB
                 itm.get("notes", "")
             ]
             for ci, val in enumerate(vals, 1):
                 c = ws.cell(row=row, column=ci, value=val)
                 c.fill = fill; c.border = bdr
                 c.font = Font(name="Arial", size=9, color=DARK)
-                if ci in (1, 4): c.alignment = Alignment(horizontal="center", vertical="center")
-                elif ci == 7:
+                if ci in (1, 4):
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif ci == 7:  # Vendor — teal, centered
+                    c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif ci == 8:  # AAE Cost
                     c.alignment = Alignment(horizontal="right", vertical="center")
                     c.number_format = '"$"#,##0.00'
-                    c.font = Font(name="Arial", size=9, color="999999", italic=True)
-                else: c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
+                    c.font = Font(name="Arial", size=9, color="AAAAAA", italic=True)
+                else:
+                    c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
             row += 1
 
         row += 1  # spacer
 
-    # Total row
-    ws.merge_cells(f"A{row}:F{row}")
-    tl = ws.cell(row=row, column=1, value="TOTAL MATERIAL COST (AAE Cost — pricing TBD from QuickBooks):")
+    # Total row (spans A:G, value in H)
+    ws.merge_cells(f"A{row}:G{row}")
+    tl = ws.cell(row=row, column=1, value="TOTAL MATERIAL COST  (AAE Cost — pricing TBD from QuickBooks):")
     tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
     tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
     tl.alignment = Alignment(horizontal="right", vertical="center")
-    tv = ws.cell(row=row, column=7, value=f"=SUM(G7:G{row-1})")
-    tv.font = Font(name="Arial", bold=True, color="999999", size=11, italic=True)
+    tv = ws.cell(row=row, column=8, value=f"=SUM(H7:H{row-1})")
+    tv.font = Font(name="Arial", bold=True, color="AAAAAA", size=11, italic=True)
     tv.number_format = '"$"#,##0.00'
     tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
     tv.alignment = Alignment(horizontal="right", vertical="center")
-    ws.cell(row=row, column=8).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.cell(row=row, column=9).fill = PatternFill("solid", fgColor=LIGHT_RED)
     ws.row_dimensions[row].height = 20
     row += 1
 
     # QB note
-    ws.merge_cells(f"A{row}:H{row}")
-    note = ws.cell(row=row, column=1, value="NOTE: AAE Cost column will be populated automatically from QuickBooks pricing data in a future update.")
+    ws.merge_cells(f"A{row}:I{row}")
+    note = ws.cell(row=row, column=1,
+        value="NOTE: AAE Cost column will be populated from QuickBooks pricing. Vendor column auto-assigned from AAE vendor database.")
     note.font = Font(name="Arial", size=8, color="888080", italic=True)
     note.alignment = Alignment(horizontal="left")
     row += 2
 
     # Footer
-    ws.merge_cells(f"A{row}:H{row}")
-    ft = ws.cell(row=row, column=1, value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
+    ws.merge_cells(f"A{row}:I{row}")
+    ft = ws.cell(row=row, column=1,
+        value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
     ft.font = Font(name="Arial", size=8, color="888080", italic=True)
     ft.alignment = Alignment(horizontal="center")
 
     ws.freeze_panes = "A7"
-    ws.auto_filter.ref = f"A6:H{row-3}"
+    ws.auto_filter.ref = f"A6:I{row-3}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:6"
@@ -1167,6 +1248,412 @@ def bom_from_scan():
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name=fname)
 
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ADMIN API ROUTES
+# ═══════════════════════════════════════════════════════════════════
+
+# ── Auth ────────────────────────────────────────────────────────────
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    data = request.get_json()
+    username = data.get("username","").strip().lower()
+    password = data.get("password","")
+    if not supabase:
+        # Fallback hardcoded users if DB not ready
+        FALLBACK = [
+            {"username":"mfellers","password":"aae2025","display_name":"M. Fellers","role":"admin"},
+            {"username":"admin","password":"aae2025","display_name":"Admin","role":"admin"},
+            {"username":"estimator","password":"panel123","display_name":"Estimator","role":"estimator"},
+        ]
+        user = next((u for u in FALLBACK if u["username"]==username and u["password"]==password), None)
+        if user:
+            return jsonify({"success":True,"display_name":user["display_name"],"role":user["role"],"username":username})
+        return jsonify({"success":False,"error":"Invalid credentials"}), 401
+    try:
+        rows = supabase.table("aae_users").select("*").eq("username",username).eq("active",True).execute()
+        if not rows.data:
+            return jsonify({"success":False,"error":"Invalid credentials"}), 401
+        user = rows.data[0]
+        if user["password"] != password:
+            return jsonify({"success":False,"error":"Invalid credentials"}), 401
+        return jsonify({"success":True,"display_name":user["display_name"],"role":user["role"],"username":username})
+    except Exception as e:
+        return jsonify({"success":False,"error":str(e)}), 500
+
+# ── User Management (admin only) ────────────────────────────────────
+@app.route("/api/users", methods=["GET"])
+def get_users():
+    if not supabase: return jsonify([])
+    try:
+        rows = supabase.table("aae_users").select("id,username,display_name,role,active,created_at").order("username").execute()
+        return jsonify(rows.data)
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/api/users", methods=["POST"])
+def create_user():
+    data = request.get_json()
+    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    try:
+        row = {"username":data["username"].strip().lower(),"password":data["password"],
+               "display_name":data.get("display_name",data["username"]),"role":data.get("role","estimator")}
+        result = supabase.table("aae_users").insert(row).execute()
+        return jsonify({"success":True,"user":result.data[0]})
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/api/users/<uid>", methods=["PUT"])
+def update_user(uid):
+    data = request.get_json()
+    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    try:
+        updates = {}
+        for f in ["password","display_name","role","active"]:
+            if f in data: updates[f] = data[f]
+        updates["updated_at"] = datetime.now().isoformat()
+        result = supabase.table("aae_users").update(updates).eq("id",uid).execute()
+        return jsonify({"success":True})
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/api/users/<uid>", methods=["DELETE"])
+def delete_user(uid):
+    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    try:
+        supabase.table("aae_users").update({"active":False}).eq("id",uid).execute()
+        return jsonify({"success":True})
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+# ── Labor Rates (admin only) ─────────────────────────────────────────
+@app.route("/api/labor_rates", methods=["GET"])
+def get_labor_rates_api():
+    if not supabase:
+        # Return defaults formatted as list
+        cats = {
+            "enclosure_prep":"Enclosure","subpanel_mount":"Enclosure","panel_layout":"Enclosure",
+            "din_rail":"Enclosure","wire_duct":"Enclosure","enc_accessory":"Enclosure","door_component":"Enclosure",
+            "main_breaker_small":"Power","main_breaker_large":"Power","branch_breaker_1p":"Power",
+            "branch_breaker_23p":"Power","fused_disconnect":"Power","cpt":"Power","pdb":"Power",
+            "relay_icecube":"Motor Ctrl","relay_din":"Motor Ctrl","contactor_small":"Motor Ctrl",
+            "contactor_large":"Motor Ctrl","overload":"Motor Ctrl","timer":"Motor Ctrl","ssr":"Motor Ctrl",
+            "vfd_small":"Motor Ctrl","vfd_med":"Motor Ctrl","vfd_large":"Motor Ctrl",
+            "soft_starter_small":"Motor Ctrl","soft_starter_large":"Motor Ctrl",
+            "pilot_light":"Control","selector":"Control","pushbutton":"Control","estop":"Control",
+            "plc_rack":"PLC/Network","plc_di_do":"PLC/Network","plc_ai_ao":"PLC/Network",
+            "hmi":"PLC/Network","safety_relay":"PLC/Network","eth_switch":"PLC/Network","eth_cable":"PLC/Network",
+            "tb_standard":"Terminals","tb_ground":"Terminals","tb_fused":"Terminals",
+            "tb_disconnect":"Terminals","tb_accessories":"Terminals","terminal_markers":"Terminals",
+            "wire_land_control":"Wiring","ferrule":"Wiring","wire_route":"Wiring",
+            "heat_shrink_label":"Wiring","heat_shrink_batch":"Wiring",
+            "ul_labels":"UL/QC","continuity_check":"UL/QC","hipot":"UL/QC","as_built":"UL/QC","qc_signoff":"UL/QC",
+        }
+        return jsonify([{"rate_key":k,"rate_value":v,"category":cats.get(k,"Other"),"description":k.replace("_"," ").title()}
+                        for k,v in LABOR_RATES.items()])
+    try:
+        rows = supabase.table("aae_labor_rates").select("*").order("category").order("rate_key").execute()
+        return jsonify(rows.data)
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/api/labor_rates/<rate_key>", methods=["PUT"])
+def update_labor_rate(rate_key):
+    data = request.get_json()
+    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    try:
+        updates = {"rate_value":float(data["rate_value"]),"updated_by":data.get("updated_by","mfellers"),"updated_at":datetime.now().isoformat()}
+        supabase.table("aae_labor_rates").update(updates).eq("rate_key",rate_key).execute()
+        return jsonify({"success":True})
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/api/labor_rates/bulk", methods=["POST"])
+def bulk_update_labor_rates():
+    """Update multiple rates at once."""
+    data = request.get_json()
+    updates = data.get("rates", {})
+    username = data.get("username", "mfellers")
+    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    try:
+        now = datetime.now().isoformat()
+        for key, val in updates.items():
+            supabase.table("aae_labor_rates").update(
+                {"rate_value": float(val), "updated_by": username, "updated_at": now}
+            ).eq("rate_key", key).execute()
+        return jsonify({"success":True,"updated":len(updates)})
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+# ── Vendors ───────────────────────────────────────────────────────────
+@app.route("/api/vendors", methods=["GET"])
+def get_vendors():
+    if not supabase:
+        return jsonify([])
+    try:
+        rows = supabase.table("aae_vendors").select("*").order("vendor_name").order("manufacturer").execute()
+        return jsonify(rows.data)
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/api/vendors", methods=["POST"])
+def create_vendor():
+    data = request.get_json()
+    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    try:
+        result = supabase.table("aae_vendors").insert({
+            "vendor_name":data["vendor_name"],"manufacturer":data["manufacturer"],
+            "account_number":data.get("account_number",""),
+            "notes":data.get("notes",""),"updated_by":data.get("updated_by","mfellers")
+        }).execute()
+        return jsonify({"success":True,"vendor":result.data[0]})
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/api/vendors/<int:vid>", methods=["PUT"])
+def update_vendor(vid):
+    data = request.get_json()
+    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    try:
+        updates = {k:data[k] for k in ["vendor_name","manufacturer","account_number","notes","active"] if k in data}
+        updates["updated_at"] = datetime.now().isoformat()
+        updates["updated_by"] = data.get("updated_by","mfellers")
+        supabase.table("aae_vendors").update(updates).eq("id",vid).execute()
+        return jsonify({"success":True})
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+@app.route("/api/vendors/<int:vid>", methods=["DELETE"])
+def delete_vendor(vid):
+    if not supabase: return jsonify({"error":"DB not configured"}), 500
+    try:
+        supabase.table("aae_vendors").update({"active":False,"updated_at":datetime.now().isoformat()}).eq("id",vid).execute()
+        return jsonify({"success":True})
+    except Exception as e:
+        return jsonify({"error":str(e)}), 500
+
+# ── Hour Breakdown Report (Excel download) ────────────────────────────
+@app.route("/api/hours_report", methods=["POST"])
+def hours_report():
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    data      = request.get_json()
+    calc      = data.get("calc", {})
+    bid       = data.get("bid_data", {})
+    breakdown = calc.get("hour_breakdown", {})
+    project   = bid.get("project_name","Unknown Project")
+    customer  = bid.get("customer_name","")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Labor Hour Breakdown"
+    ws.column_dimensions["A"].width = 36
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 14
+    ws.column_dimensions["D"].width = 40
+
+    RED="9B1B1B"; DARK_RED="6B0A0A"; WHITE="FFFFFF"; LIGHT_RED="FDECEA"
+    DARK="2C2C2C"; GRAY="F5F0F0"
+
+    def hdr(row, vals, bg, fg=WHITE, bold=True, sz=10):
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(row=row, column=ci, value=v)
+            c.font = Font(name="Arial", bold=bold, color=fg, size=sz)
+            if bg: c.fill = PatternFill("solid", fgColor=bg)
+            c.alignment = Alignment(horizontal="center" if ci>1 else "left", vertical="center", indent=(1 if ci==1 else 0))
+
+    def row_data(r, label, hrs, rate_key=None, qty=None, rate=None, note=""):
+        thin = Side(style="thin", color="E0D0D0")
+        bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
+        vals = [label, f"{hrs:.2f} hrs" if isinstance(hrs,(int,float)) else hrs,
+                f"{rate:.2f} min/ea × {qty}" if (rate and qty is not None) else "", note]
+        even = r%2==0
+        fill = PatternFill("solid", fgColor=GRAY if even else WHITE)
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(row=r, column=ci, value=v)
+            c.fill = fill; c.border = bdr
+            c.font = Font(name="Arial", size=9, color=DARK)
+            c.alignment = Alignment(horizontal="right" if ci==2 else "left", vertical="center")
+
+    # Banner
+    ws.merge_cells("A1:D1"); ws.row_dimensions[1].height = 14
+    c=ws["A1"]; c.value="AAE AUTOMATION — LABOR HOUR BREAKDOWN REPORT"; c.fill=PatternFill("solid",fgColor=RED)
+    c.font=Font(name="Arial",bold=True,color=WHITE,size=11); c.alignment=Alignment(horizontal="center",vertical="center")
+
+    # Project header
+    ws.merge_cells("A2:B2"); ws["A2"]=f"Project: {project}"
+    ws["A2"].font=Font(name="Arial",bold=True,color=DARK_RED,size=10); ws["A2"].fill=PatternFill("solid",fgColor=LIGHT_RED)
+    ws.merge_cells("C2:D2"); ws["C2"]=f"Customer: {customer}"
+    ws["C2"].font=Font(name="Arial",size=9,color=DARK); ws["C2"].fill=PatternFill("solid",fgColor=LIGHT_RED)
+    ws.row_dimensions[2].height=18
+
+    ws.merge_cells("A3:B3"); ws["A3"]=f"Date: {datetime.now().strftime('%m/%d/%Y %I:%M %p')}"
+    ws["A3"].font=Font(name="Arial",size=9,color=DARK); ws["A3"].fill=PatternFill("solid",fgColor=GRAY)
+    ws.merge_cells("C3:D3")
+    ws["C3"]=f"Complexity: {bid.get('complexity','STANDARD')}  |  Tech: {bid.get('tech_level','JOURNEYMAN')}"
+    ws["C3"].font=Font(name="Arial",size=9,color=DARK); ws["C3"].fill=PatternFill("solid",fgColor=GRAY)
+    ws.row_dimensions[3].height=15
+
+    # Column headers
+    hdr(4, ["SECTION / LINE ITEM","HOURS","RATE × QTY","NOTES"], DARK, WHITE)
+    ws.row_dimensions[4].height=18
+
+    r = 5
+    def section(title):
+        nonlocal r
+        ws.merge_cells(f"A{r}:D{r}")
+        c=ws.cell(row=r,column=1,value=f"  {title}")
+        c.font=Font(name="Arial",bold=True,color=WHITE,size=9)
+        c.fill=PatternFill("solid",fgColor=RED)
+        c.alignment=Alignment(horizontal="left",vertical="center",indent=1)
+        ws.row_dimensions[r].height=16
+        r+=1
+
+    def data_row(label, hrs, formula="", note=""):
+        nonlocal r
+        thin=Side(style="thin",color="E0D0D0"); bdr=Border(bottom=thin,left=thin,right=thin,top=thin)
+        fill=PatternFill("solid",fgColor=GRAY if r%2==0 else WHITE)
+        for ci,v in enumerate([label, f"{hrs:.2f}" if isinstance(hrs,(int,float)) else hrs, formula, note],1):
+            c=ws.cell(row=r,column=ci,value=v)
+            c.fill=fill; c.border=bdr
+            c.font=Font(name="Arial",size=9,color=DARK)
+            c.alignment=Alignment(horizontal="right" if ci==2 else "left",vertical="center")
+            if ci==2: c.number_format='0.00'
+        ws.row_dimensions[r].height=15
+        r+=1
+
+    rates = get_labor_rates()
+    bd    = breakdown
+
+    enc_qty = max(1,int(bid.get("enc_qty",1)))
+    din_runs= int(bid.get("din_rail_runs",3)); duct_runs=int(bid.get("wire_duct_runs",4))
+    wire_cnt= bd.get("wire_count_used",0)
+    tb_std=int(bid.get("tb_standard",0)); tb_gnd=int(bid.get("tb_ground",0))
+    tb_fsd=int(bid.get("tb_fused",0));    tb_dis=int(bid.get("tb_disconnect",0))
+    tb_total=tb_std+tb_gnd+tb_fsd+tb_dis
+    di=int(bid.get("plc_di",0)); do_pts=int(bid.get("plc_do",0))
+    ai=int(bid.get("plc_ai",0)); ao=int(bid.get("plc_ao",0))
+    relay_ic=int(bid.get("relay_icecube",0))
+    plc_yn=str(bid.get("plc_present","N")).upper()=="Y"
+    hmi_yn=str(bid.get("hmi_present","N")).upper()=="Y"
+    eth_sw=1 if str(bid.get("eth_switch","N")).upper()=="Y" else 0
+    eth_cab=int(bid.get("eth_cables",0))
+    main_amp=int(bid.get("main_amp",100))
+    br_1p=int(bid.get("branch_1p",0)); br_2p=int(bid.get("branch_2p",0)); br_3p=int(bid.get("branch_3p",0))
+    fused_d=int(bid.get("fused_disconnects",0))
+    estops=int(bid.get("estops",0)); pilots=int(bid.get("pilot_lights",0))
+    markers=str(bid.get("terminal_markers","Y")).upper()=="Y"
+    ferrules=str(bid.get("ferrules","Y")).upper()=="Y"
+    hs_yn=str(bid.get("heat_shrink","Y")).upper()=="Y"
+
+    section("ENCLOSURE & MECHANICAL")
+    data_row("Enclosure prep + subpanel mount", (rates["enclosure_prep"]+rates["subpanel_mount"])*enc_qty/60,
+             f"({rates['enclosure_prep']}+{rates['subpanel_mount']}) min × {enc_qty} enc")
+    data_row("Panel layout", rates["panel_layout"]*enc_qty/60, f"{rates['panel_layout']} min × {enc_qty} enc")
+    data_row("DIN rail installation", rates["din_rail"]*din_runs/60, f"{rates['din_rail']} min × {din_runs} runs")
+    data_row("Wire duct installation", rates["wire_duct"]*duct_runs*4/60, f"{rates['wire_duct']} min × {duct_runs*4} sections")
+    data_row("Enclosure accessories", rates["enc_accessory"]*int(bid.get("enc_accessories",0))/60,
+             f"{rates['enc_accessory']} min × {bid.get('enc_accessories',0)} items")
+    data_row("► SECTION TOTAL", bd.get("enclosure_hrs",0))
+
+    section("POWER DISTRIBUTION")
+    mb_rate = rates["main_breaker_small"] if main_amp<=100 else rates["main_breaker_large"]
+    data_row("Main breaker", mb_rate*enc_qty/60, f"{mb_rate} min × {enc_qty}")
+    data_row("1-pole branch breakers", rates["branch_breaker_1p"]*br_1p/60, f"{rates['branch_breaker_1p']} min × {br_1p}")
+    data_row("2/3-pole branch breakers", rates["branch_breaker_23p"]*(br_2p+br_3p)/60, f"{rates['branch_breaker_23p']} min × {br_2p+br_3p}")
+    data_row("Fused disconnects", rates["fused_disconnect"]*fused_d/60, f"{rates['fused_disconnect']} min × {fused_d}")
+    data_row("► SECTION TOTAL", bd.get("power_hrs",0))
+
+    section("MOTOR CONTROL")
+    data_row("Ice cube relays", rates["relay_icecube"]*relay_ic/60, f"{rates['relay_icecube']} min × {relay_ic}")
+    vfd_sm=int(bid.get("vfd_small",0)); vfd_md=int(bid.get("vfd_med",0)); vfd_lg=int(bid.get("vfd_large",0))
+    data_row("VFDs (small/med/large)", (rates["vfd_small"]*vfd_sm+rates["vfd_med"]*vfd_md+rates["vfd_large"]*vfd_lg)/60,
+             f"{vfd_sm}×{rates['vfd_small']} + {vfd_md}×{rates['vfd_med']} + {vfd_lg}×{rates['vfd_large']} min")
+    data_row("► SECTION TOTAL", bd.get("motor_ctrl_hrs",0))
+
+    section("CONTROL DEVICES")
+    data_row("E-stops", rates["estop"]*estops/60, f"{rates['estop']} min × {estops}")
+    data_row("Pilot lights", rates["pilot_light"]*pilots/60, f"{rates['pilot_light']} min × {pilots}")
+    data_row("► SECTION TOTAL", bd.get("control_dev_hrs",0))
+
+    section("PLC / NETWORKING")
+    data_row("PLC rack/controller", (rates["plc_rack"] if plc_yn else 0)/60, f"{rates['plc_rack']} min (if PLC present)")
+    data_row("Digital I/O wiring", rates["plc_di_do"]*(di+do_pts)/60, f"{rates['plc_di_do']} min × {di+do_pts} pts (DI:{di} DO:{do_pts})")
+    data_row("Analog I/O wiring", rates["plc_ai_ao"]*(ai+ao)/60, f"{rates['plc_ai_ao']} min × {ai+ao} pts (AI:{ai} AO:{ao})")
+    data_row("HMI mount & cable", rates["hmi"]*(1 if hmi_yn else 0)/60, f"{rates['hmi']} min (if HMI present)")
+    data_row("Ethernet switch", rates["eth_switch"]*eth_sw/60, f"{rates['eth_switch']} min × {eth_sw}")
+    data_row("Ethernet cables", rates["eth_cable"]*eth_cab/60, f"{rates['eth_cable']} min × {eth_cab}")
+    data_row("► SECTION TOTAL", bd.get("plc_network_hrs",0))
+
+    section("TERMINAL BLOCKS & WIRING")
+    data_row("Standard TBs", rates["tb_standard"]*tb_std/60, f"{rates['tb_standard']} min × {tb_std}")
+    data_row("Ground TBs", rates["tb_ground"]*tb_gnd/60, f"{rates['tb_ground']} min × {tb_gnd}")
+    data_row("Fused TBs", rates["tb_fused"]*tb_fsd/60, f"{rates['tb_fused']} min × {tb_fsd}")
+    data_row(f"Wire landing — {wire_cnt} wires × 2 ends", rates["wire_land_control"]*wire_cnt*2/60,
+             f"{rates['wire_land_control']} min × {wire_cnt*2} ends", "AUTO-ESTIMATED wire count" if int(bid.get("wire_count",0))==0 else "")
+    data_row(f"Ferrule crimping (if enabled)", (rates["ferrule"]*wire_cnt*2/60) if ferrules else 0,
+             f"{rates['ferrule']} min × {wire_cnt*2} ends")
+    data_row("Wire routing through duct", rates["wire_route"]*wire_cnt/60, f"{rates['wire_route']} min × {wire_cnt}")
+    marker_strips=max(1,int(tb_total*1.2/10)) if markers else 0
+    data_row("Terminal marker labeling", rates["terminal_markers"]*marker_strips/60, f"{rates['terminal_markers']} min × {marker_strips} strips")
+    data_row("► SECTION TOTAL", bd.get("terminals_wire_hrs",0))
+
+    section("HEAT SHRINK LABELS")
+    data_row(f"Label application ({wire_cnt*2} labels)", (rates["heat_shrink_label"]*wire_cnt*2/60) if hs_yn else 0,
+             f"{rates['heat_shrink_label']} min × {wire_cnt*2}")
+    data_row("Heat shrink batch setups", (rates["heat_shrink_batch"]*max(1,int(wire_cnt*2/50))/60) if hs_yn else 0,
+             f"{rates['heat_shrink_batch']} min × {max(1,int(wire_cnt*2/50))} batches")
+    data_row("► SECTION TOTAL", bd.get("heat_shrink_hrs",0))
+
+    section("UL LABELING & QC")
+    data_row("UL component labeling", rates["ul_labels"]*enc_qty/60, f"{rates['ul_labels']} min × {enc_qty} enc")
+    data_row("Continuity check", rates["continuity_check"]*wire_cnt/60, f"{rates['continuity_check']} min × {wire_cnt} wires")
+    data_row("Hi-pot test", rates["hipot"]*enc_qty/60, f"{rates['hipot']} min × {enc_qty} enc")
+    data_row("As-built drawings", rates["as_built"]*enc_qty/60, f"{rates['as_built']} min × {enc_qty} enc")
+    data_row("QC sign-off", rates["qc_signoff"]*enc_qty/60, f"{rates['qc_signoff']} min × {enc_qty} enc")
+    data_row("► SECTION TOTAL", bd.get("ul_qc_hrs",0))
+
+    # Summary block
+    r+=1
+    ws.merge_cells(f"A{r}:D{r}")
+    ws.cell(row=r,column=1,value="  SUMMARY").fill=PatternFill("solid",fgColor=DARK_RED)
+    ws.cell(row=r,column=1).font=Font(name="Arial",bold=True,color=WHITE,size=10)
+    ws.cell(row=r,column=1).alignment=Alignment(horizontal="left",vertical="center",indent=1)
+    ws.row_dimensions[r].height=18; r+=1
+
+    fat_hrs=float(bid.get("fat_hours",0)); eng_hrs=float(bid.get("eng_hours",0)); prog_hrs=float(bid.get("prog_hours",0))
+    data_row("RAW HOURS (sum of all sections)", calc.get("raw_hours",0))
+    data_row(f"Complexity multiplier ({bid.get('complexity','STANDARD')})", calc.get("raw_hours",0)*(calc.get("complexity_mult",1)-1), f"× {calc.get('complexity_mult',1.0):.2f}")
+    data_row(f"Tech level multiplier ({bid.get('tech_level','JOURNEYMAN')})", 0, f"× {calc.get('tech_mult',1.0):.2f}")
+    data_row(f"Calibration factor", 0, f"× {calc.get('calib_factor',1.0):.3f}")
+    data_row("FAT / witness testing hours", fat_hrs)
+    data_row("Engineering hours", eng_hrs)
+    data_row("Programming hours", prog_hrs)
+
+    r+=1
+    ws.merge_cells(f"A{r}:C{r}")
+    tc=ws.cell(row=r,column=1,value="TOTAL BILLABLE HOURS")
+    tc.font=Font(name="Arial",bold=True,color=WHITE,size=12)
+    tc.fill=PatternFill("solid",fgColor=RED)
+    tc.alignment=Alignment(horizontal="left",vertical="center",indent=1)
+    tv=ws.cell(row=r,column=2,value=calc.get("total_hours",0))
+    tv.font=Font(name="Arial",bold=True,color=WHITE,size=12)
+    tv.fill=PatternFill("solid",fgColor=RED)
+    tv.alignment=Alignment(horizontal="right",vertical="center")
+    tv.number_format='0.00'
+    ws.cell(row=r,column=3).fill=PatternFill("solid",fgColor=RED)
+    ws.cell(row=r,column=4,value=f"@ ${calc.get('labor_rate_used',95)}/hr = ${calc.get('labor_cost',0):,.2f}")
+    ws.cell(row=r,column=4).font=Font(name="Arial",bold=True,color=DARK_RED,size=10)
+    ws.row_dimensions[r].height=22
+
+    ws.freeze_panes="A5"
+    ws.page_setup.orientation="landscape"; ws.page_setup.fitToPage=True; ws.page_setup.fitToWidth=1
+
+    buf=io.BytesIO(); wb.save(buf); buf.seek(0)
+    fname=f"AAE_HourBreakdown_{project.replace(' ','_')}.xlsx"
+    return send_file(buf,mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True,download_name=fname)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
