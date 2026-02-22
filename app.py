@@ -14,11 +14,10 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 app = Flask(__name__)
 
 # Clients
-anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-supabase  = create_client(
-    os.environ.get("SUPABASE_URL"),
-    os.environ.get("SUPABASE_ANON_KEY")
-)
+claude_client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+_sb_url = os.environ.get("SUPABASE_URL", "")
+_sb_key = os.environ.get("SUPABASE_ANON_KEY", "")
+supabase = create_client(_sb_url, _sb_key) if _sb_url and _sb_key else None
 
 # ── Labor rates (minutes per unit) ────────────────────────────────────────
 LABOR_RATES = {
@@ -349,7 +348,7 @@ Rules:
 - confidence: 0.0 to 1.0"""
 
     try:
-        response = anthropic.messages.create(
+        response = claude_client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=4000,
             messages=[{
@@ -588,13 +587,13 @@ def static_files(filename):
 def api_test():
     """Quick health check — verifies Anthropic API key and model are working."""
     try:
-        resp = anthropic.messages.create(
+        resp = claude_client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=20,
             messages=[{"role":"user","content":"Reply with the word OK only."}]
         )
         return jsonify({"status": "ok", "reply": resp.content[0].text,
-                        "anthropic_sdk": anthropic.__version__})
+                        "anthropic_sdk": "ok"})
     except Exception as e:
         import traceback
         return jsonify({"status": "error", "error": str(e),
@@ -607,12 +606,22 @@ def index():
 
 @app.route("/api/scan", methods=["POST"])
 def scan():
+    print("=== /api/scan called ===", flush=True)
     if "drawing" not in request.files:
+        print("ERROR: No file in request", flush=True)
         return jsonify({"error": "No file uploaded"}), 400
     f = request.files["drawing"]
+    print(f"File received: {f.filename}, size approx {len(f.read())} bytes", flush=True)
+    f.seek(0)  # reset after read
     pdf_bytes = f.read()
     pdf_b64   = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+    api_key   = os.environ.get("ANTHROPIC_API_KEY", "")
+    print(f"API key present: {bool(api_key)}, key prefix: {api_key[:8] if api_key else 'MISSING'}", flush=True)
+    print(f"PDF b64 length: {len(pdf_b64)}", flush=True)
     result    = scan_drawing(pdf_b64, f.filename)
+    print(f"Scan result keys: {list(result.keys())}", flush=True)
+    if "error" in result:
+        print(f"SCAN ERROR: {result['error']}", flush=True)
     return jsonify(result)
 
 @app.route("/api/calculate", methods=["POST"])
@@ -636,6 +645,7 @@ def save_bid():
             "bid_data":       json.dumps(data),
             "created_at":     datetime.now().isoformat(),
         }
+        if not supabase: return jsonify({"error": "Supabase not configured"}), 500
         result = supabase.table("bids").insert(row).execute()
         return jsonify({"success": True, "id": result.data[0]["id"]})
     except Exception as e:
@@ -644,6 +654,7 @@ def save_bid():
 @app.route("/api/bids", methods=["GET"])
 def get_bids():
     try:
+        if not supabase: return jsonify([])
         result = supabase.table("bids").select("*").order("created_at", desc=True).limit(50).execute()
         return jsonify(result.data)
     except Exception as e:
@@ -797,6 +808,7 @@ def bom_excel():
 def bid_quote_pdf(bid_id):
     """Download quote PDF for a saved bid by ID."""
     try:
+        if not supabase: return jsonify({"error": "Supabase not configured"}), 500
         result = supabase.table("bids").select("*").eq("id", bid_id).single().execute()
         bid = result.data
         if not bid:
