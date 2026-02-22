@@ -1428,18 +1428,21 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
     auth: { persistSession: false, detectSessionInUrl: true }
   });
 
-  // Handle invite / password-recovery links — Supabase puts the token in the URL hash.
-  // onAuthStateChange fires SIGNED_IN after an invite or PASSWORD_RECOVERY after a reset.
-  _sbClient.auth.onAuthStateChange((event, session) => {
-    if ((event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') && session) {
-      // Only show set-password screen if we got here via an invite/recovery link
-      // (i.e. the user hasn't gone through doLogin() — _accessToken will be null)
-      if (!_accessToken) {
+  // Handle invite / password-recovery links.
+  // ONLY activate if the URL hash contains type=invite or type=recovery.
+  // This prevents the handler firing on every normal sign-in.
+  const _hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+  const _tokenType  = _hashParams.get('type');
+  if (_tokenType === 'invite' || _tokenType === 'recovery') {
+    _sbClient.auth.onAuthStateChange((event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') && session && !_accessToken) {
         _inviteSession = session;
         showSetPasswordScreen(session.user.email);
+        // Remove token from URL so page refresh doesn't re-trigger
+        window.history.replaceState(null, '', window.location.pathname);
       }
-    }
-  });
+    });
+  }
 }
 
 /** Always attach Bearer token to backend API calls */
