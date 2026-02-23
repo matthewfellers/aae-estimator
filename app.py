@@ -764,22 +764,31 @@ def index():
 @require_auth
 def me():
     """Return current user's profile (role, display name). Used by frontend for role-gated UI."""
-    if not _sb_url:
-        return jsonify({"id": g.user["id"], "email": g.user["email"], "role": g.user.get("role","estimator"), "display_name": ""})
-    try:
-        sb = get_user_sb()
-        result = sb.table("profiles").select("role,display_name,username").eq("user_id", g.user["id"]).single().execute()
-        profile = result.data or {}
-        return jsonify({
-            "id": g.user["id"],
-            "email": g.user["email"],
-            "aal": g.user.get("aal"),
-            "role": profile.get("role", "estimator"),
-            "display_name": profile.get("display_name", ""),
-            "username": profile.get("username", ""),
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Role is authoritative from JWT app_metadata (set by provision_admin.py).
+    # profiles table is supplementary — display name only.
+    # If the row doesn't exist yet (user not yet provisioned), we fall back to
+    # JWT values so login still works and the admin can see who is unprovisioned.
+    user_role = g.user.get("role", "viewer")
+    user_email = g.user["email"]
+    display_name = ""
+
+    if _sb_url:
+        try:
+            sb = get_user_sb()
+            result = sb.table("profiles").select("display_name,username").eq("user_id", g.user["id"]).maybe_single().execute()
+            if result.data:
+                display_name = result.data.get("display_name", "") or result.data.get("username", "")
+        except Exception:
+            pass  # profiles row missing or RLS blocked — not fatal, role comes from JWT
+
+    return jsonify({
+        "id":           g.user["id"],
+        "email":        user_email,
+        "aal":          g.user.get("aal"),
+        "role":         user_role,
+        "display_name": display_name or user_email,
+        "org_id":       g.user.get("org_id"),
+    })
 
 MAX_SCAN_SIZE = 25 * 1024 * 1024  # 25 MB
 PDF_MAGIC = b"%PDF"
