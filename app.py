@@ -876,8 +876,25 @@ def get_bids():
     try:
         if not _sb_url: return jsonify([])
         sb = get_user_sb()
-        result = sb.table("bids").select("*").order("created_at", desc=True).limit(50).execute()
+        result = sb.table("bids").select("*").is_("is_deleted", "null").order("created_at", desc=True).limit(50).execute()
         return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/bids/<int:bid_id>", methods=["DELETE"])
+@require_auth
+def delete_bid(bid_id):
+    """Soft delete a bid — admin only. Sets is_deleted = now() instead of removing the row."""
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin role required"}), 403
+    try:
+        sb = get_user_sb()
+        from datetime import timezone
+        sb.table("bids").update({
+            "is_deleted": datetime.now(timezone.utc).isoformat()
+        }).eq("id", bid_id).execute()
+        audit_log("bid_soft_delete", "bids", str(bid_id), {"deleted_by": g.user["email"]})
+        return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
