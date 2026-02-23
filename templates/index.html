@@ -1489,7 +1489,10 @@ async function doLogin() {
 
     // Fetch server-verified profile (role comes from server, never trusted from client)
     const profileResp = await apiFetch("/api/me");
-    if (!profileResp.ok) throw new Error("Could not load user profile");
+    if (!profileResp.ok) {
+      const body = await profileResp.json().catch(() => ({}));
+      throw new Error(body.error || "Could not load user profile (" + profileResp.status + ")");
+    }
     const profile = await profileResp.json();
 
     currentUser = profile;
