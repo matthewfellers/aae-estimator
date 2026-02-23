@@ -54,19 +54,43 @@ def _get_jwks() -> dict:
         raise RuntimeError(f"Cannot fetch JWKS: {e}") from e
 
 def verify_supabase_jwt(token: str) -> dict:
-    """Verify RS256 JWT via JWKS. Validates signature AND issuer."""
-    jwks = _get_jwks()
-    kid = jwt.get_unverified_header(token).get("kid")
-    key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
-    if not key_data:
-        raise ValueError(f"JWT kid '{kid}' not found in JWKS")
-    public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key_data))
-    return jwt.decode(
-        token, public_key,
-        algorithms=["RS256"],
-        options={"verify_aud": False},
-        issuer=_expected_issuer(),
-    )
+    """
+    Verify Supabase JWT — supports both RS256 (asymmetric, JWKS) and
+    HS256 (symmetric, JWT secret). Supabase projects use HS256 by default
+    unless asymmetric signing is explicitly enabled in project settings.
+    Auto-detects which algorithm the token uses from its header.
+    """
+    header = jwt.get_unverified_header(token)
+    alg    = header.get("alg", "RS256")
+
+    if alg == "HS256":
+        # Symmetric — verify with the JWT secret from env
+        secret = os.environ.get("SUPABASE_JWT_SECRET", "")
+        if not secret:
+            raise ValueError(
+                "SUPABASE_JWT_SECRET env var not set. "
+                "Add it in Railway → Variables (Supabase → Settings → API → JWT Secret)."
+            )
+        return jwt.decode(
+            token, secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+            issuer=_expected_issuer(),
+        )
+    else:
+        # Asymmetric RS256 — verify via JWKS
+        jwks     = _get_jwks()
+        kid      = header.get("kid")
+        key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+        if not key_data:
+            raise ValueError(f"JWT kid '{kid}' not found in JWKS")
+        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key_data))
+        return jwt.decode(
+            token, public_key,
+            algorithms=["RS256"],
+            options={"verify_aud": False},
+            issuer=_expected_issuer(),
+        )
 
 def get_bearer_token() -> str | None:
     auth = request.headers.get("Authorization", "")
