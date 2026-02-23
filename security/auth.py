@@ -139,9 +139,24 @@ def require_auth(fn):
             payload = verify_supabase_jwt(token)
         except jwt.ExpiredSignatureError:
             return jsonify({"error": "Session expired — please sign in again"}), 401
-        except jwt.InvalidIssuerError:
-            return jsonify({"error": "Invalid token issuer"}), 401
+        except jwt.InvalidIssuerError as e:
+            # Log the actual vs expected issuer to Railway logs
+            try:
+                unverified = jwt.decode(token, options={"verify_signature": False})
+                actual_iss = unverified.get("iss", "MISSING")
+            except Exception:
+                actual_iss = "UNREADABLE"
+            print(f"[AUTH] InvalidIssuer: token iss='{actual_iss}' expected='{_expected_issuer()}'", flush=True)
+            return jsonify({"error": f"Invalid token issuer (got '{actual_iss}', expected '{_expected_issuer()}')"}), 401
         except Exception as e:
+            # Log full details to Railway logs for diagnosis
+            try:
+                header = jwt.get_unverified_header(token)
+                unverified = jwt.decode(token, options={"verify_signature": False})
+                actual_iss = unverified.get("iss", "MISSING")
+            except Exception:
+                header, actual_iss = {}, "UNREADABLE"
+            print(f"[AUTH] JWT error: {e} | alg={header.get('alg')} | iss='{actual_iss}' | expected_iss='{_expected_issuer()}' | jwt_secret_set={bool(os.environ.get('SUPABASE_JWT_SECRET'))}", flush=True)
             return jsonify({"error": f"Invalid token: {str(e)}"}), 401
 
         user_id = payload.get("sub")
