@@ -1384,6 +1384,7 @@ async function loadHistory() {
               <td style="white-space:nowrap">
                 <a href="/api/bid_quote_pdf/${b.id}" target="_blank" class="hab hab-pdf">📄 PDF</a>
                 <button class="hab hab-bom" onclick="downloadHistoryBOM(${b.id})">📦 BOM</button>
+                ${currentUser?.role === 'admin' ? `<button class="hab" style="background:rgba(155,27,27,0.2);border:1px solid rgba(155,27,27,0.5);color:#F4A9A8" onclick="deleteBid(${b.id}, '${(b.project_name||'this bid').replace(/'/g,'')}')">🗑 Delete</button>` : ''}
               </td>
             </tr>
           `).join('')}
@@ -1391,6 +1392,21 @@ async function loadHistory() {
       </table>`;
   } catch(err) {
     el.innerHTML = '<p style="color:#ef4444">Failed to load history.</p>';
+  }
+}
+
+async function deleteBid(bidId, projectName) {
+  if (!confirm(`Soft-delete "${projectName}"?\n\nThe bid will be hidden from all views but preserved in the database for audit purposes. This cannot be undone from the UI.`)) return;
+  try {
+    const res = await apiFetch(`/api/bids/${bidId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Delete failed');
+    }
+    toast('Bid deleted', 'success');
+    loadHistory();
+  } catch(err) {
+    toast('Delete failed: ' + err.message, 'error');
   }
 }
 
