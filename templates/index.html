@@ -1471,7 +1471,7 @@ function showLoginErr(msg) {
 async function doLogin() {
   const email = document.getElementById("login_email").value.trim();
   const pass  = document.getElementById("login_pass").value;
-  const btn   = document.querySelector(".login-submit");
+  const btn   = document.querySelector("#signin-form .login-submit");
   btn.disabled = true;
   btn.textContent = "Signing in…";
   document.getElementById("login_err").style.display = "none";
