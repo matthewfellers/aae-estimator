@@ -55,13 +55,13 @@ def _get_jwks() -> dict:
 
 def verify_supabase_jwt(token: str) -> dict:
     """
-    Verify Supabase JWT — supports both RS256 (asymmetric, JWKS) and
-    HS256 (symmetric, JWT secret). Supabase projects use HS256 by default
-    unless asymmetric signing is explicitly enabled in project settings.
-    Auto-detects which algorithm the token uses from its header.
+    Verify Supabase JWT — supports ES256 (elliptic curve, JWKS),
+    RS256 (RSA, JWKS), and HS256 (symmetric, JWT secret).
+    Supabase uses ES256 by default on newer projects.
+    Auto-detects algorithm from token header.
     """
     header = jwt.get_unverified_header(token)
-    alg    = header.get("alg", "RS256")
+    alg    = header.get("alg", "ES256")
 
     if alg == "HS256":
         # Symmetric — verify with the JWT secret from env
@@ -78,16 +78,27 @@ def verify_supabase_jwt(token: str) -> dict:
             issuer=_expected_issuer(),
         )
     else:
-        # Asymmetric RS256 — verify via JWKS
+        # Asymmetric (ES256 or RS256) — verify via JWKS
+        from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+
         jwks     = _get_jwks()
         kid      = header.get("kid")
         key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
         if not key_data:
             raise ValueError(f"JWT kid '{kid}' not found in JWKS")
-        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key_data))
+
+        kty = key_data.get("kty", "")
+        if kty == "EC":
+            public_key = jwt.algorithms.ECAlgorithm.from_jwk(json.dumps(key_data))
+            algorithms = ["ES256", "ES384", "ES512"]
+        else:
+            public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key_data))
+            algorithms = ["RS256", "RS384", "RS512"]
+
         return jwt.decode(
             token, public_key,
-            algorithms=["RS256"],
+            algorithms=algorithms,
             options={"verify_aud": False},
             issuer=_expected_issuer(),
         )
