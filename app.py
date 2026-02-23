@@ -477,7 +477,7 @@ Rules:
         try:
             response = claude_client.messages.create(
                 model=model,
-                max_tokens=4000,
+                max_tokens=8000,
                 messages=[{
                     "role": "user",
                     "content": [
@@ -497,7 +497,36 @@ Rules:
             # Strip markdown if model wrapped it anyway
             raw = re.sub(r"^```json\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
-            result = json.loads(raw)
+
+            # Attempt 1: clean parse
+            try:
+                result = json.loads(raw)
+            except json.JSONDecodeError:
+                # Attempt 2: response was truncated — find the last complete
+                # top-level key and close the JSON gracefully.
+                # This happens when max_tokens is hit mid-response on large BOMs.
+                print(f"SCAN: JSON truncated, attempting repair (len={len(raw)})", flush=True)
+                # Find the last complete bom_line_item entry
+                last_brace = raw.rfind('}')
+                if last_brace > 0:
+                    # Trim to last complete object and close the structure
+                    trimmed = raw[:last_brace+1]
+                    # Count unclosed braces/brackets and close them
+                    opens_b  = trimmed.count('{') - trimmed.count('}')
+                    opens_sq = trimmed.count('[') - trimmed.count(']')
+                    trimmed += ']' * opens_sq + '}' * opens_b
+                    try:
+                        result = json.loads(trimmed)
+                        result["_truncated"] = True
+                        print("SCAN: JSON repair succeeded", flush=True)
+                    except json.JSONDecodeError as e2:
+                        raise json.JSONDecodeError(
+                            f"JSON parse failed after repair attempt: {e2.msg} (original len={len(raw)})",
+                            e2.doc, e2.pos
+                        )
+                else:
+                    raise
+
             result["_model_used"] = model
             return result
 
