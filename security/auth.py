@@ -21,8 +21,18 @@ from flask import request, jsonify, g
 
 SUPABASE_URL      = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
-SUPABASE_JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-EXPECTED_ISSUER   = f"{SUPABASE_URL}/auth/v1"
+
+# Resolved at request time (not module load) so Railway env vars are
+# guaranteed to be present. Module-load resolution caused EXPECTED_ISSUER
+# to be "/auth/v1" when the dyno started before env vars were injected.
+def _supabase_url() -> str:
+    return os.environ.get("SUPABASE_URL", "").rstrip("/")
+
+def _jwks_url() -> str:
+    return f"{_supabase_url()}/auth/v1/.well-known/jwks.json"
+
+def _expected_issuer() -> str:
+    return f"{_supabase_url()}/auth/v1"
 
 _VALID_ROLES = {"admin", "estimator", "purchasing", "accounting", "manufacturing", "viewer"}
 
@@ -33,7 +43,7 @@ def _get_jwks() -> dict:
     if _jwks_cache["keys"] and (now - _jwks_cache["ts"] < 3600):
         return _jwks_cache["keys"]
     try:
-        r = requests.get(SUPABASE_JWKS_URL, timeout=10)
+        r = requests.get(_jwks_url(), timeout=10)
         r.raise_for_status()
         _jwks_cache["keys"] = r.json()
         _jwks_cache["ts"] = now
@@ -55,7 +65,7 @@ def verify_supabase_jwt(token: str) -> dict:
         token, public_key,
         algorithms=["RS256"],
         options={"verify_aud": False},
-        issuer=EXPECTED_ISSUER,
+        issuer=_expected_issuer(),
     )
 
 def get_bearer_token() -> str | None:
@@ -73,7 +83,7 @@ def get_user_sb():
     token = getattr(g, "_bearer_token", None)
     if not token:
         raise RuntimeError("get_user_sb() called outside an authenticated request context")
-    client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    client = create_client(_supabase_url(), os.environ.get("SUPABASE_ANON_KEY", ""))
     client.postgrest.auth(token)
     return client
 
