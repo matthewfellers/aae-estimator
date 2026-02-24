@@ -44,6 +44,7 @@ body {
   align-items: center;
   justify-content: space-between;
   height: 64px;
+  position: -webkit-sticky;
   position: sticky; top: 0; z-index: 100;
 }
 .topnav-brand {
@@ -88,6 +89,7 @@ body {
   border-radius: 12px;
   padding: 1.5rem;
   margin-bottom: 1.25rem;
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
 }
 .card-title {
@@ -418,7 +420,37 @@ body {
 @media (max-width: 768px) {
   .results-grid { grid-template-columns: 1fr; }
   .form-grid-3, .form-grid-4 { grid-template-columns: repeat(2,1fr); }
-  .topnav-tabs { display: none; }
+
+  /* Nav: flexible height, compact padding */
+  .topnav { height: auto; min-height: 52px; padding: 0.4rem 0.75rem; flex-wrap: nowrap; gap: 0.5rem; }
+
+  /* Hide address/contact block — saves ~180px of nav width on mobile */
+  .topnav-contact { display: none; }
+
+  /* Keep tabs visible but scrollable instead of hidden */
+  .topnav-tabs {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  .topnav-tabs::-webkit-scrollbar { display: none; }
+
+  /* Tighter tab buttons */
+  .tab-btn { font-size: 0.78rem; padding: 0.4rem 0.75rem; white-space: nowrap; }
+
+  /* Shrink brand text */
+  .topnav-brand { font-size: 1.3rem; }
+  .topnav-cert { display: none; }
+}
+
+/* Very small screens — iPhone SE (375px), iPhone 12 mini (360px) */
+@media (max-width: 400px) {
+  .login-card { width: calc(100vw - 2rem); padding: 32px 20px; }
+  .user-pill { display: none; }
+  .tab-btn { font-size: 0.72rem; padding: 0.35rem 0.6rem; }
 }
 
 /* ── LOGIN PAGE ────────────────────────────────────── */
@@ -582,7 +614,7 @@ body {
   <div style="display:flex;align-items:center;gap:12px">
     <div class="topnav-contact">
       <div>8528 SW 2nd St, OKC, OK 73128 · <a href="tel:4052101567">405-210-1567</a></div>
-      <div><a href="mailto:mfellers@aaeok.com">mfellers@aaeok.com</a> · aaeok.com</div>
+      <div><a href="/cdn-cgi/l/email-protection#204d46454c4c455253604141454f4b0e434f4d"><span class="__cf_email__" data-cfemail="563b30333a3a33242516373733393d7835393b">[email&#160;protected]</span></a> · aaeok.com</div>
     </div>
     <div class="topnav-tabs">
       <button class="tab-btn active" onclick="showTab('new-bid')">➕ New Bid</button>
@@ -620,13 +652,15 @@ body {
     <div class="review-flags" id="reviewFlags"></div>
     <!-- SCAN BOM DOWNLOAD — appears after scan -->
     <div class="bom-export-row" id="scanBomRow" style="display:none">
-      <div class="bom-export-label">📦 Bill of Materials extracted from drawing — download before calculating</div>
+      <div class="bom-export-label" id="scanBomLabel">📦 Bill of Materials extracted from drawing — download before calculating</div>
       <div class="bom-btns">
-        <button class="bom-btn bom-btn-xls" onclick="downloadScanBOM()">📊 Download AAE BOM — Excel</button>
+        <button class="bom-btn bom-btn-xls" onclick="downloadScanBOM()">📊 Download AAE BOM — Excel (Master + Vendor Sheets)</button>
       </div>
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:6px">
-        Cost column will be $0.00 — QuickBooks pricing integration coming soon
+        Excel file includes a Master BOM sheet + one sheet per vendor (Rexel, AWC, etc.) · Cost column will be $0.00 — QuickBooks pricing integration coming soon
       </div>
+      <!-- Live BOM preview table -->
+      <div id="scanBomPreview" style="margin-top:1rem;overflow-x:auto;max-height:400px;overflow-y:auto;border-radius:8px;border:1px solid rgba(155,27,27,0.25)"></div>
     </div>
   </div>
 
@@ -1004,7 +1038,7 @@ body {
 <!-- Toast container -->
 <div class="toast-container" id="toastContainer"></div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // Global error handler — catches any JS crash and shows it
 window.onerror = function(msg, src, line, col, err) {
   console.error("JS ERROR:", msg, "at line", line);
@@ -1159,15 +1193,55 @@ async function startScan(file) {
       project_name:  document.getElementById('project_name').value || '',
       job_number:    'AAE-' + Date.now()
     };
-    const bomRow = document.getElementById('scanBomRow');
+    const bomRow     = document.getElementById('scanBomRow');
+    const bomPreview = document.getElementById('scanBomPreview');
     if (lastScanBOM.length > 0) {
       bomRow.style.display = 'block';
-      bomRow.querySelector('.bom-export-label').textContent =
-        `📦 ${lastScanBOM.length} BOM line items extracted — download before calculating`;
+      document.getElementById('scanBomLabel').textContent =
+        `📦 ${lastScanBOM.length} BOM line items extracted — review below, then download`;
+      // Render inline BOM preview table
+      const cats = [...new Set(lastScanBOM.map(i => i.category || 'Other'))];
+      let tableHtml = `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'DM Mono',monospace">
+          <thead>
+            <tr style="background:#6B0A0A;color:#fff;position:sticky;top:0">
+              <th style="padding:6px 8px;text-align:left;width:40px">#</th>
+              <th style="padding:6px 8px;text-align:left;width:130px">Part Number</th>
+              <th style="padding:6px 8px;text-align:left">Description</th>
+              <th style="padding:6px 8px;text-align:center;width:45px">Qty</th>
+              <th style="padding:6px 8px;text-align:left;width:40px">U/M</th>
+              <th style="padding:6px 8px;text-align:left;width:130px">Manufacturer</th>
+              <th style="padding:6px 8px;text-align:left;width:70px">Category</th>
+            </tr>
+          </thead>
+          <tbody>`;
+      lastScanBOM.forEach((item, idx) => {
+        const bg = idx % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(155,27,27,0.06)';
+        tableHtml += `
+          <tr style="background:${bg};border-bottom:1px solid rgba(155,27,27,0.15)">
+            <td style="padding:5px 8px;color:var(--muted)">${item.item_num || idx+1}</td>
+            <td style="padding:5px 8px;color:#F4A9A8;font-weight:600">${item.part_number || '—'}</td>
+            <td style="padding:5px 8px;color:var(--white)">${item.description || '—'}</td>
+            <td style="padding:5px 8px;text-align:center;color:#81C784;font-weight:700">${item.qty || 1}</td>
+            <td style="padding:5px 8px;color:var(--muted)">${item.unit || 'ea'}</td>
+            <td style="padding:5px 8px;color:var(--lightblue)">${item.manufacturer || '—'}</td>
+            <td style="padding:5px 8px"><span style="background:rgba(155,27,27,0.3);border-radius:4px;padding:2px 6px;font-size:10px;color:#F4A9A8">${item.category || 'Other'}</span></td>
+          </tr>`;
+      });
+      tableHtml += `
+            <tr style="background:#6B0A0A">
+              <td colspan="3" style="padding:6px 8px;text-align:right;color:#F4A9A8;font-weight:700;font-size:12px">TOTAL LINE ITEMS:</td>
+              <td style="padding:6px 8px;text-align:center;color:#fff;font-weight:700">${lastScanBOM.reduce((s,i)=>s+(parseInt(i.qty)||1),0)}</td>
+              <td colspan="3" style="padding:6px 8px;color:rgba(255,255,255,0.5);font-size:10px">${lastScanBOM.length} unique parts</td>
+            </tr>
+          </tbody>
+        </table>`;
+      bomPreview.innerHTML = tableHtml;
     } else if (data.quantities) {
       bomRow.style.display = 'block';
-      bomRow.querySelector('.bom-export-label').textContent =
-        `📦 Component quantities extracted (no BOM table found) — download summary`;
+      document.getElementById('scanBomLabel').textContent =
+        `📦 Component quantities extracted (no BOM table found in drawing) — download summary`;
+      bomPreview.innerHTML = '';
     }
 
   } catch (err) {
@@ -1382,7 +1456,7 @@ async function loadHistory() {
               <td style="font-family:'DM Mono',monospace">${(b.total_hours||0).toFixed(1)} hrs</td>
               <td class="price-cell">$${(b.total_price||0).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
               <td style="white-space:nowrap">
-                <a href="/api/bid_quote_pdf/${b.id}" target="_blank" class="hab hab-pdf">📄 PDF</a>
+                <button class="hab hab-pdf" onclick="downloadHistoryPDF(${b.id})">📄 PDF</button>
                 <button class="hab hab-bom" onclick="downloadHistoryBOM(${b.id})">📦 BOM</button>
                 ${currentUser?.role === 'admin' ? `<button class="hab" style="background:rgba(155,27,27,0.2);border:1px solid rgba(155,27,27,0.5);color:#F4A9A8" onclick="deleteBid(${b.id}, '${(b.project_name||'this bid').replace(/'/g,'')}')">🗑 Delete</button>` : ''}
               </td>
@@ -1764,6 +1838,26 @@ async function exportBomExcel() {
     a.download = `AAE_BOM_${currentBidData.project_name||"quote"}.xlsx`;
     a.click(); toast("BOM Excel downloaded!","success");
   } catch(e) { toast("BOM Excel failed","error"); }
+}
+
+async function downloadHistoryPDF(bidId) {
+  try {
+    const res = await apiFetch(`/api/bid_quote_pdf/${bidId}`);
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      toast('PDF error: ' + (e.error || 'Unknown error'), 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `AAE_Quote_${bidId}.pdf`;
+    a.click();
+    toast('Quote PDF downloaded!', 'success');
+  } catch(e) {
+    toast('PDF failed: ' + e.message, 'error');
+  }
 }
 
 async function downloadHistoryBOM(bidId) {
@@ -2169,14 +2263,4 @@ function removeVendorLocal(id) {
   saveVendorsLocal(vendors);
   toast("Mapping removed","success");
   renderVendorsTable(getVendors());
-  apiFetch("/api/vendors/"+id,{method:"DELETE"}).catch(()=>{});
-}
-const deleteVendor = removeVendorLocal;
-
-
-// Load admin data when admin tab is shown
-// Add Rockwell logo to quote PDF area (shown in print)
-const _origDownloadPDF = downloadPDF;
-</script>
-</body>
-</html>
+  apiFetch("/api/vendors/"+id,{
