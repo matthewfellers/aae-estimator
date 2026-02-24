@@ -997,7 +997,7 @@ def bom_excel():
     # ── Excel workbook ─────────────────────────────────────────────────────────
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Bill of Materials"
+    ws.title = "Master BOM"
 
     RED="9B1B1B"; DARK_RED="6B0A0A"; WHITE="FFFFFF"; LIGHT_RED="FDECEA"; MID_GRAY="F5F0F0"; DARK="2C2C2C"; TEAL="00897A"
 
@@ -1143,6 +1143,19 @@ def bom_excel():
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:6"
+
+    # ── Vendor-specific sheets ─────────────────────────────────────────────────
+    from collections import defaultdict as _vdd
+    vendor_groups = _vdd(list)
+    for _itm in line_items:
+        _v = _itm.get("vendor", "") or "Unassigned"
+        vendor_groups[_v].append(_itm)
+    for _vn in sorted(vendor_groups.keys()):
+        if vendor_groups[_vn]:
+            _write_vendor_bom_sheet(wb, _vn, vendor_groups[_vn],
+                                    customer, project, quote_num,
+                                    bid_data.get("estimator_name", ""),
+                                    show_aae_cost=True)
 
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)
@@ -1361,7 +1374,7 @@ def bom_from_scan():
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Bill of Materials"
+    ws.title = "Master BOM"
 
     # Column widths
     for col, w in [("A",10),("B",22),("C",54),("D",7),("E",7),("F",22),("G",14),("H",22)]:
@@ -1473,6 +1486,7 @@ def bom_from_scan():
                 for key, vname in vendor_map.items():
                     if key and (key in mfr.lower() or mfr.lower() in key):
                         vendor = vname; break
+            itm["_resolved_vendor"] = vendor  # store for vendor sheet grouping
             vals = [
                 itm.get("item_num", item_counter),
                 itm.get("part_number", ""),
@@ -1540,6 +1554,22 @@ def bom_from_scan():
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:6"
 
+    # ── Vendor-specific sheets ─────────────────────────────────────────────────
+    # Build items list with vendor info resolved (stored during the row-write loop)
+    from collections import defaultdict as _vdd2
+    scan_vendor_groups = _vdd2(list)
+    for _itm in line_items:
+        _v = _itm.get("_resolved_vendor", "") or "Unassigned"
+        # normalize item for the helper (add vendor key)
+        _norm = dict(_itm)
+        _norm["vendor"] = _v
+        scan_vendor_groups[_v].append(_norm)
+    for _vn in sorted(scan_vendor_groups.keys()):
+        if scan_vendor_groups[_vn]:
+            _write_vendor_bom_sheet(wb, _vn, scan_vendor_groups[_vn],
+                                    customer, project, job_num,
+                                    "", show_aae_cost=False)
+
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)
     fname = f"AAE_BOM_{(project or job_num).replace(' ','_')}.xlsx"
@@ -1547,6 +1577,184 @@ def bom_from_scan():
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name=fname)
 
+
+
+# ── Vendor BOM Sheet Helper ────────────────────────────────────────────────
+def _write_vendor_bom_sheet(wb, vendor_name, items, customer, project, quote_num,
+                             estimator="", show_aae_cost=True):
+    """
+    Add a vendor-specific BOM worksheet to an existing openpyxl Workbook.
+    Mirrors the master BOM format, filtered to one vendor's items.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from collections import defaultdict
+
+    # Sheet name: Excel limits to 31 chars, strip invalid chars
+    safe_name = vendor_name[:31].replace("/","&").replace("\\","&").replace("?","").replace("*","")
+    ws = wb.create_sheet(title=safe_name)
+
+    RED="9B1B1B"; DARK_RED="6B0A0A"; WHITE="FFFFFF"; LIGHT_RED="FDECEA"
+    MID_GRAY="F5F0F0"; DARK="2C2C2C"; TEAL="00897A"
+
+    def s(cell, bold=False, bg=None, fg=WHITE, sz=10, ha="left"):
+        cell.font = Font(name="Arial", bold=bold, color=fg, size=sz)
+        if bg: cell.fill = PatternFill("solid", fgColor=bg)
+        cell.alignment = Alignment(horizontal=ha, vertical="center", wrap_text=False)
+
+    thin = Side(style="thin", color="E0D0D0")
+    bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
+
+    for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",14),("I",14),("J",20)]:
+        ws.column_dimensions[col].width = w
+
+    # Row 1: Banner
+    ws.merge_cells("A1:J1"); ws.row_dimensions[1].height = 14
+    ws["A1"] = f"AAE AUTOMATION — VENDOR ORDER: {vendor_name.upper()}  |  UL-508A Certified Panel Specialists"
+    s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
+
+    # Row 2: Title | Quote#
+    ws.merge_cells("A2:E2"); ws.row_dimensions[2].height = 34
+    ws["A2"] = f"PURCHASE ORDER — {vendor_name.upper()}"
+    ws["A2"].font      = Font(name="Arial", bold=True, color=WHITE, size=16)
+    ws["A2"].fill      = PatternFill("solid", fgColor=DARK_RED)
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.merge_cells("F2:J2")
+    ws["F2"] = quote_num
+    s(ws["F2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
+
+    # Row 3: Customer | Project
+    ws.row_dimensions[3].height = 18
+    ws.merge_cells("A3:B3"); ws["A3"] = "Customer:"
+    s(ws["A3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("C3:E3"); ws["C3"] = customer
+    s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
+    ws["F3"] = "Project:"
+    s(ws["F3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("G3:J3"); ws["G3"] = project
+    s(ws["G3"], bg=LIGHT_RED, fg=DARK, sz=10)
+
+    # Row 4: Date | Estimator
+    ws.row_dimensions[4].height = 16
+    ws.merge_cells("A4:B4"); ws["A4"] = "Date:"
+    s(ws["A4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("C4:E4"); ws["C4"] = datetime.now().strftime("%m/%d/%Y")
+    s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
+    ws["F4"] = "Send To:"
+    s(ws["F4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("G4:J4"); ws["G4"] = vendor_name
+    s(ws["G4"], bg=MID_GRAY, fg=DARK, sz=9)
+
+    # Row 5: Vendor notice
+    ws.merge_cells("A5:J5"); ws.row_dimensions[5].height = 15
+    ws["A5"] = f"⚠  VENDOR PURCHASE ORDER — Send to: {vendor_name}  |  Estimator: {estimator or 'AAE Automation'}  ⚠"
+    s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
+
+    # Row 6: Column headers
+    ws.row_dimensions[6].height = 20
+    for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","UNIT COST","TOTAL COST","NOTES"], 1):
+        c = ws.cell(row=6, column=ci, value=h)
+        s(c, bold=True, bg=DARK, sz=9, ha="center")
+        c.border = Border(bottom=Side(style="medium", color=RED))
+
+    # Group items by category
+    grouped = defaultdict(list)
+    cat_order = ["Enclosure","Power","Motor Ctrl","Control","Control Devices","PLC/Network",
+                 "Terminals","Relays","HMI/Computer","Wiring","Markers","Other"]
+    for item in items:
+        cat = item.get("category","Other")
+        if cat not in cat_order:
+            cat_order.append(cat)
+        grouped[cat].append(item)
+
+    row = 7; item_counter = 0
+    even_fill = PatternFill("solid", fgColor="FDF8F8")
+    odd_fill  = PatternFill("solid", fgColor=WHITE)
+
+    for cat in [c for c in cat_order if grouped[c]]:
+        ws.merge_cells(f"A{row}:J{row}")
+        hc = ws.cell(row=row, column=1, value=f"  {cat.upper()}")
+        hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
+        hc.fill = PatternFill("solid", fgColor=RED)
+        hc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws.row_dimensions[row].height = 16
+        row += 1
+
+        for itm in grouped[cat]:
+            item_counter += 1
+            fill = even_fill if item_counter % 2 == 0 else odd_fill
+            ws.row_dimensions[row].height = 15
+            unit_cost = float(itm.get("aae_cost") or itm.get("unit_cost") or 0)
+            qty = itm.get("qty", 1)
+            vals = [
+                itm.get("item_num", item_counter),
+                itm.get("part_number") or itm.get("part_num",""),
+                itm.get("description",""),
+                qty,
+                itm.get("unit","ea"),
+                itm.get("manufacturer",""),
+                itm.get("vendor","") or vendor_name,
+                unit_cost if show_aae_cost else 0.00,
+                qty * unit_cost if show_aae_cost else 0,
+                itm.get("notes",""),
+            ]
+            for ci, val in enumerate(vals, 1):
+                c = ws.cell(row=row, column=ci, value=val)
+                c.fill = fill; c.border = bdr
+                c.font = Font(name="Arial", size=9, color=DARK)
+                if ci in (1, 4):
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif ci == 7:
+                    c.font = Font(name="Arial", size=9, color=TEAL, bold=True)
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif ci == 8:
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                    c.number_format = '"$"#,##0.000'
+                    c.font = Font(name="Arial", size=9,
+                                  color="555555" if show_aae_cost else "AAAAAA",
+                                  italic=not show_aae_cost)
+                elif ci == 9:
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                    c.number_format = '"$"#,##0.00'
+                    c.font = Font(name="Arial", size=9,
+                                  color="008800" if show_aae_cost else "AAAAAA",
+                                  bold=show_aae_cost, italic=not show_aae_cost)
+                else:
+                    c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
+            row += 1
+        row += 1  # spacer between categories
+
+    # Total row
+    ws.merge_cells(f"A{row}:G{row}")
+    tl = ws.cell(row=row, column=1, value=f"TOTAL — {vendor_name.upper()} ORDER:")
+    tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
+    tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tl.alignment = Alignment(horizontal="right", vertical="center")
+    tv = ws.cell(row=row, column=9, value=f"=SUM(I7:I{row-1})")
+    tv.font = Font(name="Arial", bold=True,
+                   color="008800" if show_aae_cost else "AAAAAA",
+                   size=11, italic=not show_aae_cost)
+    tv.number_format = '"$"#,##0.00'
+    tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tv.alignment = Alignment(horizontal="right", vertical="center")
+    ws.cell(row=row, column=8).fill  = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.cell(row=row, column=10).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.row_dimensions[row].height = 20
+    row += 2
+
+    # Footer
+    ws.merge_cells(f"A{row}:J{row}")
+    ft = ws.cell(row=row, column=1,
+        value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
+    ft.font = Font(name="Arial", size=8, color="888080", italic=True)
+    ft.alignment = Alignment(horizontal="center")
+
+    ws.freeze_panes = "A7"
+    ws.auto_filter.ref = f"A6:J{row-3}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
+    ws.print_title_rows = "1:6"
+    return ws
 
 
 # ═══════════════════════════════════════════════════════════════════
