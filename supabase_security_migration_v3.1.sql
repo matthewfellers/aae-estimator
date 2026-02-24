@@ -455,6 +455,16 @@ WITH CHECK (
   AND created_by = auth.uid()
 );
 
+-- Admins: insert bids (no MFA required for bid creation — same as estimators)
+DROP POLICY IF EXISTS "bids_insert_admin" ON public.bids;
+CREATE POLICY "bids_insert_admin"
+ON public.bids FOR INSERT TO authenticated
+WITH CHECK (
+  public.is_admin()
+  AND org_id = public.current_org_id()
+  AND created_by = auth.uid()
+);
+
 -- Estimators: update own bids
 CREATE POLICY "bids_update_owner"
 ON public.bids FOR UPDATE TO authenticated
