@@ -1198,49 +1198,54 @@ async function startScan(file) {
     if (lastScanBOM.length > 0) {
       bomRow.style.display = 'block';
       document.getElementById('scanBomLabel').textContent =
-        `📦 ${lastScanBOM.length} BOM line items extracted — review below, then download`;
-      // Render inline BOM preview table
-      const cats = [...new Set(lastScanBOM.map(i => i.category || 'Other'))];
-      let tableHtml = `
-        <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'DM Mono',monospace">
-          <thead>
-            <tr style="background:#6B0A0A;color:#fff;position:sticky;top:0">
-              <th style="padding:6px 8px;text-align:left;width:40px">#</th>
-              <th style="padding:6px 8px;text-align:left;width:130px">Part Number</th>
-              <th style="padding:6px 8px;text-align:left">Description</th>
-              <th style="padding:6px 8px;text-align:center;width:45px">Qty</th>
-              <th style="padding:6px 8px;text-align:left;width:40px">U/M</th>
-              <th style="padding:6px 8px;text-align:left;width:130px">Manufacturer</th>
-              <th style="padding:6px 8px;text-align:left;width:70px">Category</th>
-            </tr>
-          </thead>
-          <tbody>`;
-      lastScanBOM.forEach((item, idx) => {
-        const bg = idx % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(155,27,27,0.06)';
-        tableHtml += `
-          <tr style="background:${bg};border-bottom:1px solid rgba(155,27,27,0.15)">
-            <td style="padding:5px 8px;color:var(--muted)">${item.item_num || idx+1}</td>
-            <td style="padding:5px 8px;color:#F4A9A8;font-weight:600">${item.part_number || '—'}</td>
-            <td style="padding:5px 8px;color:var(--white)">${item.description || '—'}</td>
-            <td style="padding:5px 8px;text-align:center;color:#81C784;font-weight:700">${item.qty || 1}</td>
-            <td style="padding:5px 8px;color:var(--muted)">${item.unit || 'ea'}</td>
-            <td style="padding:5px 8px;color:var(--lightblue)">${item.manufacturer || '—'}</td>
-            <td style="padding:5px 8px"><span style="background:rgba(155,27,27,0.3);border-radius:4px;padding:2px 6px;font-size:10px;color:#F4A9A8">${item.category || 'Other'}</span></td>
-          </tr>`;
-      });
-      tableHtml += `
-            <tr style="background:#6B0A0A">
-              <td colspan="3" style="padding:6px 8px;text-align:right;color:#F4A9A8;font-weight:700;font-size:12px">TOTAL LINE ITEMS:</td>
-              <td style="padding:6px 8px;text-align:center;color:#fff;font-weight:700">${lastScanBOM.reduce((s,i)=>s+(parseInt(i.qty)||1),0)}</td>
-              <td colspan="3" style="padding:6px 8px;color:rgba(255,255,255,0.5);font-size:10px">${lastScanBOM.length} unique parts</td>
-            </tr>
-          </tbody>
-        </table>`;
-      bomPreview.innerHTML = tableHtml;
+        '\u{1F4E6} ' + lastScanBOM.length + ' BOM line items extracted \u2014 review below, then download';
+      // Render inline BOM preview table using safe string building
+      var rows = '';
+      for (var bi = 0; bi < lastScanBOM.length; bi++) {
+        var itm = lastScanBOM[bi];
+        var rowBg = bi % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(155,27,27,0.06)';
+        var pn   = String(itm.part_number   || '\u2014');
+        var desc = String(itm.description   || '\u2014');
+        var qty  = String(itm.qty           || 1);
+        var um   = String(itm.unit          || 'ea');
+        var mfr  = String(itm.manufacturer  || '\u2014');
+        var cat  = String(itm.category      || 'Other');
+        var num  = String(itm.item_num      || bi + 1);
+        rows += '<tr style="background:' + rowBg + ';border-bottom:1px solid rgba(155,27,27,0.15)">'
+              + '<td style="padding:5px 8px;color:var(--muted)">' + num + '</td>'
+              + '<td style="padding:5px 8px;color:#F4A9A8;font-weight:600">' + pn + '</td>'
+              + '<td style="padding:5px 8px;color:var(--white)">' + desc + '</td>'
+              + '<td style="padding:5px 8px;text-align:center;color:#81C784;font-weight:700">' + qty + '</td>'
+              + '<td style="padding:5px 8px;color:var(--muted)">' + um + '</td>'
+              + '<td style="padding:5px 8px;color:var(--lightblue)">' + mfr + '</td>'
+              + '<td style="padding:5px 8px"><span style="background:rgba(155,27,27,0.3);border-radius:4px;padding:2px 6px;font-size:10px;color:#F4A9A8">' + cat + '</span></td>'
+              + '</tr>';
+      }
+      var totalQty = 0;
+      for (var bi2 = 0; bi2 < lastScanBOM.length; bi2++) {
+        totalQty += parseInt(lastScanBOM[bi2].qty) || 1;
+      }
+      var tblHtml = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+        + '<thead><tr style="background:#6B0A0A;color:#fff;position:sticky;top:0">'
+        + '<th style="padding:6px 8px;text-align:left;width:40px">#</th>'
+        + '<th style="padding:6px 8px;text-align:left;width:130px">Part Number</th>'
+        + '<th style="padding:6px 8px;text-align:left">Description</th>'
+        + '<th style="padding:6px 8px;text-align:center;width:45px">Qty</th>'
+        + '<th style="padding:6px 8px;text-align:left;width:40px">U/M</th>'
+        + '<th style="padding:6px 8px;text-align:left;width:130px">Manufacturer</th>'
+        + '<th style="padding:6px 8px;text-align:left;width:70px">Category</th>'
+        + '</tr></thead>'
+        + '<tbody>' + rows
+        + '<tr style="background:#6B0A0A">'
+        + '<td colspan="3" style="padding:6px 8px;text-align:right;color:#F4A9A8;font-weight:700">TOTAL LINE ITEMS:</td>'
+        + '<td style="padding:6px 8px;text-align:center;color:#fff;font-weight:700">' + totalQty + '</td>'
+        + '<td colspan="3" style="padding:6px 8px;color:rgba(255,255,255,0.5);font-size:10px">' + lastScanBOM.length + ' unique parts</td>'
+        + '</tr></tbody></table>';
+      bomPreview.innerHTML = tblHtml;
     } else if (data.quantities) {
       bomRow.style.display = 'block';
       document.getElementById('scanBomLabel').textContent =
-        `📦 Component quantities extracted (no BOM table found in drawing) — download summary`;
+        '\u{1F4E6} Component quantities extracted (no BOM table found in drawing) \u2014 download summary';
       bomPreview.innerHTML = '';
     }
 
@@ -1498,7 +1503,12 @@ function clearForm() {
   document.getElementById('confidenceBar').className = 'confidence-bar';
   document.getElementById('reviewFlags').innerHTML = '';
   document.getElementById('uploadText').textContent = 'Drop customer drawing PDF here';
+  var sp = document.getElementById('scanBomPreview');
+  if (sp) sp.innerHTML = '';
+  var sb = document.getElementById('scanBomRow');
+  if (sb) sb.style.display = 'none';
   currentCalcResults = null; currentBidData = null;
+  lastScanBOM = []; lastScanMeta = {};
   toast('Form cleared', 'info');
 }
 
