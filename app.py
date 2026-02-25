@@ -265,6 +265,10 @@ def load_routing_rules():
     """Load all three tiers of vendor routing rules from DB.
     Returns dict with keys: part_overrides, prefix_rules, vendor_defaults.
     Falls back to hardcoded defaults when DB is unavailable.
+
+    Uses the authenticated user's Supabase client (get_user_sb()) so that
+    RLS org-scoped policies work correctly.  Falls back to the global
+    anon-key client if called outside a request context.
     """
     rules = {
         "part_overrides": dict(_DEFAULT_PART_OVERRIDES),
@@ -276,9 +280,15 @@ def load_routing_rules():
         rules["vendor_defaults"] = get_vendor_map()
         return rules
 
+    # Use authenticated client so RLS sees org_id from JWT
+    try:
+        sb = get_user_sb()
+    except Exception:
+        sb = supabase  # fallback for non-request contexts
+
     # Tier 1: Part overrides from DB (merge on top of defaults)
     try:
-        rows = supabase.table("aae_vendor_part_overrides") \
+        rows = sb.table("aae_vendor_part_overrides") \
             .select("part_number,manufacturer,vendor_name,notes") \
             .eq("active", True).execute()
         if rows.data:
@@ -295,7 +305,7 @@ def load_routing_rules():
 
     # Tier 2: Prefix rules from DB (merge on top of defaults)
     try:
-        rows = supabase.table("aae_vendor_prefix_rules") \
+        rows = sb.table("aae_vendor_prefix_rules") \
             .select("prefix,regex_pattern,manufacturer,vendor_name,notes,priority") \
             .eq("active", True) \
             .order("priority", desc=True) \
