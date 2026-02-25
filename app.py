@@ -196,6 +196,200 @@ def get_vendor_map():
         pass
     return vendor_map
 
+
+# ── Deterministic Vendor Routing Engine ──────────────────────────────────────
+# 4-tier precedence: Part Override → Prefix Rule → Manufacturer Default → UNASSIGNED
+
+# Hardcoded fallback defaults (from AAE_Vendor_Routing_Rules.json)
+_DEFAULT_PART_OVERRIDES = {
+    "ATQR1/2":       {"manufacturer": "Eaton Bussmann",    "vendor": "Rexel",     "note": "Purchasing exception (buy from Rexel)"},
+    "ATQR1/4":       {"manufacturer": "Eaton Bussmann",    "vendor": "Rexel",     "note": "Purchasing exception (buy from Rexel)"},
+    "CEP-FS30CC2":   {"manufacturer": "Mersen",            "vendor": "Rexel",     "note": "Mersen via Rexel"},
+    "XETA9X-11INDFD":{"manufacturer": "XetaWave",         "vendor": "Rexel",     "note": "XetaWave via Rexel"},
+    "A-4AXFN24":     {"manufacturer": "nVent HOFFMAN",    "vendor": "Rexel",     "note": ""},
+    "P-R2-K2RF0":    {"manufacturer": "GracePort",        "vendor": "Rexel",     "note": ""},
+    "STP480D07M":    {"manufacturer": "Mersen",            "vendor": "Rexel",     "note": ""},
+    "STZ480D20B1":   {"manufacturer": "Mersen",            "vendor": "Rexel",     "note": ""},
+    "WF100LP":       {"manufacturer": "nVent HOFFMAN",    "vendor": "Rexel",     "note": ""},
+    "MB3170":        {"manufacturer": "MOXA",              "vendor": "AWC",       "note": ""},
+    "MB3170-T":      {"manufacturer": "MOXA",              "vendor": "AWC",       "note": ""},
+    "TRS15":         {"manufacturer": "Eaton Bussmann",    "vendor": "AWC",       "note": ""},
+    "TRS40":         {"manufacturer": "Eaton Bussmann",    "vendor": "AWC",       "note": ""},
+    "G07S0000":      {"manufacturer": "Red Lion Controls", "vendor": "Atech",     "note": ""},
+    "G10S0000":      {"manufacturer": "Red Lion Controls", "vendor": "Atech",     "note": ""},
+    "G15C0000":      {"manufacturer": "Red Lion Controls", "vendor": "Atech",     "note": ""},
+    "DRP-03":        {"manufacturer": "Mean Well",         "vendor": "RS America","note": ""},
+}
+
+_DEFAULT_PREFIX_RULES_RAW = [
+    {"prefix": "QO",     "pattern": "^QO",                                       "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider breakers",  "priority": 20},
+    {"prefix": "9070TF", "pattern": "^9070TF",                                   "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider xfmrs",     "priority": 60},
+    {"prefix": "LV",     "pattern": "^LV\\d+",                                   "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider LV",        "priority": 20},
+    {"prefix": "BGA/BJA/HJA/JJA/RJA", "pattern": "^(BGA|BJA|HJA|JJA|RJA)\\d+", "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider breakers",  "priority": 30},
+    {"prefix": "1769-",  "pattern": "^1769-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "CompactLogix I/O",    "priority": 50},
+    {"prefix": "1756-",  "pattern": "^1756-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "ControlLogix",        "priority": 50},
+    {"prefix": "1734-",  "pattern": "^1734-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "POINT I/O",           "priority": 50},
+    {"prefix": "5034-",  "pattern": "^5034-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Flex 5000",           "priority": 50},
+    {"prefix": "1794-",  "pattern": "^1794-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "FLEX I/O",            "priority": 50},
+    {"prefix": "5094-",  "pattern": "^5094-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "FLEX 5000",           "priority": 50},
+    {"prefix": "1783-",  "pattern": "^1783-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Stratix switches",    "priority": 50},
+    {"prefix": "20F",    "pattern": "^20F",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex VFDs",      "priority": 30},
+    {"prefix": "22B",    "pattern": "^22B",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 40",        "priority": 30},
+    {"prefix": "25B",    "pattern": "^25B",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 525",       "priority": 30},
+    {"prefix": "140G-",  "pattern": "^140G-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Molded case breakers", "priority": 50},
+    {"prefix": "1492-",  "pattern": "^1492-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Terminal blocks",     "priority": 50},
+]
+
+def _compile_default_prefix_rules():
+    """Pre-compile regex patterns for default prefix rules."""
+    compiled = []
+    for r in _DEFAULT_PREFIX_RULES_RAW:
+        try:
+            compiled.append({
+                "prefix": r["prefix"],
+                "pattern": re.compile(r["pattern"], re.IGNORECASE),
+                "manufacturer": r["manufacturer"],
+                "vendor": r["vendor"],
+                "note": r.get("note", ""),
+                "priority": r.get("priority", 0),
+            })
+        except re.error:
+            pass
+    compiled.sort(key=lambda x: (-x["priority"], -len(x["prefix"])))
+    return compiled
+
+_DEFAULT_PREFIX_RULES = _compile_default_prefix_rules()
+
+
+def load_routing_rules():
+    """Load all three tiers of vendor routing rules from DB.
+    Returns dict with keys: part_overrides, prefix_rules, vendor_defaults.
+    Falls back to hardcoded defaults when DB is unavailable.
+    """
+    rules = {
+        "part_overrides": dict(_DEFAULT_PART_OVERRIDES),
+        "prefix_rules": list(_DEFAULT_PREFIX_RULES),
+        "vendor_defaults": {},
+    }
+
+    if not supabase:
+        rules["vendor_defaults"] = get_vendor_map()
+        return rules
+
+    # Tier 1: Part overrides from DB (merge on top of defaults)
+    try:
+        rows = supabase.table("aae_vendor_part_overrides") \
+            .select("part_number,manufacturer,vendor_name,notes") \
+            .eq("active", True).execute()
+        if rows.data:
+            for row in rows.data:
+                pn = (row["part_number"] or "").strip().upper()
+                if pn:
+                    rules["part_overrides"][pn] = {
+                        "manufacturer": row.get("manufacturer", ""),
+                        "vendor": row["vendor_name"],
+                        "note": row.get("notes", ""),
+                    }
+    except Exception as e:
+        print(f"[routing] part_overrides load error: {e}", flush=True)
+
+    # Tier 2: Prefix rules from DB (merge on top of defaults)
+    try:
+        rows = supabase.table("aae_vendor_prefix_rules") \
+            .select("prefix,regex_pattern,manufacturer,vendor_name,notes,priority") \
+            .eq("active", True) \
+            .order("priority", desc=True) \
+            .order("prefix") \
+            .execute()
+        if rows.data:
+            db_prefixes = set()
+            db_rules = []
+            for row in rows.data:
+                try:
+                    compiled = re.compile(row["regex_pattern"], re.IGNORECASE)
+                    db_prefixes.add(row["prefix"].upper())
+                    db_rules.append({
+                        "prefix": row["prefix"],
+                        "pattern": compiled,
+                        "manufacturer": row.get("manufacturer", ""),
+                        "vendor": row["vendor_name"],
+                        "note": row.get("notes", ""),
+                        "priority": row.get("priority", 0),
+                    })
+                except re.error:
+                    print(f"[routing] bad regex for prefix '{row['prefix']}': {row['regex_pattern']}", flush=True)
+            # Keep defaults that aren't overridden by DB entries
+            for dr in _DEFAULT_PREFIX_RULES:
+                if dr["prefix"].upper() not in db_prefixes:
+                    db_rules.append(dr)
+            db_rules.sort(key=lambda x: (-x["priority"], -len(x["prefix"])))
+            rules["prefix_rules"] = db_rules
+    except Exception as e:
+        print(f"[routing] prefix_rules load error: {e}", flush=True)
+
+    # Tier 3: Manufacturer defaults (existing vendor map)
+    rules["vendor_defaults"] = get_vendor_map()
+
+    return rules
+
+
+def resolve_vendor(part_number, manufacturer, rules=None):
+    """Deterministic 4-tier vendor resolution.
+
+    Args:
+        part_number:  The part number string (e.g. "1769-OB16")
+        manufacturer: The manufacturer string (e.g. "Allen Bradley")
+        rules:        Pre-loaded rules from load_routing_rules(). Loads fresh if None.
+
+    Returns:
+        dict: {vendor, manufacturer, note, matched_tier}
+        matched_tier is one of: "part_override", "prefix_rule", "vendor_default", "UNASSIGNED"
+    """
+    if rules is None:
+        rules = load_routing_rules()
+
+    pn_upper  = (part_number or "").strip().upper()
+    mfr_lower = (manufacturer or "").strip().lower()
+
+    # Tier 1: Exact part number override
+    if pn_upper and pn_upper in rules["part_overrides"]:
+        match = rules["part_overrides"][pn_upper]
+        return {
+            "vendor": match["vendor"],
+            "manufacturer": match.get("manufacturer") or manufacturer,
+            "note": match.get("note", ""),
+            "matched_tier": "part_override",
+        }
+
+    # Tier 2: Prefix / regex rules (sorted by priority desc, then longest prefix)
+    if pn_upper:
+        for rule in rules["prefix_rules"]:
+            if rule["pattern"].search(pn_upper):
+                return {
+                    "vendor": rule["vendor"],
+                    "manufacturer": rule.get("manufacturer") or manufacturer,
+                    "note": rule.get("note", ""),
+                    "matched_tier": "prefix_rule",
+                }
+
+    # Tier 3: Manufacturer default
+    if mfr_lower and mfr_lower in rules["vendor_defaults"]:
+        return {
+            "vendor": rules["vendor_defaults"][mfr_lower],
+            "manufacturer": manufacturer,
+            "note": "",
+            "matched_tier": "vendor_default",
+        }
+
+    # Tier 4: UNASSIGNED — no guessing
+    return {
+        "vendor": "UNASSIGNED",
+        "manufacturer": manufacturer,
+        "note": "",
+        "matched_tier": "UNASSIGNED",
+    }
+
+
 def calculate_bid(data):
     r = get_labor_rates()
     enc_qty  = max(1, int(data.get("enc_qty", 1)))
@@ -971,24 +1165,21 @@ def bom_excel():
 
     # Build structured BOM items from bid + calc
     bom_items = build_bom_items(bid_data, calc_data)
-    # Convert to scan-BOM format
-    vendor_map = get_vendor_map()
+    # Convert to scan-BOM format — deterministic routing engine
+    routing_rules = load_routing_rules()
     line_items = []
     for i, itm in enumerate(bom_items, 1):
-        mfr    = itm.get("manufacturer", "")
-        vendor = vendor_map.get(mfr.lower(), "")
-        if not vendor:
-            for key, vname in vendor_map.items():
-                if key and (key in mfr.lower() or mfr.lower() in key):
-                    vendor = vname; break
+        mfr = itm.get("manufacturer", "")
+        pn  = itm.get("part_num", "")
+        result = resolve_vendor(pn, mfr, routing_rules)
         line_items.append({
             "item_num":    i,
-            "part_number": itm.get("part_num", ""),
+            "part_number": pn,
             "description": itm.get("description", ""),
             "qty":         itm.get("qty", 1),
             "unit":        itm.get("unit", "ea"),
-            "manufacturer": mfr,
-            "vendor":      vendor,
+            "manufacturer": result["manufacturer"],
+            "vendor":      result["vendor"],
             "aae_cost":    itm.get("unit_cost", 0.0),
             "notes":       "",
             "category":    itm.get("category", "Other"),
@@ -1453,8 +1644,8 @@ def bom_from_scan():
         s(c, bold=True, bg=DARK, sz=9, ha="center")
         c.border = Border(bottom=Side(style="medium", color=RED))
 
-    # ── Load vendor map ────────────────────────────────────────────────────────
-    vendor_map = get_vendor_map()
+    # ── Load routing rules (deterministic 4-tier engine) ─────────────────────
+    routing_rules = load_routing_rules()
 
     # Group items by category
     from collections import defaultdict
@@ -1490,11 +1681,9 @@ def bom_from_scan():
             fill = even_fill if item_counter % 2 == 0 else odd_fill
             ws.row_dimensions[row].height = 15
             mfr    = itm.get("manufacturer", "")
-            vendor = vendor_map.get(mfr.lower(), "")
-            if not vendor:
-                for key, vname in vendor_map.items():
-                    if key and (key in mfr.lower() or mfr.lower() in key):
-                        vendor = vname; break
+            pn     = itm.get("part_number", "")
+            result = resolve_vendor(pn, mfr, routing_rules)
+            vendor = result["vendor"]
             itm["_resolved_vendor"] = vendor  # store for vendor sheet grouping
             vals = [
                 itm.get("item_num", item_counter),
@@ -2062,6 +2251,151 @@ def delete_vendor(vid):
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Vendor Routing: Part Override Routes ─────────────────────────────────────
+@app.route("/api/part_overrides", methods=["GET"])
+@require_auth
+def get_part_overrides():
+    """List all active part-level vendor overrides."""
+    if not supabase:
+        return jsonify([])
+    try:
+        sb = get_user_sb()
+        rows = sb.table("aae_vendor_part_overrides") \
+            .select("*").eq("active", True) \
+            .order("part_number").execute()
+        return jsonify(rows.data)
+    except Exception as e:
+        print(f"part_overrides DB error: {e}")
+        return jsonify([])
+
+@app.route("/api/part_overrides", methods=["POST"])
+@require_role("admin", "purchasing", "accounting", require_mfa=True)
+def create_part_override():
+    """Create a new part-level vendor override (Tier 1)."""
+    data = request.get_json()
+    if not supabase:
+        return jsonify({"error": "DB not configured"}), 503
+    part_num = (data.get("part_number") or "").strip()
+    vendor   = (data.get("vendor_name") or "").strip()
+    if not part_num or not vendor:
+        return jsonify({"error": "Part number and vendor required"}), 400
+    try:
+        sb = get_user_sb()
+        result = sb.table("aae_vendor_part_overrides").insert({
+            "part_number":  part_num,
+            "manufacturer": data.get("manufacturer", ""),
+            "vendor_name":  vendor,
+            "notes":        data.get("notes", ""),
+            "updated_by":   g.user["email"],
+        }).execute()
+        new_id = result.data[0]["id"]
+        audit_log("create_part_override", "aae_vendor_part_overrides", new_id,
+                  {"part_number": part_num, "vendor": vendor})
+        return jsonify({"success": True, "override": result.data[0]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/part_overrides/<int:oid>", methods=["DELETE"])
+@require_role("admin", "purchasing", "accounting", require_mfa=True)
+def delete_part_override(oid):
+    """Soft-delete a part override."""
+    if not supabase:
+        return jsonify({"error": "DB not configured"}), 500
+    try:
+        sb = get_user_sb()
+        sb.table("aae_vendor_part_overrides") \
+            .update({"active": False, "updated_at": datetime.now().isoformat()}) \
+            .eq("id", oid).execute()
+        audit_log("delete_part_override", "aae_vendor_part_overrides", oid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Vendor Routing: Prefix / Family Rule Routes ─────────────────────────────
+@app.route("/api/prefix_rules", methods=["GET"])
+@require_auth
+def get_prefix_rules():
+    """List all active prefix/family vendor rules."""
+    if not supabase:
+        return jsonify([])
+    try:
+        sb = get_user_sb()
+        rows = sb.table("aae_vendor_prefix_rules") \
+            .select("*").eq("active", True) \
+            .order("priority", desc=True).order("prefix").execute()
+        return jsonify(rows.data)
+    except Exception as e:
+        print(f"prefix_rules DB error: {e}")
+        return jsonify([])
+
+@app.route("/api/prefix_rules", methods=["POST"])
+@require_role("admin", "purchasing", "accounting", require_mfa=True)
+def create_prefix_rule():
+    """Create a new prefix/family vendor rule (Tier 2).
+    Auto-generates the regex pattern from the user-supplied prefix."""
+    data = request.get_json()
+    if not supabase:
+        return jsonify({"error": "DB not configured"}), 503
+    prefix = (data.get("prefix") or "").strip()
+    vendor = (data.get("vendor_name") or "").strip()
+    if not prefix or not vendor:
+        return jsonify({"error": "Prefix and vendor required"}), 400
+    # Auto-generate regex: escape special chars, anchor to start
+    escaped = re.escape(prefix)
+    regex_pattern = f"^{escaped}"
+    # Longer prefixes get higher priority (more specific match wins)
+    priority = data.get("priority", len(prefix) * 10)
+    try:
+        sb = get_user_sb()
+        result = sb.table("aae_vendor_prefix_rules").insert({
+            "prefix":        prefix,
+            "regex_pattern": regex_pattern,
+            "manufacturer":  data.get("manufacturer", ""),
+            "vendor_name":   vendor,
+            "notes":         data.get("notes", ""),
+            "priority":      priority,
+            "updated_by":    g.user["email"],
+        }).execute()
+        new_id = result.data[0]["id"]
+        audit_log("create_prefix_rule", "aae_vendor_prefix_rules", new_id,
+                  {"prefix": prefix, "vendor": vendor})
+        return jsonify({"success": True, "rule": result.data[0]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/prefix_rules/<int:rid>", methods=["DELETE"])
+@require_role("admin", "purchasing", "accounting", require_mfa=True)
+def delete_prefix_rule(rid):
+    """Soft-delete a prefix rule."""
+    if not supabase:
+        return jsonify({"error": "DB not configured"}), 500
+    try:
+        sb = get_user_sb()
+        sb.table("aae_vendor_prefix_rules") \
+            .update({"active": False, "updated_at": datetime.now().isoformat()}) \
+            .eq("id", rid).execute()
+        audit_log("delete_prefix_rule", "aae_vendor_prefix_rules", rid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Vendor Routing: Test Endpoint ────────────────────────────────────────────
+@app.route("/api/test_routing", methods=["POST"])
+@require_auth
+def test_routing():
+    """Test where a part number would route through the 4-tier engine.
+    Returns: {vendor, manufacturer, note, matched_tier}"""
+    data = request.get_json()
+    part_number  = data.get("part_number", "")
+    manufacturer = data.get("manufacturer", "")
+    rules  = load_routing_rules()
+    result = resolve_vendor(part_number, manufacturer, rules)
+    return jsonify(result)
+
 
 # ── Hour Breakdown Report (Excel download) ────────────────────────────
 @app.route("/api/hours_report", methods=["POST"])
