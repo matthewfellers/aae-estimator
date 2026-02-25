@@ -1144,25 +1144,34 @@ def bom_excel():
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:6"
 
-    # ── Vendor-specific sheets ─────────────────────────────────────────────────
+    # ── Build ZIP: Master BOM + one simple Excel file per vendor ───────────────
+    import zipfile
     from collections import defaultdict as _vdd
     vendor_groups = _vdd(list)
     for _itm in line_items:
         _v = _itm.get("vendor", "") or "Unassigned"
         vendor_groups[_v].append(_itm)
-    for _vn in sorted(vendor_groups.keys()):
-        if vendor_groups[_vn]:
-            _write_vendor_bom_sheet(wb, _vn, vendor_groups[_vn],
-                                    customer, project, quote_num,
-                                    bid_data.get("estimator_name", ""),
-                                    show_aae_cost=True)
 
-    buf = io.BytesIO()
-    wb.save(buf); buf.seek(0)
-    return send_file(buf,
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    estimator  = bid_data.get("estimator_name", "")
+    safe_proj  = (project or quote_num).replace(" ", "_").replace("/", "-")[:40]
+
+    master_buf = io.BytesIO()
+    wb.save(master_buf)
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"AAE_Master_BOM_{safe_proj}.xlsx", master_buf.getvalue())
+        for _vn in sorted(vendor_groups.keys()):
+            if vendor_groups[_vn]:
+                _vbuf = _build_vendor_excel(_vn, vendor_groups[_vn],
+                                            customer, project, quote_num, estimator)
+                _safe_vn = _vn.replace(" ", "_").replace("/", "-")[:20]
+                zf.writestr(f"AAE_BOM_{_safe_vn}_{safe_proj}.xlsx", _vbuf.getvalue())
+    zip_buf.seek(0)
+    return send_file(zip_buf,
+                     mimetype="application/zip",
                      as_attachment=True,
-                     download_name=f"AAE_BOM_{project.replace(' ','_') or quote_num}.xlsx")
+                     download_name=f"AAE_BOM_Package_{safe_proj}.zip")
 
 @app.route("/api/bid_quote_pdf/<int:bid_id>", methods=["GET"])
 @require_auth
@@ -1554,32 +1563,174 @@ def bom_from_scan():
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:6"
 
-    # ── Vendor-specific sheets ─────────────────────────────────────────────────
-    # Build items list with vendor info resolved (stored during the row-write loop)
+    # ── Build ZIP: Master BOM + one simple Excel file per vendor ───────────────
+    import zipfile
     from collections import defaultdict as _vdd2
     scan_vendor_groups = _vdd2(list)
     for _itm in line_items:
         _v = _itm.get("_resolved_vendor", "") or "Unassigned"
-        # normalize item for the helper (add vendor key)
-        _norm = dict(_itm)
-        _norm["vendor"] = _v
+        _norm = dict(_itm); _norm["vendor"] = _v
         scan_vendor_groups[_v].append(_norm)
-    for _vn in sorted(scan_vendor_groups.keys()):
-        if scan_vendor_groups[_vn]:
-            _write_vendor_bom_sheet(wb, _vn, scan_vendor_groups[_vn],
-                                    customer, project, job_num,
-                                    "", show_aae_cost=False)
+
+    safe_proj = (project or job_num).replace(" ", "_").replace("/", "-")[:40]
+
+    master_buf = io.BytesIO()
+    wb.save(master_buf)
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"AAE_Master_BOM_{safe_proj}.xlsx", master_buf.getvalue())
+        for _vn in sorted(scan_vendor_groups.keys()):
+            if scan_vendor_groups[_vn]:
+                _vbuf = _build_vendor_excel(_vn, scan_vendor_groups[_vn],
+                                            customer, project, job_num, "")
+                _safe_vn = _vn.replace(" ", "_").replace("/", "-")[:20]
+                zf.writestr(f"AAE_BOM_{_safe_vn}_{safe_proj}.xlsx", _vbuf.getvalue())
+    zip_buf.seek(0)
+    return send_file(zip_buf,
+                     mimetype="application/zip",
+                     as_attachment=True,
+                     download_name=f"AAE_BOM_Package_{safe_proj}.zip")
+
+
+
+# ── Vendor BOM File Builder ────────────────────────────────────────────────
+def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estimator=""):
+    """Create a standalone simple Excel workbook for one vendor's BOM.
+    6 columns: ITEM, PART NUMBER, DESCRIPTION, QTY, MANUFACTURER, VENDOR
+    No cost columns — clean purchase-order format for sending to vendors.
+    Returns an io.BytesIO buffer ready for writing into a ZIP.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = vendor_name[:31].replace("/","&").replace("\\","&").replace("?","").replace("*","")
+
+    RED = "9B1B1B"; DARK_RED = "6B0A0A"; WHITE = "FFFFFF"
+    LIGHT_RED = "FDECEA"; MID_GRAY = "F5F0F0"; DARK = "2C2C2C"; TEAL = "00897A"
+
+    def s(cell, bold=False, bg=None, fg=WHITE, sz=10, ha="left"):
+        cell.font = Font(name="Arial", bold=bold, color=fg, size=sz)
+        if bg: cell.fill = PatternFill("solid", fgColor=bg)
+        cell.alignment = Alignment(horizontal=ha, vertical="center", wrap_text=False)
+
+    thin = Side(style="thin", color="E0D0D0")
+    bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
+
+    # 6 columns: A=Item, B=Part#, C=Description, D=Qty, E=Manufacturer, F=Vendor
+    for col, w in [("A",8),("B",24),("C",52),("D",8),("E",26),("F",18)]:
+        ws.column_dimensions[col].width = w
+
+    # Row 1: Banner
+    ws.merge_cells("A1:F1"); ws.row_dimensions[1].height = 14
+    ws["A1"] = f"AAE AUTOMATION — VENDOR ORDER: {vendor_name.upper()}  |  UL-508A Certified Industrial Control Panel Specialists"
+    s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
+
+    # Row 2: Title | Quote#
+    ws.merge_cells("A2:D2"); ws.row_dimensions[2].height = 34
+    ws["A2"] = f"PURCHASE ORDER — {vendor_name.upper()}"
+    ws["A2"].font = Font(name="Arial", bold=True, color=WHITE, size=16)
+    ws["A2"].fill = PatternFill("solid", fgColor=DARK_RED)
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.merge_cells("E2:F2")
+    ws["E2"] = quote_num
+    s(ws["E2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
+
+    # Row 3: Customer | Project
+    ws.row_dimensions[3].height = 18
+    ws["A3"] = "Customer:"
+    s(ws["A3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("B3:C3"); ws["B3"] = customer
+    s(ws["B3"], bg=LIGHT_RED, fg=DARK, sz=10)
+    ws["D3"] = "Project:"
+    s(ws["D3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("E3:F3"); ws["E3"] = project
+    s(ws["E3"], bg=LIGHT_RED, fg=DARK, sz=10)
+
+    # Row 4: Date | Vendor
+    ws.row_dimensions[4].height = 16
+    ws["A4"] = "Date:"
+    s(ws["A4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("B4:C4"); ws["B4"] = datetime.now().strftime("%m/%d/%Y")
+    s(ws["B4"], bg=MID_GRAY, fg=DARK, sz=9)
+    ws["D4"] = "Send To:"
+    s(ws["D4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+    ws.merge_cells("E4:F4"); ws["E4"] = vendor_name
+    s(ws["E4"], bg=MID_GRAY, fg=DARK, sz=9)
+
+    # Row 5: Column headers
+    ws.row_dimensions[5].height = 20
+    for ci, h in enumerate(["ITEM", "PART NUMBER", "DESCRIPTION", "QTY", "MANUFACTURER", "VENDOR"], 1):
+        c = ws.cell(row=5, column=ci, value=h)
+        s(c, bold=True, bg=DARK, sz=9, ha="center")
+        c.border = Border(bottom=Side(style="medium", color=RED))
+
+    # Data rows — flat list, no category groupings
+    row = 6
+    even_fill = PatternFill("solid", fgColor="FDF8F8")
+    odd_fill  = PatternFill("solid", fgColor=WHITE)
+
+    for i, itm in enumerate(items, 1):
+        fill = even_fill if i % 2 == 0 else odd_fill
+        ws.row_dimensions[row].height = 15
+        vals = [
+            itm.get("item_num", i),
+            itm.get("part_number") or itm.get("part_num", ""),
+            itm.get("description", ""),
+            itm.get("qty", 1),
+            itm.get("manufacturer", ""),
+            itm.get("vendor", "") or vendor_name,
+        ]
+        for ci, val in enumerate(vals, 1):
+            c = ws.cell(row=row, column=ci, value=val)
+            c.fill = fill; c.border = bdr
+            c.font = Font(name="Arial", size=9, color=DARK)
+            if ci in (1, 4):
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif ci == 6:  # Vendor — teal accent
+                c.font = Font(name="Arial", size=9, color=TEAL, bold=True)
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci == 3))
+        row += 1
+
+    # Total row
+    total_qty = sum(int(itm.get("qty") or 1) for itm in items)
+    ws.merge_cells(f"A{row}:C{row}")
+    tl = ws.cell(row=row, column=1, value=f"TOTAL LINE ITEMS — {vendor_name.upper()}:")
+    tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
+    tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tl.alignment = Alignment(horizontal="right", vertical="center")
+    tv = ws.cell(row=row, column=4, value=total_qty)
+    tv.font = Font(name="Arial", bold=True, color="008800", size=11)
+    tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tv.alignment = Alignment(horizontal="center", vertical="center")
+    ws.cell(row=row, column=5).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.cell(row=row, column=6).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    ws.row_dimensions[row].height = 20
+    row += 2
+
+    # Footer
+    ws.merge_cells(f"A{row}:F{row}")
+    ft = ws.cell(row=row, column=1,
+        value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
+    ft.font = Font(name="Arial", size=8, color="888080", italic=True)
+    ft.alignment = Alignment(horizontal="center")
+
+    ws.freeze_panes = "A6"
+    ws.auto_filter.ref = f"A5:F{row - 3}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
+    ws.print_title_rows = "1:5"
 
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)
-    fname = f"AAE_BOM_{(project or job_num).replace(' ','_')}.xlsx"
-    return send_file(buf,
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                     as_attachment=True, download_name=fname)
+    return buf
 
 
-
-# ── Vendor BOM Sheet Helper ────────────────────────────────────────────────
+# ── Vendor BOM Sheet Helper (legacy — kept for reference) ─────────────────
 def _write_vendor_bom_sheet(wb, vendor_name, items, customer, project, quote_num,
                              estimator="", show_aae_cost=True):
     """
