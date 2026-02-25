@@ -999,22 +999,93 @@ body {
     <div id="usersTable"></div>
   </div>
 
-  <!-- ── Vendor / Manufacturer Mapping ── -->
+  <!-- ── Vendor Routing Engine ── -->
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-      <div class="card-title" style="margin:0">🏭 VENDOR / MANUFACTURER MAPPING</div>
-      <button class="btn btn-primary" onclick="showAddVendorForm()">➕ Add Mapping</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+      <div class="card-title" style="margin:0">🏭 VENDOR ROUTING ENGINE</div>
     </div>
-    <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">Auto-populates the Vendor column on BOM exports. Partial matching — "Allen Bradley" matches "Allen-Bradley" too.</p>
-    <div id="addVendorForm" style="display:none;background:rgba(155,27,27,0.1);border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:16px;margin-bottom:16px">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end">
-        <div class="field"><label>Manufacturer</label><input type="text" id="newMfr" placeholder="Allen Bradley"></div>
-        <div class="field"><label>Vendor (AAE buys from)</label><input type="text" id="newVendor" placeholder="Rexel"></div>
-        <div class="field"><label>Notes</label><input type="text" id="newVendorNotes" placeholder="optional"></div>
-        <button class="btn btn-primary" onclick="createVendor()" style="margin-bottom:0;height:38px">Add</button>
+    <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px">
+      Deterministic 4-tier routing: <strong style="color:#F4A9A8">Part Overrides</strong> &rarr;
+      <strong style="color:#F4A9A8">Prefix Rules</strong> &rarr;
+      <strong style="color:#F4A9A8">Manufacturer Defaults</strong> &rarr;
+      <strong style="color:#CC3333">UNASSIGNED</strong>.
+      No fuzzy matching. No guessing.
+    </p>
+
+    <!-- ── Test Routing Panel ── -->
+    <div style="background:rgba(46,125,50,0.08);border:1px solid rgba(46,125,50,0.3);border-radius:8px;padding:16px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:600;color:#81C784;margin-bottom:10px;letter-spacing:0.5px">
+        TEST ROUTING
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+        <div class="field"><label>Part Number</label><input type="text" id="testPartNum" placeholder="e.g. 1769-OB16 or ATQR1/2"></div>
+        <div class="field"><label>Manufacturer (optional)</label><input type="text" id="testMfr" placeholder="e.g. Allen Bradley"></div>
+        <button class="btn btn-primary" onclick="testRouting()" style="margin-bottom:0;height:38px;background:#2E7D32">Test</button>
+      </div>
+      <div id="routingTestResult" style="display:none;margin-top:12px;padding:10px;background:rgba(0,0,0,0.3);border-radius:6px;font-size:13px"></div>
     </div>
-    <div id="vendorsTable"></div>
+
+    <!-- ── Tier 1: Part Overrides ── -->
+    <div style="margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;color:#F4A9A8;letter-spacing:0.5px">
+          TIER 1 &mdash; PART NUMBER OVERRIDES
+          <span style="font-weight:400;color:rgba(255,255,255,0.4);font-size:11px;margin-left:8px">Highest priority &mdash; exact part# match</span>
+        </div>
+        <button class="btn btn-ghost" onclick="toggleForm('addPartOverrideForm')" style="font-size:11px;padding:4px 12px">+ Add Override</button>
+      </div>
+      <div id="addPartOverrideForm" style="display:none;background:rgba(155,27,27,0.1);border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:16px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end">
+          <div class="field"><label>Part Number</label><input type="text" id="newOverridePN" placeholder="ATQR1/2"></div>
+          <div class="field"><label>Manufacturer</label><input type="text" id="newOverrideMfr" placeholder="Eaton Bussmann"></div>
+          <div class="field"><label>Vendor</label><select id="newOverrideVendor"></select></div>
+          <div class="field"><label>Notes</label><input type="text" id="newOverrideNotes" placeholder="optional"></div>
+          <button class="btn btn-primary" onclick="createPartOverride()" style="margin-bottom:0;height:38px">Add</button>
+        </div>
+      </div>
+      <div id="partOverridesTable"></div>
+    </div>
+
+    <!-- ── Tier 2: Prefix Rules ── -->
+    <div style="margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;color:#F4A9A8;letter-spacing:0.5px">
+          TIER 2 &mdash; PREFIX / FAMILY RULES
+          <span style="font-weight:400;color:rgba(255,255,255,0.4);font-size:11px;margin-left:8px">Part numbers starting with prefix &rarr; vendor</span>
+        </div>
+        <button class="btn btn-ghost" onclick="toggleForm('addPrefixRuleForm')" style="font-size:11px;padding:4px 12px">+ Add Prefix</button>
+      </div>
+      <div id="addPrefixRuleForm" style="display:none;background:rgba(155,27,27,0.1);border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:16px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end">
+          <div class="field"><label>Prefix</label><input type="text" id="newRulePrefix" placeholder="QO or 1769-"></div>
+          <div class="field"><label>Manufacturer</label><input type="text" id="newRuleMfr" placeholder="Schneider Electric"></div>
+          <div class="field"><label>Vendor</label><select id="newRuleVendor"></select></div>
+          <div class="field"><label>Notes</label><input type="text" id="newRuleNotes" placeholder="optional"></div>
+          <button class="btn btn-primary" onclick="createPrefixRule()" style="margin-bottom:0;height:38px">Add</button>
+        </div>
+      </div>
+      <div id="prefixRulesTable"></div>
+    </div>
+
+    <!-- ── Tier 3: Manufacturer Defaults ── -->
+    <div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;color:#F4A9A8;letter-spacing:0.5px">
+          TIER 3 &mdash; MANUFACTURER DEFAULTS
+          <span style="font-weight:400;color:rgba(255,255,255,0.4);font-size:11px;margin-left:8px">Manufacturer name &rarr; default vendor</span>
+        </div>
+        <button class="btn btn-ghost" onclick="showAddVendorForm()" style="font-size:11px;padding:4px 12px">+ Add Mapping</button>
+      </div>
+      <div id="addVendorForm" style="display:none;background:rgba(155,27,27,0.1);border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:16px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end">
+          <div class="field"><label>Manufacturer</label><input type="text" id="newMfr" placeholder="Allen Bradley"></div>
+          <div class="field"><label>Vendor</label><select id="newVendor"></select></div>
+          <div class="field"><label>Notes</label><input type="text" id="newVendorNotes" placeholder="optional"></div>
+          <button class="btn btn-primary" onclick="createVendor()" style="margin-bottom:0;height:38px">Add</button>
+        </div>
+      </div>
+      <div id="vendorsTable"></div>
+    </div>
   </div>
 </div>
 
@@ -1060,7 +1131,7 @@ function showTab(name) {
   // Highlight the clicked button if called from a click event
   try { if (event && event.target) event.target.classList.add('active'); } catch(e) {}
   if (name === 'history') loadHistory();
-  if (name === 'admin') { loadLaborRates(); loadUsers(); loadVendors(); }
+  if (name === 'admin') { loadLaborRates(); loadUsers(); loadVendors(); loadPartOverrides(); loadPrefixRules(); }
 }
 
 // ── Toast notifications ────────────────────────────────────────────────────
@@ -2143,8 +2214,274 @@ function removeUser(idx) { loadUsers(); }
 
 
 // ═══════════════════════════════════════════════════════════
-// ADMIN: VENDORS  (localStorage-first, syncs to Supabase if available)
+// VENDOR ROUTING ENGINE — 4-tier deterministic routing
+// localStorage-first, syncs to Supabase if available
 // ═══════════════════════════════════════════════════════════
+
+// Known vendors for dropdown menus (prevents typos)
+const KNOWN_VENDORS = ["Rexel","Graybar","AWC","Atech","RS America","Saginaw","Cisco","Tycon","Shade-Aide","San-Disk"];
+const vendorColors = {
+  "Rexel":"#1565C0", "AWC":"#2E7D32", "A-Tech":"#6A1B9A", "Atech":"#6A1B9A",
+  "Graybar":"#E65100", "TD Synnex":"#37474F", "Saginaw":"#880E4F",
+  "RS America":"#00695C", "Cisco":"#1B5E20", "Tycon":"#4E342E",
+  "Shade-Aide":"#5D4037", "San-Disk":"#37474F", "UNASSIGNED":"#CC3333"
+};
+
+function populateVendorDropdown(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const allVendors = new Set(KNOWN_VENDORS);
+  getVendors().forEach(v => allVendors.add(v.vendor_name));
+  sel.innerHTML = '<option value="">-- Select Vendor --</option>';
+  [...allVendors].sort().forEach(v => {
+    sel.innerHTML += `<option value="${v}">${v}</option>`;
+  });
+  sel.innerHTML += '<option value="__other__">Other (type name)...</option>';
+}
+
+function getVendorFromDropdown(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return "";
+  if (sel.value === "__other__") {
+    const name = prompt("Enter new vendor name:");
+    return name ? name.trim() : "";
+  }
+  return sel.value;
+}
+
+function toggleForm(formId) {
+  const f = document.getElementById(formId);
+  if (f) f.style.display = f.style.display === "none" ? "block" : "none";
+}
+
+const TH_STYLE = 'style="text-align:left;padding:6px 10px;background:#2C2C2C;color:white;font-size:11px;letter-spacing:0.5px"';
+const TH_CENTER = 'style="text-align:center;padding:6px 10px;background:#2C2C2C;color:white;font-size:11px;width:50px"';
+function vendorBadge(name) {
+  const vc = vendorColors[name] || "#555555";
+  return `<span style="background:${vc};color:white;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:bold">${name}</span>`;
+}
+function delBtn(onclick) {
+  return `<button onclick="${onclick}" style="background:rgba(155,27,27,0.3);color:#F4A9A8;border:1px solid rgba(155,27,27,0.4);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px">&#x2715;</button>`;
+}
+
+
+// ── ROUTING TEST ────────────────────────────────────────────────────────────
+async function testRouting() {
+  const pn  = document.getElementById("testPartNum").value.trim();
+  const mfr = document.getElementById("testMfr").value.trim();
+  const div = document.getElementById("routingTestResult");
+  if (!pn && !mfr) { toast("Enter a part number or manufacturer","error"); return; }
+  div.style.display = "block";
+  div.innerHTML = '<span style="color:rgba(255,255,255,0.4)">Resolving...</span>';
+  try {
+    const res = await apiFetch("/api/test_routing",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({part_number:pn, manufacturer:mfr})
+    });
+    const r = await res.json();
+    const vc = vendorColors[r.vendor] || (r.vendor==="UNASSIGNED"?"#CC3333":"#555555");
+    const tierLabels = {
+      "part_override": "Tier 1 -- Part Override",
+      "prefix_rule":   "Tier 2 -- Prefix Rule",
+      "vendor_default":"Tier 3 -- Manufacturer Default",
+      "UNASSIGNED":    "Tier 4 -- UNASSIGNED (no match)"
+    };
+    div.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="background:${vc};color:white;padding:4px 14px;border-radius:10px;font-size:13px;font-weight:bold">${r.vendor}</span>
+        <span style="color:rgba(255,255,255,0.6);font-size:12px">
+          Matched: <strong style="color:#F4A9A8">${tierLabels[r.matched_tier] || r.matched_tier}</strong>
+        </span>
+        ${r.manufacturer ? `<span style="color:rgba(255,255,255,0.4);font-size:11px">Mfr: ${r.manufacturer}</span>` : ''}
+        ${r.note ? `<span style="color:rgba(255,255,255,0.4);font-size:11px">-- ${r.note}</span>` : ''}
+      </div>`;
+  } catch(e) {
+    div.innerHTML = `<span style="color:#F4A9A8">Error: ${e.message}</span>`;
+  }
+}
+
+
+// ── TIER 1: PART NUMBER OVERRIDES ───────────────────────────────────────────
+let _partOverrides = [];
+
+async function loadPartOverrides() {
+  const div = document.getElementById("partOverridesTable");
+  if (!div) return;
+  populateVendorDropdown("newOverrideVendor");
+  div.innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:12px">Loading...</p>';
+  try {
+    const res = await apiFetch("/api/part_overrides");
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) _partOverrides = data;
+    }
+  } catch(e) {}
+  renderPartOverridesTable();
+}
+
+function renderPartOverridesTable() {
+  const div = document.getElementById("partOverridesTable");
+  if (!div) return;
+  if (!_partOverrides.length) {
+    div.innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:12px;font-style:italic">No part overrides defined yet. Add one above or run the seed script.</p>';
+    return;
+  }
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>
+      <th ${TH_STYLE}>PART #</th>
+      <th ${TH_STYLE}>MANUFACTURER</th>
+      <th ${TH_STYLE}>VENDOR</th>
+      <th ${TH_STYLE}>NOTES</th>
+      <th ${TH_CENTER}>DEL</th>
+    </tr></thead><tbody>`;
+  _partOverrides.forEach((po, i) => {
+    const bg = i%2===0 ? "#1A0505" : "#200808";
+    html += `<tr style="background:${bg}">
+      <td style="padding:6px 10px;color:#81C784;font-family:'DM Mono',monospace;font-weight:600;font-size:12px">${po.part_number}</td>
+      <td style="padding:6px 10px;color:rgba(255,255,255,0.85)">${po.manufacturer||''}</td>
+      <td style="padding:6px 10px">${vendorBadge(po.vendor_name)}</td>
+      <td style="padding:6px 10px;color:rgba(255,255,255,0.4);font-size:11px">${po.notes||''}</td>
+      <td style="padding:4px 6px;text-align:center">${delBtn('removePartOverride('+po.id+')')}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  div.innerHTML = html;
+}
+
+async function createPartOverride() {
+  const pn     = document.getElementById("newOverridePN").value.trim();
+  const mfr    = document.getElementById("newOverrideMfr").value.trim();
+  const vendor = getVendorFromDropdown("newOverrideVendor");
+  const notes  = document.getElementById("newOverrideNotes").value.trim();
+  if (!pn || !vendor) { toast("Part number and vendor required","error"); return; }
+  if (_partOverrides.find(p => p.part_number.toUpperCase() === pn.toUpperCase())) {
+    toast(pn+" already has an override -- remove it first","error"); return;
+  }
+  try {
+    const res = await apiFetch("/api/part_overrides",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({part_number:pn, manufacturer:mfr, vendor_name:vendor, notes})
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (d.override) _partOverrides.push(d.override);
+      toast("Override added: "+pn+" -> "+vendor,"success");
+      toggleForm("addPartOverrideForm");
+      ["newOverridePN","newOverrideMfr","newOverrideNotes"].forEach(id=>document.getElementById(id).value="");
+      document.getElementById("newOverrideVendor").selectedIndex = 0;
+      renderPartOverridesTable();
+    } else {
+      const err = await res.json();
+      toast(err.error||"Failed to add override","error");
+    }
+  } catch(e) { toast("Error: "+e.message,"error"); }
+}
+
+async function removePartOverride(id) {
+  const po = _partOverrides.find(p => p.id === id);
+  if (!po) return;
+  if (!confirm("Remove override: "+po.part_number+" -> "+po.vendor_name+"?")) return;
+  try {
+    await apiFetch("/api/part_overrides/"+id,{method:"DELETE"});
+    _partOverrides = _partOverrides.filter(p => p.id !== id);
+    toast("Override removed","success");
+    renderPartOverridesTable();
+  } catch(e) { toast("Error: "+e.message,"error"); }
+}
+
+
+// ── TIER 2: PREFIX / FAMILY RULES ───────────────────────────────────────────
+let _prefixRules = [];
+
+async function loadPrefixRules() {
+  const div = document.getElementById("prefixRulesTable");
+  if (!div) return;
+  populateVendorDropdown("newRuleVendor");
+  div.innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:12px">Loading...</p>';
+  try {
+    const res = await apiFetch("/api/prefix_rules");
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) _prefixRules = data;
+    }
+  } catch(e) {}
+  renderPrefixRulesTable();
+}
+
+function renderPrefixRulesTable() {
+  const div = document.getElementById("prefixRulesTable");
+  if (!div) return;
+  if (!_prefixRules.length) {
+    div.innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:12px;font-style:italic">No prefix rules defined yet. Add one above or run the seed script.</p>';
+    return;
+  }
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>
+      <th ${TH_STYLE}>PREFIX</th>
+      <th ${TH_STYLE}>MANUFACTURER</th>
+      <th ${TH_STYLE}>VENDOR</th>
+      <th ${TH_STYLE}>NOTES</th>
+      <th ${TH_STYLE} style="width:50px">PRI</th>
+      <th ${TH_CENTER}>DEL</th>
+    </tr></thead><tbody>`;
+  _prefixRules.forEach((pr, i) => {
+    const bg = i%2===0 ? "#1A0505" : "#200808";
+    html += `<tr style="background:${bg}">
+      <td style="padding:6px 10px;color:#FFD54F;font-family:'DM Mono',monospace;font-weight:600;font-size:12px">${pr.prefix}</td>
+      <td style="padding:6px 10px;color:rgba(255,255,255,0.85)">${pr.manufacturer||''}</td>
+      <td style="padding:6px 10px">${vendorBadge(pr.vendor_name)}</td>
+      <td style="padding:6px 10px;color:rgba(255,255,255,0.4);font-size:11px">${pr.notes||''}</td>
+      <td style="padding:6px 10px;color:rgba(255,255,255,0.4);font-size:11px;text-align:center">${pr.priority||0}</td>
+      <td style="padding:4px 6px;text-align:center">${delBtn('removePrefixRule('+pr.id+')')}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  div.innerHTML = html;
+}
+
+async function createPrefixRule() {
+  const prefix = document.getElementById("newRulePrefix").value.trim();
+  const mfr    = document.getElementById("newRuleMfr").value.trim();
+  const vendor = getVendorFromDropdown("newRuleVendor");
+  const notes  = document.getElementById("newRuleNotes").value.trim();
+  if (!prefix || !vendor) { toast("Prefix and vendor required","error"); return; }
+  if (_prefixRules.find(p => p.prefix.toUpperCase() === prefix.toUpperCase())) {
+    toast(prefix+" already has a rule -- remove it first","error"); return;
+  }
+  try {
+    const res = await apiFetch("/api/prefix_rules",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({prefix, manufacturer:mfr, vendor_name:vendor, notes})
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (d.rule) _prefixRules.push(d.rule);
+      toast("Prefix rule added: "+prefix+"* -> "+vendor,"success");
+      toggleForm("addPrefixRuleForm");
+      ["newRulePrefix","newRuleMfr","newRuleNotes"].forEach(id=>document.getElementById(id).value="");
+      document.getElementById("newRuleVendor").selectedIndex = 0;
+      renderPrefixRulesTable();
+    } else {
+      const err = await res.json();
+      toast(err.error||"Failed to add rule","error");
+    }
+  } catch(e) { toast("Error: "+e.message,"error"); }
+}
+
+async function removePrefixRule(id) {
+  const pr = _prefixRules.find(p => p.id === id);
+  if (!pr) return;
+  if (!confirm("Remove prefix rule: "+pr.prefix+"* -> "+pr.vendor_name+"?")) return;
+  try {
+    await apiFetch("/api/prefix_rules/"+id,{method:"DELETE"});
+    _prefixRules = _prefixRules.filter(p => p.id !== id);
+    toast("Prefix rule removed","success");
+    renderPrefixRulesTable();
+  } catch(e) { toast("Error: "+e.message,"error"); }
+}
+
+
+// ── TIER 3: MANUFACTURER DEFAULTS (existing vendor mapping) ─────────────────
 
 const DEFAULT_VENDORS = [
   {id:1,  vendor_name:"Rexel",     manufacturer:"Allen Bradley",               notes:""},
@@ -2153,23 +2490,31 @@ const DEFAULT_VENDORS = [
   {id:4,  vendor_name:"Rexel",     manufacturer:"Panduit",                     notes:"Wire duct, labels"},
   {id:5,  vendor_name:"Rexel",     manufacturer:"Mersen",                      notes:"Fuses"},
   {id:6,  vendor_name:"Rexel",     manufacturer:"Hoffman",                     notes:"Enclosure accessories"},
-  {id:7,  vendor_name:"Rexel",     manufacturer:"N-Tron",                      notes:"Ethernet switches"},
-  {id:8,  vendor_name:"Rexel",     manufacturer:"Corning",                     notes:"Fiber"},
-  {id:9,  vendor_name:"AWC",       manufacturer:"Phoenix Contact",             notes:"Terminal blocks"},
-  {id:10, vendor_name:"AWC",       manufacturer:"Rittal",                      notes:"Enclosures"},
-  {id:11, vendor_name:"AWC",       manufacturer:"Hammond Enclosures",          notes:""},
-  {id:12, vendor_name:"AWC",       manufacturer:"Siemens",                     notes:""},
-  {id:13, vendor_name:"AWC",       manufacturer:"Solar Shield",                notes:"HMIs"},
-  {id:14, vendor_name:"AWC",       manufacturer:"Bussmann",                    notes:"Fuses"},
-  {id:15, vendor_name:"AWC",       manufacturer:"Marathon Special Products",   notes:"Terminal blocks"},
-  {id:16, vendor_name:"AWC",       manufacturer:"Tripp Lite",                  notes:"UPS / power"},
-  {id:17, vendor_name:"A-Tech",    manufacturer:"Turck",                       notes:"Sensors, connectors"},
-  {id:18, vendor_name:"A-Tech",    manufacturer:"Red Lion",                    notes:"HMI, comm"},
-  {id:19, vendor_name:"Graybar",   manufacturer:"Square D",                    notes:""},
-  {id:20, vendor_name:"Graybar",   manufacturer:"Schneider Electric",          notes:"Same as Square D"},
-  {id:21, vendor_name:"TD Synnex", manufacturer:"Cisco",                       notes:"Networking"},
-  {id:22, vendor_name:"Saginaw",   manufacturer:"Saginaw Control Engineering", notes:"Custom enclosures"},
-  {id:23, vendor_name:"Saginaw",   manufacturer:"SCE",                         notes:"Short name for Saginaw"},
+  {id:7,  vendor_name:"Rexel",     manufacturer:"nVent HOFFMAN",               notes:"Enclosure accessories"},
+  {id:8,  vendor_name:"Rexel",     manufacturer:"N-Tron",                      notes:"Ethernet switches"},
+  {id:9,  vendor_name:"Rexel",     manufacturer:"Corning",                     notes:"Fiber"},
+  {id:10, vendor_name:"Rexel",     manufacturer:"XetaWave",                    notes:"Wireless"},
+  {id:11, vendor_name:"Rexel",     manufacturer:"GracePort",                   notes:"Interface panels"},
+  {id:12, vendor_name:"AWC",       manufacturer:"Phoenix Contact",             notes:"Terminal blocks"},
+  {id:13, vendor_name:"AWC",       manufacturer:"Rittal",                      notes:"Enclosures"},
+  {id:14, vendor_name:"AWC",       manufacturer:"Hammond Enclosures",          notes:""},
+  {id:15, vendor_name:"AWC",       manufacturer:"Siemens",                     notes:""},
+  {id:16, vendor_name:"AWC",       manufacturer:"Solar Shield",                notes:"HMIs"},
+  {id:17, vendor_name:"AWC",       manufacturer:"Littelfuse",                  notes:"Fuses"},
+  {id:18, vendor_name:"AWC",       manufacturer:"MOXA",                        notes:"Serial/Ethernet gateways"},
+  {id:19, vendor_name:"AWC",       manufacturer:"Marathon Special Products",   notes:"Terminal blocks"},
+  {id:20, vendor_name:"AWC",       manufacturer:"Tripp Lite",                  notes:"UPS / power"},
+  {id:21, vendor_name:"Atech",     manufacturer:"Turck",                       notes:"Sensors, connectors"},
+  {id:22, vendor_name:"Atech",     manufacturer:"Red Lion Controls",           notes:"HMI, comm"},
+  {id:23, vendor_name:"Graybar",   manufacturer:"Square D",                    notes:""},
+  {id:24, vendor_name:"Graybar",   manufacturer:"Schneider Electric",          notes:"Same as Square D"},
+  {id:25, vendor_name:"Cisco",     manufacturer:"Cisco",                       notes:"Networking"},
+  {id:26, vendor_name:"Saginaw",   manufacturer:"Saginaw Control Engineering", notes:"Custom enclosures"},
+  {id:27, vendor_name:"Saginaw",   manufacturer:"SCE",                         notes:"Short name for Saginaw"},
+  {id:28, vendor_name:"RS America",manufacturer:"Mean Well",                   notes:"Power supplies"},
+  {id:29, vendor_name:"Tycon",     manufacturer:"Tycon Systems",               notes:"PoE / solar"},
+  {id:30, vendor_name:"Shade-Aide",manufacturer:"Shade Aide",                  notes:"Sun shades"},
+  {id:31, vendor_name:"San-Disk",  manufacturer:"SanDisk",                     notes:"Memory cards"},
 ];
 
 let _nextVendorId = 100;
@@ -2186,6 +2531,7 @@ function saveVendorsLocal(vendors) {
 async function loadVendors() {
   const div = document.getElementById("vendorsTable");
   if (!div) return;
+  populateVendorDropdown("newVendor");
   div.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:13px">Loading...</p>';
   try {
     const res = await apiFetch("/api/vendors");
@@ -2207,32 +2553,23 @@ function renderVendorsTable(vendors) {
     if (!groups[v.vendor_name]) groups[v.vendor_name] = [];
     groups[v.vendor_name].push(v);
   });
-  const vendorColors = {
-    "Rexel":"#1565C0","AWC":"#2E7D32","A-Tech":"#6A1B9A",
-    "Graybar":"#E65100","TD Synnex":"#37474F","Saginaw":"#880E4F"
-  };
   let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
     <thead><tr>
-      <th style="text-align:left;padding:8px 14px;background:#2C2C2C;color:white">VENDOR</th>
-      <th style="text-align:left;padding:8px 14px;background:#2C2C2C;color:white">MANUFACTURER</th>
-      <th style="text-align:left;padding:8px 14px;background:#2C2C2C;color:white">NOTES</th>
-      <th style="text-align:center;padding:8px 14px;background:#2C2C2C;color:white;width:80px">REMOVE</th>
+      <th ${TH_STYLE}>VENDOR</th>
+      <th ${TH_STYLE}>MANUFACTURER</th>
+      <th ${TH_STYLE}>NOTES</th>
+      <th ${TH_CENTER}>DEL</th>
     </tr></thead><tbody>`;
   let rowIdx = 0;
   Object.keys(groups).sort().forEach(vname => {
     groups[vname].forEach(v => {
       const bg = rowIdx++%2===0 ? "#1A0505" : "#200808";
-      const vc = vendorColors[vname] || "#555555";
       html += `<tr style="background:${bg}">
-        <td style="padding:8px 14px"><span style="background:${vc};color:white;padding:2px 10px;
-          border-radius:10px;font-size:11px;font-weight:bold">${vname}</span></td>
-        <td style="padding:8px 14px;color:rgba(255,255,255,0.9)">${v.manufacturer}</td>
-        <td style="padding:8px 14px;color:rgba(255,255,255,0.4);font-size:11px">${v.notes||''}</td>
-        <td style="padding:6px 8px;text-align:center">
-          <button onclick="removeVendorLocal(${v.id})"
-            style="background:rgba(155,27,27,0.3);color:#F4A9A8;border:1px solid rgba(155,27,27,0.4);
-                   border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px">&#x2715;</button>
-        </td></tr>`;
+        <td style="padding:6px 10px">${vendorBadge(vname)}</td>
+        <td style="padding:6px 10px;color:rgba(255,255,255,0.9)">${v.manufacturer}</td>
+        <td style="padding:6px 10px;color:rgba(255,255,255,0.4);font-size:11px">${v.notes||''}</td>
+        <td style="padding:4px 6px;text-align:center">${delBtn('removeVendorLocal('+v.id+')')}</td>
+      </tr>`;
     });
   });
   html += '</tbody></table>';
@@ -2240,24 +2577,24 @@ function renderVendorsTable(vendors) {
 }
 
 function showAddVendorForm() {
-  const f = document.getElementById("addVendorForm");
-  f.style.display = f.style.display==="none" ? "block" : "none";
+  toggleForm("addVendorForm");
 }
 
 function createVendor() {
   const mfr    = document.getElementById("newMfr").value.trim();
-  const vendor = document.getElementById("newVendor").value.trim();
+  const vendor = getVendorFromDropdown("newVendor");
   const notes  = document.getElementById("newVendorNotes").value.trim();
   if (!mfr || !vendor) { toast("Manufacturer and vendor required","error"); return; }
   const vendors = getVendors();
   if (vendors.find(v => v.manufacturer.toLowerCase()===mfr.toLowerCase())) {
-    toast(mfr+" already mapped — remove first","error"); return;
+    toast(mfr+" already mapped -- remove first","error"); return;
   }
   vendors.push({id:_nextVendorId++, vendor_name:vendor, manufacturer:mfr, notes, active:true});
   saveVendorsLocal(vendors);
-  toast("Added: "+mfr+" → "+vendor,"success");
+  toast("Added: "+mfr+" -> "+vendor,"success");
   document.getElementById("addVendorForm").style.display="none";
-  ["newMfr","newVendor","newVendorNotes"].forEach(id=>document.getElementById(id).value="");
+  ["newMfr","newVendorNotes"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("newVendor").selectedIndex = 0;
   renderVendorsTable(getVendors());
   apiFetch("/api/vendors",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({manufacturer:mfr,vendor_name:vendor,notes,
@@ -2268,14 +2605,12 @@ function removeVendorLocal(id) {
   const vendors = getVendors();
   const idx = vendors.findIndex(v => v.id===id);
   if (idx===-1) return;
-  if (!confirm("Remove "+vendors[idx].manufacturer+" → "+vendors[idx].vendor_name+"?")) return;
+  if (!confirm("Remove "+vendors[idx].manufacturer+" -> "+vendors[idx].vendor_name+"?")) return;
   vendors.splice(idx,1);
   saveVendorsLocal(vendors);
   toast("Mapping removed","success");
   renderVendorsTable(getVendors());
-  apiFetch("/api/vendors/"+id,{
-    method:"DELETE"
-  }).catch(()=>{});
+  apiFetch("/api/vendors/"+id,{method:"DELETE"}).catch(()=>{});
 }
 </script>
 </body>
