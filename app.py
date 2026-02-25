@@ -681,7 +681,8 @@ Rules:
         try:
             response = claude_client.messages.create(
                 model=model,
-                max_tokens=8000,
+                max_tokens=32000,
+                temperature=0,
                 messages=[{
                     "role": "user",
                     "content": [
@@ -697,6 +698,13 @@ Rules:
                     ]
                 }]
             )
+
+            # Check if response was truncated due to token limit
+            stop_reason = response.stop_reason
+            tokens_used = response.usage.output_tokens if response.usage else 0
+            if stop_reason == "max_tokens":
+                print(f"SCAN WARNING: Response truncated at {tokens_used} output tokens (max_tokens hit). BOM may be incomplete.", flush=True)
+
             raw = response.content[0].text.strip()
             # Strip markdown if model wrapped it anyway
             raw = re.sub(r"^```json\s*", "", raw)
@@ -732,6 +740,17 @@ Rules:
                     raise
 
             result["_model_used"] = model
+            result["_stop_reason"] = stop_reason
+            result["_output_tokens"] = tokens_used
+            if stop_reason == "max_tokens":
+                result["_truncated"] = True
+                if "extraction_summary" not in result:
+                    result["extraction_summary"] = {}
+                if "review_flags" not in result.get("extraction_summary", {}):
+                    result["extraction_summary"]["review_flags"] = []
+                result["extraction_summary"]["review_flags"].append(
+                    "WARNING: Response was truncated — some BOM items may be missing. Re-scan if item count looks low."
+                )
             return result
 
         except Exception as e:
