@@ -664,11 +664,14 @@ Rules:
 - Soft starters: <=50A = small, >50A = large
 - Count wire numbers if a wire schedule exists for wire_count
 - If no wire schedule: estimate wire_count as (DI+DO)*0.8 + (AI+AO)*1.0 + terminals*0.6
-- bom_line_items: extract EVERY line item from any BOM table found in the drawings
+- bom_line_items: extract EVERY SINGLE line item from any BOM table found in the drawings
+  - THIS IS CRITICAL: Do NOT skip or omit ANY rows. Every row in the BOM table must appear in bom_line_items.
+  - If the BOM table has 36 rows, you must return exactly 36 items. Count them.
   - Include part numbers, descriptions, quantities, manufacturers exactly as shown
   - Use these categories: Enclosure, Power, Motor Ctrl, Control Devices, PLC/Network, Terminals, Relays, Wiring, HMI/Computer, Markers, Other
   - If no BOM table found, return empty array []
   - Set qty to numeric value (not "A/R" — use 1 for A/R items and note in notes field)
+  - Include a "total_bom_rows_on_drawing" field in extraction_summary with how many rows you see in the BOM table
 - Flag anything uncertain in review_flags
 - confidence: 0.0 to 1.0"""
 
