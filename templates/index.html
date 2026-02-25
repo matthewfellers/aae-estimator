@@ -1250,14 +1250,33 @@ async function startScan(file) {
       if (el && val) el.value = val;
     });
 
-    // Confidence bar
+    // Confidence bar with model diagnostics
     const conf = data.extraction_summary?.confidence || 0;
     const confClass = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'med' : 'low';
     const confEmoji = conf >= 0.85 ? '✅' : conf >= 0.65 ? '⚠️' : '🔴';
+    const modelUsed = data._model_used || 'unknown';
+    const stopReason = data._stop_reason || '';
+    const outputTokens = data._output_tokens || 0;
+    const wasTruncated = data._truncated || false;
+    const totalBomRows = data.extraction_summary?.total_bom_rows_on_drawing || '?';
+    const bomItemCount = (data.bom_line_items || []).length;
+
+    let diagInfo = `Model: ${modelUsed.replace('claude-','').split('-202')[0]}`;
+    if (outputTokens) diagInfo += ` | ${outputTokens} tokens`;
+    if (wasTruncated) diagInfo += ' | TRUNCATED';
+
     confBar.className = `confidence-bar visible ${confClass}`;
-    confBar.innerHTML = `${confEmoji} <strong>AI Confidence: ${Math.round(conf*100)}%</strong> — 
-      ${(data.extraction_summary?.drawing_types_found || []).join(', ')} detected. 
-      Review green-highlighted fields before calculating.`;
+    confBar.innerHTML = `${confEmoji} <strong>AI Confidence: ${Math.round(conf*100)}%</strong> —
+      ${(data.extraction_summary?.drawing_types_found || []).join(', ')} detected.
+      Review green-highlighted fields before calculating.
+      <span style="opacity:0.5;font-size:10px;margin-left:8px">[${diagInfo}]</span>`;
+
+    // Warn if extracted count doesn't match BOM table row count
+    if (totalBomRows !== '?' && parseInt(totalBomRows) > bomItemCount) {
+      const missing = parseInt(totalBomRows) - bomItemCount;
+      flagsDiv.innerHTML += `<div class="flag-item" style="color:#FF6B6B;font-weight:bold">
+        WARNING: Drawing BOM has ${totalBomRows} rows but only ${bomItemCount} were extracted (${missing} missing). Re-scan recommended.</div>`;
+    }
 
     // Review flags
     const flags = [
@@ -1265,11 +1284,12 @@ async function startScan(file) {
       ...(data.extraction_summary?.scope_gap_flags || [])
     ];
     if (flags.length) {
-      flagsDiv.innerHTML = flags.map(f => `<div class="flag-item">⚠ ${f}</div>`).join('');
+      flagsDiv.innerHTML += flags.map(f => `<div class="flag-item">⚠ ${f}</div>`).join('');
     }
 
     document.getElementById('uploadText').textContent = `✅ ${file.name} — scan complete`;
-    toast(`Drawing scanned — ${Math.round(conf*100)}% confidence`, conf >= 0.75 ? 'success' : 'info');
+    toast(`Drawing scanned — ${bomItemCount} items, ${Math.round(conf*100)}% confidence [${modelUsed.includes('haiku') ? 'HAIKU fallback' : 'Sonnet'}]`,
+      conf >= 0.75 ? 'success' : 'info');
 
     // Store BOM line items for download
     lastScanBOM = data.bom_line_items || [];
