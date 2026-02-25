@@ -679,7 +679,8 @@ Rules:
 
     for attempt, model in enumerate(models_to_try):
         try:
-            response = claude_client.messages.create(
+            # Use streaming to avoid timeout on large responses
+            with claude_client.messages.stream(
                 model=model,
                 max_tokens=32000,
                 temperature=0,
@@ -697,7 +698,8 @@ Rules:
                         {"type": "text", "text": prompt}
                     ]
                 }]
-            )
+            ) as stream:
+                response = stream.get_final_message()
 
             # Check if response was truncated due to token limit
             stop_reason = response.stop_reason
