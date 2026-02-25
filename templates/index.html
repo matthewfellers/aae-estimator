@@ -1631,7 +1631,7 @@ let _sbClient = null;
 let _inviteSession = null;
 if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undefined") {
   _sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
-    auth: { persistSession: false, detectSessionInUrl: false }
+    auth: { persistSession: true, detectSessionInUrl: false }
   });
 
   // Handle invite / password-recovery links.
@@ -1664,6 +1664,43 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
   } catch(e) {
     console.warn('Hash parse error:', e);
   }
+
+  // Auto-restore session on page load (persisted from previous login)
+  // This skips the login screen if the session + MFA are still valid
+  (async function restoreSession() {
+    try {
+      const { data: { session } } = await _sbClient.auth.getSession();
+      if (session && session.access_token) {
+        _accessToken = session.access_token;
+
+        // Verify the token is still valid with the server
+        const profileResp = await fetch("/api/me", { headers: { "Authorization": "Bearer " + _accessToken } });
+        if (profileResp.ok) {
+          const profile = await profileResp.json();
+          currentUser = profile;
+          onLoginSuccess();
+          console.log("[auth] Session restored (aal=" + (session.user?.aal || "?") + ")");
+          return;
+        }
+        // Token expired or invalid — fall through to login screen
+        _accessToken = null;
+      }
+    } catch(e) {
+      console.warn("[auth] Session restore failed:", e.message);
+      _accessToken = null;
+    }
+  })();
+
+  // Keep _accessToken in sync when Supabase auto-refreshes the token
+  _sbClient.auth.onAuthStateChange((event, session) => {
+    if (event === 'TOKEN_REFRESHED' && session) {
+      _accessToken = session.access_token;
+      console.log("[auth] Token auto-refreshed");
+    } else if (event === 'SIGNED_OUT') {
+      _accessToken = null;
+      currentUser = null;
+    }
+  });
 }
 
 /** Always attach Bearer token to backend API calls */
