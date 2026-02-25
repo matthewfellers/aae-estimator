@@ -999,6 +999,20 @@ body {
     <div id="usersTable"></div>
   </div>
 
+  <!-- ── MFA Enrollment ── -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+      <div class="card-title" style="margin:0">🔐 MFA / TWO-FACTOR AUTHENTICATION</div>
+    </div>
+    <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">
+      Required for admin write operations (editing labor rates, vendor rules, etc.).
+      Uses an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, etc.).
+    </p>
+    <div id="mfaStatusPanel">
+      <p style="color:rgba(255,255,255,0.3);font-size:12px">Checking MFA status...</p>
+    </div>
+  </div>
+
   <!-- ── Vendor Routing Engine ── -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
@@ -1131,7 +1145,7 @@ function showTab(name) {
   // Highlight the clicked button if called from a click event
   try { if (event && event.target) event.target.classList.add('active'); } catch(e) {}
   if (name === 'history') loadHistory();
-  if (name === 'admin') { loadLaborRates(); loadUsers(); loadVendors(); loadPartOverrides(); loadPrefixRules(); }
+  if (name === 'admin') { loadLaborRates(); loadUsers(); loadMfaStatus(); loadVendors(); loadPartOverrides(); loadPrefixRules(); }
 }
 
 // ── Toast notifications ────────────────────────────────────────────────────
@@ -1655,12 +1669,14 @@ function showLoginErr(msg) {
   el.style.display = "block";
 }
 
+let _pendingMfaFactorId = null;  // set when MFA challenge is needed
+
 async function doLogin() {
   const email = document.getElementById("login_email").value.trim();
   const pass  = document.getElementById("login_pass").value;
+  const mfaCode = document.getElementById("login_mfa").value.trim();
   const btn   = document.querySelector("#signin-form .login-submit");
   btn.disabled = true;
-  btn.textContent = "Signing in…";
   document.getElementById("login_err").style.display = "none";
 
   if (!_sbClient) {
@@ -1669,28 +1685,70 @@ async function doLogin() {
   }
 
   try {
+    // Step A: If we already have a pending MFA challenge, verify the code
+    if (_pendingMfaFactorId && mfaCode) {
+      btn.textContent = "Verifying MFA…";
+      const { data: chalData, error: chalErr } = await _sbClient.auth.mfa.challengeAndVerify({
+        factorId: _pendingMfaFactorId,
+        code: mfaCode
+      });
+      if (chalErr) throw chalErr;
+
+      // MFA verified — get the upgraded session (aal2)
+      const { data: sessionData } = await _sbClient.auth.getSession();
+      _accessToken = sessionData.session.access_token;
+      _pendingMfaFactorId = null;
+      document.getElementById("mfa-section").style.display = "none";
+      document.getElementById("login_mfa").value = "";
+
+      // Fetch profile with aal2 token
+      const profileResp = await fetch("/api/me", { headers: { "Authorization": "Bearer " + _accessToken } });
+      const profileBody = await profileResp.json().catch(() => ({}));
+      if (!profileResp.ok) throw new Error(profileBody.error || "Profile load failed");
+      currentUser = profileBody;
+      onLoginSuccess();
+      return;
+    }
+
+    // Step B: Normal password sign-in
+    btn.textContent = "Signing in…";
     const { data, error } = await _sbClient.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
 
     _accessToken = data.session.access_token;
 
-    // Fetch server-verified profile (role comes from server, never trusted from client)
-    // Use raw fetch (not apiFetch) so we can read the error body before throwing.
-    // apiFetch intercepts 401s and throws "Unauthenticated" before we can see the reason.
+    // Step C: Check if MFA is enrolled and needs verification
+    const { data: aalData } = await _sbClient.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aalData && aalData.currentLevel === "aal1" && aalData.nextLevel === "aal2") {
+      // User has MFA enrolled but hasn't verified yet — show the MFA code field
+      const totp = (aalData.currentAuthenticationMethods || []).find(m => m.method === "totp");
+      // Get the factor ID from enrolled factors
+      const { data: factorData } = await _sbClient.auth.mfa.listFactors();
+      const verifiedFactor = (factorData?.totp || []).find(f => f.status === "verified");
+      if (verifiedFactor) {
+        _pendingMfaFactorId = verifiedFactor.id;
+        document.getElementById("mfa-section").style.display = "block";
+        document.getElementById("login_mfa").focus();
+        btn.textContent = "VERIFY MFA";
+        btn.disabled = false;
+        return;  // Wait for user to enter MFA code and click again
+      }
+    }
+
+    // Step D: No MFA enrolled or not required — proceed with aal1 session
     const profileResp = await fetch("/api/me", { headers: { "Authorization": "Bearer " + _accessToken } });
     const profileBody = await profileResp.json().catch(() => ({}));
-    if (!profileResp.ok) {
-      throw new Error(profileBody.error || "Profile load failed (" + profileResp.status + ")");
-    }
-    const profile = profileBody;
-
-    currentUser = profile;
+    if (!profileResp.ok) throw new Error(profileBody.error || "Profile load failed (" + profileResp.status + ")");
+    currentUser = profileBody;
     onLoginSuccess();
   } catch (err) {
     _accessToken = null;
+    _pendingMfaFactorId = null;
+    document.getElementById("mfa-section").style.display = "none";
     showLoginErr(err.message || "Sign-in failed. Check your credentials.");
   } finally {
-    btn.disabled = false; btn.textContent = "SIGN IN";
+    btn.disabled = false;
+    if (!_pendingMfaFactorId) btn.textContent = "SIGN IN";
   }
 }
 
@@ -1715,7 +1773,7 @@ async function doLogout() {
   if (adminBtn) adminBtn.style.display = "none";
 }
 
-["login_email","login_pass"].forEach(id => {
+["login_email","login_pass","login_mfa"].forEach(id => {
   document.getElementById(id)?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
 });
 
@@ -2211,6 +2269,177 @@ function showAddUserForm() {
 function createUser() { loadUsers(); }
 function saveUserPassword(idx) { loadUsers(); }
 function removeUser(idx) { loadUsers(); }
+
+
+// ═══════════════════════════════════════════════════════════
+// ADMIN: MFA ENROLLMENT & STATUS
+// ═══════════════════════════════════════════════════════════
+
+let _mfaEnrollData = null;  // holds pending enrollment (factorId, qr, secret)
+
+async function loadMfaStatus() {
+  const panel = document.getElementById("mfaStatusPanel");
+  if (!panel || !_sbClient) {
+    if (panel) panel.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:12px">Auth service not available.</p>';
+    return;
+  }
+
+  try {
+    const { data: aalData } = await _sbClient.auth.mfa.getAuthenticatorAssuranceLevel();
+    const { data: factorData } = await _sbClient.auth.mfa.listFactors();
+    const verifiedFactors = (factorData?.totp || []).filter(f => f.status === "verified");
+    const currentLevel = aalData?.currentLevel || "aal1";
+
+    if (verifiedFactors.length > 0) {
+      // MFA is enrolled and active
+      const factor = verifiedFactors[0];
+      const isVerified = currentLevel === "aal2";
+      panel.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span style="background:#2E7D32;color:white;padding:4px 14px;border-radius:10px;font-size:13px;font-weight:bold">
+            MFA ENROLLED
+          </span>
+          <span style="color:rgba(255,255,255,0.6);font-size:12px">
+            Session level: <strong style="color:${isVerified ? '#81C784' : '#FFD54F'}">${currentLevel.toUpperCase()}</strong>
+            ${isVerified ? '(admin writes enabled)' : '(sign out and back in to verify MFA)'}
+          </span>
+        </div>
+        <p style="color:rgba(255,255,255,0.4);font-size:11px;margin-top:8px">
+          Factor ID: ${factor.id.substring(0,8)}... &nbsp; | &nbsp;
+          Friendly name: ${factor.friendly_name || 'Authenticator'} &nbsp; | &nbsp;
+          Enrolled: ${new Date(factor.created_at).toLocaleDateString()}
+        </p>
+        <div style="margin-top:10px">
+          <button class="btn btn-ghost" onclick="unenrollMfa('${factor.id}')" style="font-size:11px;padding:4px 12px;color:#F4A9A8">
+            Remove MFA Factor
+          </button>
+        </div>`;
+    } else {
+      // No MFA enrolled — show enrollment button
+      panel.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+          <span style="background:#CC3333;color:white;padding:4px 14px;border-radius:10px;font-size:13px;font-weight:bold">
+            NOT ENROLLED
+          </span>
+          <span style="color:rgba(255,255,255,0.5);font-size:12px">
+            MFA is required to edit settings (labor rates, vendor rules, etc.)
+          </span>
+        </div>
+        <button class="btn btn-primary" onclick="startMfaEnroll()" style="font-size:13px">
+          Set Up MFA (Authenticator App)
+        </button>
+        <div id="mfaEnrollPanel" style="display:none;margin-top:16px"></div>`;
+    }
+  } catch(e) {
+    panel.innerHTML = `<p style="color:#F4A9A8;font-size:12px">Error checking MFA status: ${e.message}</p>`;
+  }
+}
+
+async function startMfaEnroll() {
+  const panel = document.getElementById("mfaEnrollPanel");
+  if (!panel) return;
+  panel.style.display = "block";
+  panel.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:12px">Generating QR code...</p>';
+
+  try {
+    const { data, error } = await _sbClient.auth.mfa.enroll({
+      factorType: "totp",
+      friendlyName: "AAE Authenticator"
+    });
+    if (error) throw error;
+
+    _mfaEnrollData = data;
+
+    panel.innerHTML = `
+      <div style="background:rgba(155,27,27,0.1);border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:20px">
+        <div style="font-size:13px;font-weight:600;color:#F4A9A8;margin-bottom:12px">STEP 1: Scan this QR code with your authenticator app</div>
+        <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+          <div style="background:white;padding:12px;border-radius:8px;display:inline-block">
+            <img src="${data.totp.qr_code}" alt="MFA QR Code" style="width:200px;height:200px;display:block">
+          </div>
+          <div style="flex:1;min-width:200px">
+            <p style="color:rgba(255,255,255,0.6);font-size:12px;margin-bottom:8px">
+              Open <strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong>,
+              <strong>Authy</strong>, or any TOTP app and scan the QR code.
+            </p>
+            <p style="color:rgba(255,255,255,0.4);font-size:11px;margin-bottom:12px">
+              Can't scan? Enter this secret manually:<br>
+              <code style="background:rgba(0,0,0,0.3);padding:4px 8px;border-radius:4px;color:#81C784;font-size:12px;word-break:break-all">
+                ${data.totp.secret}
+              </code>
+            </p>
+            <div style="font-size:13px;font-weight:600;color:#F4A9A8;margin-bottom:8px;margin-top:16px">STEP 2: Enter the 6-digit code from your app</div>
+            <div style="display:flex;gap:8px;align-items:end">
+              <div class="field" style="flex:0 0 120px">
+                <input type="text" id="mfaEnrollCode" placeholder="123456" maxlength="6" inputmode="numeric"
+                  style="font-size:18px;text-align:center;letter-spacing:4px;padding:8px">
+              </div>
+              <button class="btn btn-primary" onclick="verifyMfaEnroll()" style="height:42px">Verify & Activate</button>
+              <button class="btn btn-ghost" onclick="cancelMfaEnroll()" style="height:42px">Cancel</button>
+            </div>
+            <div id="mfaEnrollError" style="display:none;color:#F4A9A8;font-size:12px;margin-top:8px"></div>
+          </div>
+        </div>
+      </div>`;
+
+    // Auto-focus the code input
+    setTimeout(() => document.getElementById("mfaEnrollCode")?.focus(), 100);
+  } catch(e) {
+    panel.innerHTML = `<p style="color:#F4A9A8;font-size:12px">Error starting enrollment: ${e.message}</p>`;
+  }
+}
+
+async function verifyMfaEnroll() {
+  if (!_mfaEnrollData) return;
+  const code = document.getElementById("mfaEnrollCode").value.trim();
+  const errDiv = document.getElementById("mfaEnrollError");
+  if (code.length !== 6 || !/^\d{6}$/.test(code)) {
+    errDiv.textContent = "Enter a 6-digit numeric code from your authenticator app.";
+    errDiv.style.display = "block";
+    return;
+  }
+
+  try {
+    const { data, error } = await _sbClient.auth.mfa.challengeAndVerify({
+      factorId: _mfaEnrollData.id,
+      code: code
+    });
+    if (error) throw error;
+
+    // MFA verified — refresh session to get aal2 token
+    const { data: sessionData } = await _sbClient.auth.getSession();
+    if (sessionData?.session) {
+      _accessToken = sessionData.session.access_token;
+    }
+
+    _mfaEnrollData = null;
+    toast("MFA enrolled successfully! Admin writes are now enabled.", "success");
+    loadMfaStatus();
+  } catch(e) {
+    errDiv.textContent = "Invalid code. Make sure the code in your authenticator app matches and try again.";
+    errDiv.style.display = "block";
+    document.getElementById("mfaEnrollCode").value = "";
+    document.getElementById("mfaEnrollCode").focus();
+  }
+}
+
+function cancelMfaEnroll() {
+  _mfaEnrollData = null;
+  const panel = document.getElementById("mfaEnrollPanel");
+  if (panel) { panel.style.display = "none"; panel.innerHTML = ""; }
+}
+
+async function unenrollMfa(factorId) {
+  if (!confirm("Remove MFA? You will need to re-enroll to edit admin settings.")) return;
+  try {
+    const { error } = await _sbClient.auth.mfa.unenroll({ factorId });
+    if (error) throw error;
+    toast("MFA factor removed.", "success");
+    loadMfaStatus();
+  } catch(e) {
+    toast("Error removing MFA: " + e.message, "error");
+  }
+}
 
 
 // ═══════════════════════════════════════════════════════════
