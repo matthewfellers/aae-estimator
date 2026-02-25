@@ -2274,3 +2274,9 @@ function removeVendorLocal(id) {
   toast("Mapping removed","success");
   renderVendorsTable(getVendors());
   apiFetch("/api/vendors/"+id,{
+    method:"DELETE"
+  }).catch(()=>{});
+}
+</script>
+</body>
+</html>
