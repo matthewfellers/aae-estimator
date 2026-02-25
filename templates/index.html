@@ -654,10 +654,10 @@ body {
     <div class="bom-export-row" id="scanBomRow" style="display:none">
       <div class="bom-export-label" id="scanBomLabel">📦 Bill of Materials extracted from drawing — download before calculating</div>
       <div class="bom-btns">
-        <button class="bom-btn bom-btn-xls" onclick="downloadScanBOM()">📊 Download AAE BOM — Excel (Master + Vendor Sheets)</button>
+        <button class="bom-btn bom-btn-xls" onclick="downloadScanBOM()">📦 Download BOM Package — ZIP (Master + Per-Vendor Files)</button>
       </div>
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:6px">
-        Excel file includes a Master BOM sheet + one sheet per vendor (Rexel, AWC, etc.) · Cost column will be $0.00 — QuickBooks pricing integration coming soon
+        ZIP contains: AAE_Master_BOM.xlsx (full internal BOM) + one clean Excel file per vendor (Rexel, AWC, A-Tech, etc.) ready to send · No cost columns on vendor files
       </div>
       <!-- Live BOM preview table -->
       <div id="scanBomPreview" style="margin-top:1rem;overflow-x:auto;max-height:400px;overflow-y:auto;border-radius:8px;border:1px solid rgba(155,27,27,0.25)"></div>
@@ -952,7 +952,7 @@ body {
       <div class="btn-row" style="margin-top:1.5rem">
         <button class="btn btn-primary" onclick="downloadPDF()">📄 Download Quote PDF</button>
         <button class="btn btn-secondary" onclick="saveBid()">💾 Save Bid</button>
-        <button class="btn btn-ghost" onclick="exportBomExcel()">📦 Download BOM</button>
+        <button class="btn btn-ghost" onclick="exportBomExcel()">📦 Download BOM Package (ZIP)</button>
         <button class="btn btn-ghost" onclick="downloadHoursReport()" style="border-color:#7B52AB;color:#B39DDB">📊 Hour Breakdown</button>
       </div>
     </div>
@@ -1811,9 +1811,9 @@ async function downloadScanBOM() {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href = url;
-    a.download = `AAE_BOM_${(lastScanMeta.project_name || 'scan').replace(/[^a-z0-9]/gi,'_')}.xlsx`;
+    a.download = 'AAE_BOM_Package_' + (lastScanMeta.project_name || 'scan').replace(/[^a-z0-9]/gi,'_') + '.zip';
     a.click();
-    toast('BOM Excel downloaded!', 'success');
+    toast('BOM package downloaded! Open the ZIP for Master BOM + per-vendor files.', 'success');
   } catch(e) { toast('BOM download failed: ' + e.message, 'error'); }
 }
 
@@ -1845,9 +1845,9 @@ async function exportBomExcel() {
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href=url;
-    a.download = `AAE_BOM_${currentBidData.project_name||"quote"}.xlsx`;
-    a.click(); toast("BOM Excel downloaded!","success");
-  } catch(e) { toast("BOM Excel failed","error"); }
+    a.download = "AAE_BOM_Package_" + (currentBidData.project_name||"quote").replace(/[^a-z0-9]/gi,"_") + ".zip";
+    a.click(); toast("BOM package downloaded! Open the ZIP for Master BOM + per-vendor files.","success");
+  } catch(e) { toast("BOM package download failed","error"); }
 }
 
 async function downloadHistoryPDF(bidId) {
@@ -1887,8 +1887,8 @@ async function downloadHistoryBOM(bidId) {
     const blob = await r2.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href=url;
-    a.download = `AAE_BOM_${bid.project_name||bidId}.xlsx`;
-    a.click(); toast("BOM Excel downloaded!","success");
+    a.download = "AAE_BOM_Package_" + (bid.project_name||bidId).toString().replace(/[^a-z0-9]/gi,"_") + ".zip";
+    a.click(); toast("BOM package downloaded! Open the ZIP for Master BOM + per-vendor files.","success");
   } catch(e) { toast("BOM download failed","error"); }
 }
 
