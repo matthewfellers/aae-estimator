@@ -1,22 +1,93 @@
 """
-AAE Scanner Pipeline v2.2 — Multi-Stage BOM Extraction
+AAE Scanner Pipeline v2.3 — Multi-Stage BOM Extraction
 =======================================================
 5-stage pipeline with hardened anti-hallucination measures:
-  Stage 1: Detect BOM table structure & column headers
-  Stage 2: Extract every BOM row (pure transcription, double-read)
+  Stage 1: Detect BOM table structure & column headers (full PDF)
+  Stage 2: Extract every BOM row (BOM PAGE(S) ONLY — extracted via pypdf)
   Stage 3: Derive estimator quantity buckets from BOM data
   Stage 4: Validate extraction (row count, column swap detection)
-  Stage 5: AI-powered part number cross-verification
+  Stage 5: AI-powered part number cross-verification (BOM PAGE(S) ONLY)
 
-v2.2 changes:
-  - Stronger Stage 2 prompts (double-read, confusable chars, segment checks)
-  - _verification_status tagged on every BOM item for UI display
-  - verification_summary included in response for frontend
-  - Improved JSON extraction robustness
+v2.3 — THE FIX FOR 35-PAGE DRAWINGS:
+  After Stage 1 identifies which page(s) contain the BOM, we use pypdf to
+  physically extract ONLY those pages into a smaller PDF. Stages 2 and 5
+  then receive the small, focused PDF instead of the full 35-page drawing.
+  This eliminates the noise from schematics, wiring diagrams, etc. that was
+  causing Claude to hallucinate.
 """
 
-import json, re, time
+import json, re, time, base64, io
 from collections import Counter
+
+# ---------------------------------------------------------------------------
+# PDF Page Extraction — THE FIX for multi-page drawings
+# ---------------------------------------------------------------------------
+def _extract_pages(pdf_b64, page_numbers):
+    """Extract specific pages from a PDF and return a new base64-encoded PDF.
+
+    Args:
+        pdf_b64: Base64-encoded PDF (full drawing, e.g. 35 pages)
+        page_numbers: List of 1-based page numbers to extract (e.g. [2] or [2,3])
+
+    Returns:
+        Base64-encoded PDF containing ONLY the requested pages.
+        If extraction fails for any reason, returns the original pdf_b64 unchanged
+        so the pipeline continues with the full PDF as a fallback.
+    """
+    if not page_numbers:
+        print("  [PageExtract] No page numbers specified, using full PDF", flush=True)
+        return pdf_b64
+
+    try:
+        from pypdf import PdfReader, PdfWriter
+
+        # Decode the base64 PDF into bytes
+        pdf_bytes = base64.b64decode(pdf_b64)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        total_pages = len(reader.pages)
+
+        print(f"  [PageExtract] Full PDF has {total_pages} pages, "
+              f"extracting page(s) {page_numbers}", flush=True)
+
+        writer = PdfWriter()
+        pages_added = 0
+        for pg in page_numbers:
+            idx = pg - 1  # Convert 1-based to 0-based index
+            if 0 <= idx < total_pages:
+                writer.add_page(reader.pages[idx])
+                pages_added += 1
+            else:
+                print(f"  [PageExtract] WARNING: Page {pg} out of range "
+                      f"(PDF has {total_pages} pages)", flush=True)
+
+        if pages_added == 0:
+            print("  [PageExtract] No valid pages extracted, using full PDF", flush=True)
+            return pdf_b64
+
+        # Write the extracted pages to a new PDF in memory
+        out_buf = io.BytesIO()
+        writer.write(out_buf)
+        out_buf.seek(0)
+        extracted_b64 = base64.b64encode(out_buf.read()).decode("ascii")
+
+        # Log size reduction
+        original_kb = len(pdf_b64) * 3 / 4 / 1024  # approx decoded size
+        extracted_kb = len(extracted_b64) * 3 / 4 / 1024
+        reduction = (1 - extracted_kb / original_kb) * 100 if original_kb > 0 else 0
+
+        print(f"  [PageExtract] Extracted {pages_added} page(s): "
+              f"{original_kb:.0f}KB -> {extracted_kb:.0f}KB "
+              f"({reduction:.0f}% smaller)", flush=True)
+
+        return extracted_b64
+
+    except ImportError:
+        print("  [PageExtract] pypdf not installed, using full PDF", flush=True)
+        return pdf_b64
+    except Exception as exc:
+        print(f"  [PageExtract] ERROR: {exc}, using full PDF as fallback", flush=True)
+        return pdf_b64
+
 
 # System-level instruction that forces JSON-only output.
 _SYSTEM_JSON = (
@@ -717,18 +788,31 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 "_output_tokens": total_tokens,
             }
 
+        # == EXTRACT BOM PAGES (THE KEY FIX) ==================================
+        # Instead of sending the full 35-page drawing to Stage 2 & 5, extract
+        # ONLY the BOM page(s) into a small PDF. This eliminates the noise from
+        # schematics, wiring diagrams, etc. that was causing hallucination.
+        bom_pages = structure.get("pages_with_bom", [])
+        if bom_pages:
+            bom_pdf_b64 = _extract_pages(pdf_b64, bom_pages)
+        else:
+            print(f"SCAN [{filename}]: No BOM pages identified, using full PDF", flush=True)
+            bom_pdf_b64 = pdf_b64
+
         # == STAGE 2 ========================================================
+        # Uses BOM-ONLY PDF (not full drawing)
         t2 = time.time()
-        print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows", flush=True)
+        print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows "
+              f"(BOM pages only: {bom_pages})", flush=True)
         try:
-            extraction = _stage2_extract_bom(claude_client, pdf_b64, structure)
+            extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure)
         except Exception as e2:
             err_str = str(e2)
             if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
                 print(f"SCAN: Rate limit on Stage 2, waiting 30s...", flush=True)
                 time.sleep(30)
                 try:
-                    extraction = _stage2_extract_bom(claude_client, pdf_b64, structure)
+                    extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure)
                 except Exception:
                     raise e2
             else:
@@ -745,12 +829,13 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         all_flags.extend(validation_flags)
 
         # == STAGE 5 ========================================================
+        # Uses BOM-ONLY PDF (not full drawing) — same extracted pages as Stage 2
         t5 = time.time()
-        bom_pages = structure.get("pages_with_bom", [])
-        print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification (pages={bom_pages})", flush=True)
+        print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification "
+              f"(BOM pages only: {bom_pages})", flush=True)
         try:
             verify_result = _stage5_verify_part_numbers(
-                claude_client, pdf_b64, bom_items, bom_pages=bom_pages
+                claude_client, bom_pdf_b64, bom_items, bom_pages=bom_pages
             )
             total_tokens += verify_result.get("_output_tokens", 0)
             bom_items, correction_flags, verification_summary = _apply_corrections(
@@ -764,7 +849,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 time.sleep(30)
                 try:
                     verify_result = _stage5_verify_part_numbers(
-                        claude_client, pdf_b64, bom_items, bom_pages=bom_pages
+                        claude_client, bom_pdf_b64, bom_items, bom_pages=bom_pages
                     )
                     total_tokens += verify_result.get("_output_tokens", 0)
                     bom_items, correction_flags, verification_summary = _apply_corrections(
