@@ -344,6 +344,65 @@ def load_routing_rules():
     return rules
 
 
+# ── Manufacturer Alias Normalization ─────────────────────────────────────────
+# Maps common manufacturer name variants to the canonical lowercase form used
+# in get_vendor_map(). Without this, "Allen-Bradley" → "allen-bradley" would
+# miss the "allen bradley" key in vendor_defaults.
+_MFR_ALIASES = {
+    # Allen-Bradley / Rockwell variants
+    "allen-bradley": "allen bradley",
+    "a-b": "allen bradley",
+    "ab": "allen bradley",
+    "rockwell": "allen bradley",
+    "rockwell automation": "allen bradley",
+    "rockwell automation / allen-bradley": "allen bradley",
+    "rockwell/allen-bradley": "allen bradley",
+    # Phoenix Contact variants
+    "phoenix": "phoenix contact",
+    "phx": "phoenix contact",
+    # Schneider / Square D variants
+    "schneider": "schneider electric",
+    "square-d": "square d",
+    "sqd": "square d",
+    # Eaton / Bussmann variants
+    "eaton": "bussmann",
+    "eaton bussmann": "bussmann",
+    "bussman": "bussmann",
+    # Saginaw / SCE variants
+    "saginaw control engineering": "saginaw",
+    "saginaw control": "saginaw",
+    "sce": "saginaw",
+    # Automation Direct variants
+    "automationdirect": "automation direct",
+    "automation-direct": "automation direct",
+    "automationdirect.com": "automation direct",
+    # Hoffman / nVent variants
+    "nvent": "hoffman",
+    "nvent hoffman": "hoffman",
+    "n-vent": "hoffman",
+    # Hammond variants
+    "hammond": "hammond power",
+    "hammond mfg": "hammond enclosures",
+    "hammond manufacturing": "hammond enclosures",
+    # Mean Well variants
+    "meanwell": "mean well",
+    "mean-well": "mean well",
+    # Weidmuller variants
+    "weidmueller": "weidmuller",
+    # Pepperl+Fuchs variants
+    "pepperl+fuchs": "pepperl",
+    "pepperl fuchs": "pepperl",
+    "pepperl-fuchs": "pepperl",
+    # LAPP variants
+    "lapp group": "lapp",
+    "lapp usa": "lapp",
+    # Panduit
+    "panduit corp": "panduit",
+    # Rittal
+    "rittal corporation": "rittal",
+}
+
+
 def resolve_vendor(part_number, manufacturer, rules=None):
     """Deterministic 4-tier vendor resolution.
 
@@ -361,6 +420,9 @@ def resolve_vendor(part_number, manufacturer, rules=None):
 
     pn_upper  = (part_number or "").strip().upper()
     mfr_lower = (manufacturer or "").strip().lower()
+
+    # Normalize manufacturer via alias map before Tier 3 lookup
+    mfr_lower = _MFR_ALIASES.get(mfr_lower, mfr_lower)
 
     # Tier 1: Exact part number override
     if pn_upper and pn_upper in rules["part_overrides"]:
