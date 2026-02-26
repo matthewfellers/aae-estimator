@@ -180,7 +180,11 @@ def _stage1_detect_structure(claude_client, pdf_b64):
         "- ITEM column: sequential row numbers (1, 2, 3...)\n"
         "- If a column header is ambiguous, read 2-3 cells below it to determine what data type it holds\n\n"
         "Count total_bom_rows by counting every data row in the table (not headers, not blank rows).\n"
-        "Count CAREFULLY -- go row by row and count each one."
+        "Count CAREFULLY -- go row by row and count each one.\n\n"
+        "CRITICAL: Report the EXACT page number(s) where the BOM table appears in pages_with_bom.\n"
+        "This drawing may have 30+ pages of schematics, wiring diagrams, etc.\n"
+        "The BOM table is usually titled 'BILL OF MATERIALS' or 'BOM' — identify those pages.\n"
+        "Do NOT include pages with wire schedules, terminal schedules, nameplate schedules, or schematics."
     )
 
     result = _call_claude(claude_client, pdf_b64, prompt,
@@ -205,6 +209,7 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
     total_rows = structure.get("total_bom_rows", 0)
     has_mfg = structure.get("has_manufacturer_column", True)
     has_desc = structure.get("has_description_column", True)
+    bom_pages = structure.get("pages_with_bom", [])
 
     col_info = f"The column headers from left to right are: {headers}"
     mapping_lines = []
@@ -213,8 +218,21 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
             mapping_lines.append(f'  - Column "{v}" -> field "{k}"')
     mapping_info = "\n".join(mapping_lines)
 
+    # Critical: tell Claude exactly which page(s) to look at
+    if bom_pages:
+        page_instruction = (
+            f"IMPORTANT: The BOM table is on page(s) {bom_pages} of this PDF.\n"
+            f"IGNORE ALL OTHER PAGES. Only read the BOM table on page(s) {bom_pages}.\n"
+            "Do NOT read data from schematics, wiring diagrams, nameplate schedules, "
+            "terminal schedules, or any other tables in this drawing.\n"
+            "ONLY read the BILL OF MATERIALS table.\n\n"
+        )
+    else:
+        page_instruction = ""
+
     prompt = (
         "You are transcribing the BOM (Bill of Materials) table from an electrical panel drawing.\n\n"
+        f"{page_instruction}"
         f"COLUMN STRUCTURE (already identified):\n{col_info}\n\n"
         f"FIELD MAPPING:\n{mapping_info}\n\n"
         f"Has manufacturer column: {has_mfg}\n"
@@ -466,7 +484,7 @@ def _stage4_validate(structure, bom_items):
 # ---------------------------------------------------------------------------
 # Stage 5: AI-powered part number verification
 # ---------------------------------------------------------------------------
-def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items):
+def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items, bom_pages=None):
     pn_lines = []
     for item in bom_items:
         pn = item.get("part_number", "")
@@ -475,8 +493,17 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items):
             pn_lines.append(f"  Item {item_num}: {pn}")
     pn_list = "\n".join(pn_lines)
 
+    page_note = ""
+    if bom_pages:
+        page_note = (
+            f"The BOM table is on page(s) {bom_pages}. "
+            "Look ONLY at the BOM table on those pages to verify — "
+            "ignore all other pages and tables.\n\n"
+        )
+
     prompt = (
         "I extracted these part numbers from the BOM table in this drawing PDF.\n"
+        f"{page_note}"
         "Your job: look at the ACTUAL PDF and verify each part number CHARACTER BY CHARACTER.\n\n"
         "EXTRACTED PART NUMBERS:\n"
         f"{pn_list}\n\n"
@@ -719,10 +746,11 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
 
         # == STAGE 5 ========================================================
         t5 = time.time()
-        print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification", flush=True)
+        bom_pages = structure.get("pages_with_bom", [])
+        print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification (pages={bom_pages})", flush=True)
         try:
             verify_result = _stage5_verify_part_numbers(
-                claude_client, pdf_b64, bom_items
+                claude_client, pdf_b64, bom_items, bom_pages=bom_pages
             )
             total_tokens += verify_result.get("_output_tokens", 0)
             bom_items, correction_flags, verification_summary = _apply_corrections(
@@ -736,7 +764,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 time.sleep(30)
                 try:
                     verify_result = _stage5_verify_part_numbers(
-                        claude_client, pdf_b64, bom_items
+                        claude_client, pdf_b64, bom_items, bom_pages=bom_pages
                     )
                     total_tokens += verify_result.get("_output_tokens", 0)
                     bom_items, correction_flags, verification_summary = _apply_corrections(
