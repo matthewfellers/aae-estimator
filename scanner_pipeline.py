@@ -23,20 +23,23 @@ from collections import Counter
 # PDF Page Extraction — THE FIX for multi-page drawings
 # ---------------------------------------------------------------------------
 def _extract_pages(pdf_b64, page_numbers):
-    """Extract specific pages from a PDF and return a new base64-encoded PDF.
+    """Extract specific pages from a PDF and return (new_pdf_b64, raw_text).
 
     Args:
         pdf_b64: Base64-encoded PDF (full drawing, e.g. 35 pages)
         page_numbers: List of 1-based page numbers to extract (e.g. [2] or [2,3])
 
     Returns:
-        Base64-encoded PDF containing ONLY the requested pages.
-        If extraction fails for any reason, returns the original pdf_b64 unchanged
-        so the pipeline continues with the full PDF as a fallback.
+        Tuple of (extracted_pdf_b64, raw_text_string).
+        - extracted_pdf_b64: Base64-encoded PDF containing ONLY the requested pages.
+        - raw_text_string: Text extracted directly from the PDF text layer.
+          This is the EXACT character data from the PDF — no OCR needed.
+          Empty string if text extraction fails.
+        If page extraction fails, returns (original_pdf_b64, "") as fallback.
     """
     if not page_numbers:
         print("  [PageExtract] No page numbers specified, using full PDF", flush=True)
-        return pdf_b64
+        return pdf_b64, ""
 
     try:
         from pypdf import PdfReader, PdfWriter
@@ -51,18 +54,29 @@ def _extract_pages(pdf_b64, page_numbers):
 
         writer = PdfWriter()
         pages_added = 0
+        raw_text_parts = []
         for pg in page_numbers:
             idx = pg - 1  # Convert 1-based to 0-based index
             if 0 <= idx < total_pages:
                 writer.add_page(reader.pages[idx])
                 pages_added += 1
+                # Extract raw text from the PDF text layer
+                try:
+                    page_text = reader.pages[idx].extract_text() or ""
+                    if page_text.strip():
+                        raw_text_parts.append(page_text)
+                except Exception as txt_err:
+                    print(f"  [PageExtract] Text extraction failed for page {pg}: {txt_err}",
+                          flush=True)
             else:
                 print(f"  [PageExtract] WARNING: Page {pg} out of range "
                       f"(PDF has {total_pages} pages)", flush=True)
 
         if pages_added == 0:
             print("  [PageExtract] No valid pages extracted, using full PDF", flush=True)
-            return pdf_b64
+            return pdf_b64, ""
+
+        raw_text = "\n".join(raw_text_parts)
 
         # Write the extracted pages to a new PDF in memory
         out_buf = io.BytesIO()
@@ -78,15 +92,21 @@ def _extract_pages(pdf_b64, page_numbers):
         print(f"  [PageExtract] Extracted {pages_added} page(s): "
               f"{original_kb:.0f}KB -> {extracted_kb:.0f}KB "
               f"({reduction:.0f}% smaller)", flush=True)
+        if raw_text.strip():
+            print(f"  [PageExtract] Raw text extracted: {len(raw_text)} chars "
+                  f"(first 200: {raw_text[:200]!r})", flush=True)
+        else:
+            print("  [PageExtract] WARNING: No text layer found in PDF — "
+                  "relying on vision only", flush=True)
 
-        return extracted_b64
+        return extracted_b64, raw_text
 
     except ImportError:
         print("  [PageExtract] pypdf not installed, using full PDF", flush=True)
-        return pdf_b64
+        return pdf_b64, ""
     except Exception as exc:
         print(f"  [PageExtract] ERROR: {exc}, using full PDF as fallback", flush=True)
-        return pdf_b64
+        return pdf_b64, ""
 
 
 # System-level instruction that forces JSON-only output.
@@ -310,9 +330,27 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
     else:
         page_instruction = ""
 
+    # If we have raw text extracted from the PDF text layer, include it
+    # as the PRIMARY data source — this is the exact character data
+    raw_text = structure.get("_bom_raw_text", "")
+    if raw_text.strip():
+        text_section = (
+            "=== RAW TEXT EXTRACTED FROM PDF (PRIMARY SOURCE — EXACT CHARACTERS) ===\n"
+            "The following text was extracted directly from the PDF file's text layer.\n"
+            "These are the EXACT characters embedded in the PDF — not OCR, not guessed.\n"
+            "USE THIS TEXT as your PRIMARY source for part numbers, descriptions, and all data.\n"
+            "Use the PDF image only to understand the TABLE STRUCTURE (rows, columns, layout).\n"
+            "When the raw text and your visual reading disagree, the RAW TEXT WINS.\n\n"
+            f"{raw_text}\n\n"
+            "=== END RAW TEXT ===\n\n"
+        )
+    else:
+        text_section = ""
+
     prompt = (
         "You are transcribing the BOM (Bill of Materials) table from an electrical panel drawing.\n\n"
         f"{page_instruction}"
+        f"{text_section}"
         f"COLUMN STRUCTURE (already identified):\n{col_info}\n\n"
         f"FIELD MAPPING:\n{mapping_info}\n\n"
         f"Has manufacturer column: {has_mfg}\n"
@@ -330,17 +368,31 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
         "RULE 2 — PART NUMBERS ARE SACRED:\n"
         "These part numbers will be used to ORDER real parts. A wrong character = wrong part delivered.\n"
         "Copy EVERY character EXACTLY: dashes, slashes, letters, numbers, spaces.\n"
-        "  DOUBLE-READ STRATEGY: For each part number:\n"
-        "    a) Read it LEFT to RIGHT. Write it down.\n"
-        "    b) Read it RIGHT to LEFT, character by character. Compare.\n"
-        "    c) Count the total characters. Does your extraction have the same count?\n"
-        "    d) If the PN has dashes (e.g., 2090-CSBM1DG-14LN03), verify each segment between dashes independently.\n"
-        "  CONFUSABLE CHARACTERS — pay extra attention to:\n"
-        "    O (letter) vs 0 (zero), l (lowercase L) vs 1 (one), I (letter I) vs 1 (one),\n"
-        "    B vs 8, S vs 5, G vs 6, Z vs 2, D vs 0\n"
-        '  If you cannot read even ONE character clearly, write "[UNREADABLE]" for the whole part number.\n'
-        "  NEVER fill in a character from your training knowledge. Read it from the PDF or mark it unreadable.\n\n"
+    )
 
+    # Add extra instructions depending on whether we have raw text
+    if raw_text.strip():
+        prompt += (
+            "  The RAW TEXT above contains the exact part numbers from the PDF.\n"
+            "  Cross-reference EVERY part number against the raw text.\n"
+            "  If a part number appears in the raw text, use the EXACT string from the raw text.\n"
+            "  Do NOT modify, correct, or 'improve' part numbers from the raw text.\n\n"
+        )
+    else:
+        prompt += (
+            "  DOUBLE-READ STRATEGY: For each part number:\n"
+            "    a) Read it LEFT to RIGHT. Write it down.\n"
+            "    b) Read it RIGHT to LEFT, character by character. Compare.\n"
+            "    c) Count the total characters. Does your extraction have the same count?\n"
+            "    d) If the PN has dashes (e.g., 2090-CSBM1DG-14LN03), verify each segment between dashes independently.\n"
+            "  CONFUSABLE CHARACTERS — pay extra attention to:\n"
+            "    O (letter) vs 0 (zero), l (lowercase L) vs 1 (one), I (letter I) vs 1 (one),\n"
+            "    B vs 8, S vs 5, G vs 6, Z vs 2, D vs 0\n"
+            '  If you cannot read even ONE character clearly, write "[UNREADABLE]" for the whole part number.\n'
+            "  NEVER fill in a character from your training knowledge. Read it from the PDF or mark it unreadable.\n\n"
+        )
+
+    prompt += (
         "RULE 3 — ANTI-HALLUCINATION:\n"
         "  You have been trained on millions of part numbers. That is DANGEROUS here.\n"
         "  Your memory of what part numbers SHOULD look like can override what you actually SEE.\n"
@@ -565,7 +617,8 @@ def _stage4_validate(structure, bom_items):
 # Stage 5: AI-powered part number verification
 # ---------------------------------------------------------------------------
 def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
-                                bom_pages=None, bom_extracted=False):
+                                bom_pages=None, bom_extracted=False,
+                                bom_raw_text=""):
     pn_lines = []
     for item in bom_items:
         pn = item.get("part_number", "")
@@ -588,20 +641,38 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
             "ignore all other pages and tables.\n\n"
         )
 
+    # Include raw text if available — this is the definitive source
+    raw_text_section = ""
+    if bom_raw_text.strip():
+        raw_text_section = (
+            "=== RAW TEXT FROM PDF (DEFINITIVE SOURCE) ===\n"
+            "The following text was extracted directly from the PDF's text layer.\n"
+            "These are the EXACT characters. Use this to verify part numbers.\n\n"
+            f"{bom_raw_text}\n\n"
+            "=== END RAW TEXT ===\n\n"
+        )
+
     prompt = (
         "I extracted these part numbers from the BOM table in this drawing PDF.\n"
         f"{page_note}"
-        "Your job: look at the ACTUAL PDF and verify each part number CHARACTER BY CHARACTER.\n\n"
+        f"{raw_text_section}"
+        "Your job: verify each part number CHARACTER BY CHARACTER against the PDF.\n\n"
         "EXTRACTED PART NUMBERS:\n"
         f"{pn_list}\n\n"
         "For EACH part number above:\n"
-        "1. Find it in the actual BOM table in the PDF\n"
+        "1. Find it in the actual BOM table in the PDF"
+    )
+    if bom_raw_text.strip():
+        prompt += " AND in the raw text above"
+    prompt += (
+        "\n"
         "2. Compare character by character — read left to right, then right to left\n"
         "3. Check for commonly confused characters: O vs 0, l vs 1, B vs 8, S vs 5\n"
         "4. Count the characters — does the extracted version have the same count as the PDF?\n"
         "5. If it matches exactly, mark it verified\n"
         "6. If ANY character is wrong, provide the CORRECT value from the PDF\n"
         "7. If you cannot find it in the PDF at all, mark it as not_found\n\n"
+    )
         "Return this JSON:\n"
         "{\n"
         '  "verifications": [\n'
@@ -810,16 +881,19 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # schematics, wiring diagrams, etc. that was causing hallucination.
         bom_pages = structure.get("pages_with_bom", [])
         bom_extracted = False
+        bom_raw_text = ""
         if bom_pages:
-            bom_pdf_b64 = _extract_pages(pdf_b64, bom_pages)
+            bom_pdf_b64, bom_raw_text = _extract_pages(pdf_b64, bom_pages)
             # Check if extraction actually produced a different (smaller) PDF
             bom_extracted = (bom_pdf_b64 != pdf_b64)
             if bom_extracted:
                 # Signal to Stage 2 that page numbers no longer apply —
                 # the extracted PDF contains ONLY BOM pages starting at page 1
                 structure["_bom_extracted"] = True
+                structure["_bom_raw_text"] = bom_raw_text
                 print(f"SCAN [{filename}]: BOM pages extracted successfully, "
-                      f"Stage 2 & 5 will use BOM-only PDF", flush=True)
+                      f"Stage 2 & 5 will use BOM-only PDF "
+                      f"(raw text: {len(bom_raw_text)} chars)", flush=True)
         else:
             print(f"SCAN [{filename}]: No BOM pages identified, using full PDF", flush=True)
             bom_pdf_b64 = pdf_b64
@@ -861,7 +935,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         try:
             verify_result = _stage5_verify_part_numbers(
                 claude_client, bom_pdf_b64, bom_items,
-                bom_pages=bom_pages, bom_extracted=bom_extracted
+                bom_pages=bom_pages, bom_extracted=bom_extracted,
+                bom_raw_text=bom_raw_text
             )
             total_tokens += verify_result.get("_output_tokens", 0)
             bom_items, correction_flags, verification_summary = _apply_corrections(
@@ -876,7 +951,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 try:
                     verify_result = _stage5_verify_part_numbers(
                         claude_client, bom_pdf_b64, bom_items,
-                        bom_pages=bom_pages, bom_extracted=bom_extracted
+                        bom_pages=bom_pages, bom_extracted=bom_extracted,
+                        bom_raw_text=bom_raw_text
                     )
                     total_tokens += verify_result.get("_output_tokens", 0)
                     bom_items, correction_flags, verification_summary = _apply_corrections(
