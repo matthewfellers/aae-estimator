@@ -618,6 +618,7 @@ body {
     </div>
     <div class="topnav-tabs">
       <button class="tab-btn active" onclick="showTab('new-bid')">➕ New Bid</button>
+      <button class="tab-btn" onclick="showTab('bom-converter')">🔄 BOM Converter</button>
       <button class="tab-btn" onclick="showTab('history')">📋 Bid History</button>
       <button class="tab-btn" id="adminTabBtn" style="display:none" onclick="showTab('admin')">⚙️ Settings</button>
     </div>
@@ -958,6 +959,68 @@ body {
     </div>
   </div>
 </div>
+
+<!-- ══ TAB: BOM CONVERTER ══ -->
+<div id="tab-bom-converter" class="tab-panel">
+  <div class="page-header">
+    <h1>🔄 BOM CONVERTER</h1>
+    <p>Upload QuickBooks BOMs or vendor quotes — AI will separate by panel and vendor, then generate Excel BOM packages.</p>
+  </div>
+
+  <!-- STEP 1: Upload BOMs -->
+  <div class="card">
+    <div class="card-title">STEP 1 — UPLOAD BOMs / QUOTES</div>
+    <div class="upload-zone" id="convertUploadZone">
+      <input type="file" id="convertFiles" accept=".pdf" multiple onchange="handleBomConverterFiles(this)">
+      <div class="upload-icon">📋</div>
+      <div class="upload-text" id="convertUploadText">Drop QuickBooks BOM or vendor quote PDFs here</div>
+      <div class="upload-sub">or click to browse · PDF format · Multiple files supported · Combine BOMs into one PDF to save on API cost</div>
+    </div>
+
+    <!-- File list (shown after selection) -->
+    <div id="convertFileList" style="display:none;margin-top:12px;padding:12px;background:rgba(155,27,27,0.08);border-radius:8px;border:1px solid rgba(155,27,27,0.2)">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#F4A9A8;margin-bottom:8px">Selected Files</div>
+      <div id="convertFileNames" style="font-size:13px;color:var(--white)"></div>
+    </div>
+
+    <!-- Convert button -->
+    <div style="margin-top:16px;text-align:center">
+      <button id="convertBtn" class="btn btn-primary" onclick="startBomConvert()" style="display:none;padding:12px 32px;font-size:16px">
+        🔄 Convert BOMs
+      </button>
+    </div>
+
+    <!-- Processing status -->
+    <div class="scan-status" id="convertStatus">
+      <div class="spinner"></div>
+      <div class="scan-text" id="convertText">Processing BOMs...</div>
+    </div>
+    <div class="confidence-bar" id="convertConfBar"></div>
+    <div class="review-flags" id="convertFlags"></div>
+  </div>
+
+  <!-- STEP 2: Results -->
+  <div class="card" id="convertResultsCard" style="display:none">
+    <div class="card-title">RESULTS — EXTRACTED PANELS</div>
+
+    <!-- Panel summary pills -->
+    <div id="convertPanelSummary" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px"></div>
+
+    <!-- Download All button -->
+    <div style="margin-bottom:16px">
+      <button class="bom-btn bom-btn-xls" onclick="downloadBomConverterZip()" style="width:100%">
+        📦 Download All BOM Packages — ZIP (Master + Per-Vendor Files for Each Panel)
+      </button>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:6px">
+        ZIP contains: One folder per panel, each with AAE_Master_BOM.xlsx + per-vendor Excel files (Rexel, AWC, etc.) · Costs from QuickBooks included in Master
+      </div>
+    </div>
+
+    <!-- Per-panel preview tables (collapsible) -->
+    <div id="convertPanelPreviews"></div>
+  </div>
+</div>
+
 <!-- ══ TAB: ADMIN ══ -->
 <div id="tab-admin" class="tab-panel">
   <div class="page-header">
@@ -1252,30 +1315,47 @@ async function startScan(file) {
 
     // Confidence bar with model diagnostics
     const conf = data.extraction_summary?.confidence || 0;
-    const confClass = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'med' : 'low';
-    const confEmoji = conf >= 0.85 ? '✅' : conf >= 0.65 ? '⚠️' : '🔴';
     const modelUsed = data._model_used || 'unknown';
     const stopReason = data._stop_reason || '';
     const outputTokens = data._output_tokens || 0;
     const wasTruncated = data._truncated || false;
     const totalBomRows = data.extraction_summary?.total_bom_rows_on_drawing || '?';
     const bomItemCount = (data.bom_line_items || []).length;
+    const isHaiku = modelUsed.toLowerCase().includes('haiku');
+
+    // If Haiku was used, force lower confidence display regardless of what the model reported
+    const displayConf = isHaiku ? Math.min(conf, 0.55) : conf;
+    const confClass = displayConf >= 0.85 ? 'high' : displayConf >= 0.65 ? 'med' : 'low';
+    const confEmoji = displayConf >= 0.85 ? '✅' : displayConf >= 0.65 ? '⚠️' : '🔴';
 
     let diagInfo = `Model: ${modelUsed.replace('claude-','').split('-202')[0]}`;
     if (outputTokens) diagInfo += ` | ${outputTokens} tokens`;
     if (wasTruncated) diagInfo += ' | TRUNCATED';
 
     confBar.className = `confidence-bar visible ${confClass}`;
-    confBar.innerHTML = `${confEmoji} <strong>AI Confidence: ${Math.round(conf*100)}%</strong> —
+    confBar.innerHTML = `${confEmoji} <strong>AI Confidence: ${Math.round(displayConf*100)}%</strong> —
       ${(data.extraction_summary?.drawing_types_found || []).join(', ')} detected.
       Review green-highlighted fields before calculating.
       <span style="opacity:0.5;font-size:10px;margin-left:8px">[${diagInfo}]</span>`;
+
+    // HAIKU WARNING — this is a much weaker model, BOM quality will be poor
+    if (isHaiku) {
+      flagsDiv.innerHTML += `<div class="flag-item" style="color:#FF6B6B;font-weight:bold;font-size:13px;padding:8px;background:rgba(255,100,100,0.15);border-radius:6px;margin-bottom:8px">
+        ⚠️ REDUCED ACCURACY: Rate limit caused fallback to Haiku (smaller model). BOM extraction will be less accurate.
+        Wait 60 seconds and re-scan for better results with Sonnet.</div>`;
+    }
+
+    // Warn if response was truncated
+    if (wasTruncated) {
+      flagsDiv.innerHTML += `<div class="flag-item" style="color:#FF6B6B;font-weight:bold">
+        ⚠️ TRUNCATED: Response hit token limit — some BOM items may be missing. Re-scan if item count looks low.</div>`;
+    }
 
     // Warn if extracted count doesn't match BOM table row count
     if (totalBomRows !== '?' && parseInt(totalBomRows) > bomItemCount) {
       const missing = parseInt(totalBomRows) - bomItemCount;
       flagsDiv.innerHTML += `<div class="flag-item" style="color:#FF6B6B;font-weight:bold">
-        WARNING: Drawing BOM has ${totalBomRows} rows but only ${bomItemCount} were extracted (${missing} missing). Re-scan recommended.</div>`;
+        ⚠️ MISSING ITEMS: Drawing BOM has ${totalBomRows} rows but only ${bomItemCount} were extracted (${missing} missing). Re-scan recommended.</div>`;
     }
 
     // Review flags
@@ -1288,8 +1368,8 @@ async function startScan(file) {
     }
 
     document.getElementById('uploadText').textContent = `✅ ${file.name} — scan complete`;
-    toast(`Drawing scanned — ${bomItemCount} items, ${Math.round(conf*100)}% confidence [${modelUsed.includes('haiku') ? 'HAIKU fallback' : 'Sonnet'}]`,
-      conf >= 0.75 ? 'success' : 'info');
+    toast(`Drawing scanned — ${bomItemCount} items, ${Math.round(displayConf*100)}% confidence [${isHaiku ? '⚠️ HAIKU fallback — reduced accuracy' : 'Sonnet'}]`,
+      isHaiku ? 'error' : (displayConf >= 0.75 ? 'success' : 'info'));
 
     // Store BOM line items for download
     lastScanBOM = data.bom_line_items || [];
@@ -2011,6 +2091,268 @@ async function downloadScanBOM() {
     toast('BOM package downloaded! Open the ZIP for Master BOM + per-vendor files.', 'success');
   } catch(e) { toast('BOM download failed: ' + e.message, 'error'); }
 }
+
+// ── BOM CONVERTER ──────────────────────────────────────────────────────────
+let lastConvertPanels = [];
+let lastConvertMeta = {};
+let _convertSelectedFiles = [];
+
+// Drag-and-drop for converter upload zone
+const convertZone = document.getElementById('convertUploadZone');
+if (convertZone) {
+  convertZone.addEventListener('dragover', e => { e.preventDefault(); convertZone.classList.add('dragover'); });
+  convertZone.addEventListener('dragleave', () => convertZone.classList.remove('dragover'));
+  convertZone.addEventListener('drop', e => {
+    e.preventDefault();
+    convertZone.classList.remove('dragover');
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+    if (files.length === 0) { toast('Please drop PDF files only', 'error'); return; }
+    _convertSelectedFiles = files;
+    _showConvertFileList(files);
+  });
+}
+
+function handleBomConverterFiles(input) {
+  if (!input.files || input.files.length === 0) return;
+  _convertSelectedFiles = Array.from(input.files);
+  _showConvertFileList(_convertSelectedFiles);
+}
+
+function _showConvertFileList(files) {
+  const listDiv = document.getElementById('convertFileList');
+  const namesDiv = document.getElementById('convertFileNames');
+  const btn = document.getElementById('convertBtn');
+  listDiv.style.display = 'block';
+  btn.style.display = 'inline-block';
+  var html = '';
+  var totalSize = 0;
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    totalSize += f.size;
+    var sizeMB = (f.size / 1024 / 1024).toFixed(1);
+    html += '<div style="padding:4px 0;border-bottom:1px solid rgba(155,27,27,0.15)">'
+          + '<span style="color:#F4A9A8;font-weight:600">\ud83d\udcc4 ' + String(f.name) + '</span>'
+          + '<span style="color:var(--muted);margin-left:12px;font-size:11px">' + sizeMB + ' MB</span>'
+          + '</div>';
+  }
+  html += '<div style="margin-top:8px;font-size:11px;color:var(--muted)">'
+        + files.length + ' file' + (files.length > 1 ? 's' : '') + ' selected \u2014 '
+        + (totalSize / 1024 / 1024).toFixed(1) + ' MB total'
+        + (files.length > 1 ? ' \u2014 each file = 1 API call' : '')
+        + '</div>';
+  namesDiv.innerHTML = html;
+  document.getElementById('convertUploadText').textContent =
+    '\u2705 ' + files.length + ' file' + (files.length > 1 ? 's' : '') + ' ready to convert';
+}
+
+async function startBomConvert() {
+  if (!_convertSelectedFiles || _convertSelectedFiles.length === 0) {
+    toast('Select PDF files first', 'error'); return;
+  }
+
+  const status = document.getElementById('convertStatus');
+  const confBar = document.getElementById('convertConfBar');
+  const flagsDiv = document.getElementById('convertFlags');
+  const btn = document.getElementById('convertBtn');
+  status.classList.add('visible');
+  confBar.className = 'confidence-bar';
+  flagsDiv.innerHTML = '';
+  btn.disabled = true;
+  btn.textContent = '\u23f3 Converting...';
+
+  const steps = [
+    'Reading uploaded documents...',
+    'Identifying BOM tables and quotes...',
+    'Extracting panel names and line items...',
+    'Categorizing components...',
+    'Aggregating results across all panels...'
+  ];
+  var si = 0;
+  var interval = setInterval(function() {
+    if (si < steps.length) {
+      document.getElementById('convertText').textContent = steps[si++];
+    }
+  }, 3000);
+
+  try {
+    var form = new FormData();
+    for (var i = 0; i < _convertSelectedFiles.length; i++) {
+      form.append('files', _convertSelectedFiles[i]);
+    }
+
+    var res = await apiFetch('/api/bom_convert', { method: 'POST', body: form });
+    var data = await res.json();
+    clearInterval(interval);
+    status.classList.remove('visible');
+    btn.disabled = false;
+    btn.textContent = '\ud83d\udd04 Convert BOMs';
+
+    if (data.error) {
+      toast('Conversion error: ' + (data.error_message || data.error), 'error');
+      return;
+    }
+
+    var panels = data.panels || [];
+    var summary = data.extraction_summary || {};
+    var conf = summary.confidence || 0;
+    var totalPanels = summary.total_panels_found || panels.length;
+    var totalItems = summary.total_line_items || 0;
+    var modelUsed = (data._models_used || ['unknown']).join(', ').replace(/claude-/g, '').split('-202')[0];
+    var totalTokens = data._total_output_tokens || 0;
+
+    // Confidence bar
+    var confClass = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'med' : 'low';
+    var confEmoji = conf >= 0.85 ? '\u2705' : conf >= 0.65 ? '\u26a0\ufe0f' : '\ud83d\udd34';
+    confBar.className = 'confidence-bar visible ' + confClass;
+    confBar.innerHTML = confEmoji + ' <strong>AI Confidence: ' + Math.round(conf * 100) + '%</strong> \u2014 '
+      + totalPanels + ' panel' + (totalPanels !== 1 ? 's' : '') + ' found, '
+      + totalItems + ' total line items extracted.'
+      + ' <span style="opacity:0.5;font-size:10px;margin-left:8px">[' + modelUsed + ' | ' + totalTokens + ' tokens]</span>';
+
+    // Review flags
+    var flags = summary.review_flags || [];
+    if (flags.length) {
+      flagsDiv.innerHTML = flags.map(function(f) { return '<div class="flag-item">\u26a0 ' + f + '</div>'; }).join('');
+    }
+
+    // Store results
+    lastConvertPanels = panels;
+    lastConvertMeta = {
+      customer_name: '',
+      project_name: '',
+      job_number: 'AAE-' + Date.now()
+    };
+
+    // Show results
+    renderBomConverterResults(panels);
+
+    toast(totalPanels + ' panel' + (totalPanels !== 1 ? 's' : '') + ' extracted with ' + totalItems + ' total items',
+      conf >= 0.75 ? 'success' : 'info');
+
+  } catch (err) {
+    clearInterval(interval);
+    status.classList.remove('visible');
+    btn.disabled = false;
+    btn.textContent = '\ud83d\udd04 Convert BOMs';
+    toast('Conversion failed: ' + (err.message || 'check connection'), 'error');
+  }
+}
+
+function renderBomConverterResults(panels) {
+  var resultsCard = document.getElementById('convertResultsCard');
+  var summaryDiv = document.getElementById('convertPanelSummary');
+  var previewsDiv = document.getElementById('convertPanelPreviews');
+  resultsCard.style.display = 'block';
+
+  // Panel summary pills
+  var pills = '';
+  for (var pi = 0; pi < panels.length; pi++) {
+    var p = panels[pi];
+    var itemCount = (p.line_items || []).length;
+    var typeTag = p.document_type === 'quote' ? 'QUOTE' : 'BOM';
+    var typeBg = p.document_type === 'quote' ? 'rgba(0,137,122,0.3)' : 'rgba(155,27,27,0.3)';
+    pills += '<div style="background:' + typeBg + ';border:1px solid rgba(155,27,27,0.3);border-radius:8px;padding:8px 14px;cursor:pointer" '
+           + 'onclick="document.getElementById(\'convertPanel' + pi + '\').scrollIntoView({behavior:\'smooth\'})">'
+           + '<div style="font-weight:700;color:#F4A9A8;font-size:13px">' + String(p.panel_name || 'Unknown') + '</div>'
+           + '<div style="font-size:11px;color:var(--muted)">' + itemCount + ' items \u00b7 '
+           + '<span style="background:rgba(255,255,255,0.1);border-radius:3px;padding:1px 5px;font-size:10px">' + typeTag + '</span>'
+           + '</div></div>';
+  }
+  summaryDiv.innerHTML = pills;
+
+  // Per-panel preview tables
+  var previews = '';
+  for (var pi2 = 0; pi2 < panels.length; pi2++) {
+    var panel = panels[pi2];
+    var items = panel.line_items || [];
+    previews += '<div id="convertPanel' + pi2 + '" style="margin-bottom:20px">'
+              + '<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\'" '
+              + 'style="cursor:pointer;padding:10px 14px;background:rgba(107,10,10,0.5);border-radius:8px 8px 0 0;border:1px solid rgba(155,27,27,0.3);display:flex;justify-content:space-between;align-items:center">'
+              + '<span style="font-weight:700;color:#F4A9A8;font-size:14px">'
+              + String(panel.panel_name || 'Unknown Panel')
+              + (panel.purchase_description ? ' \u2014 <span style="font-weight:400;font-size:12px;color:var(--muted)">' + String(panel.purchase_description) + '</span>' : '')
+              + '</span>'
+              + '<span style="color:var(--muted);font-size:12px">' + items.length + ' items \u25bc</span>'
+              + '</div>';
+
+    // Table
+    previews += '<div style="overflow-x:auto;max-height:350px;overflow-y:auto;border:1px solid rgba(155,27,27,0.25);border-top:none;border-radius:0 0 8px 8px">';
+    var rows = '';
+    var totalCost = 0;
+    for (var bi = 0; bi < items.length; bi++) {
+      var itm = items[bi];
+      var rowBg = bi % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(155,27,27,0.06)';
+      var pn   = String(itm.part_number  || '\u2014');
+      var desc = String(itm.description  || '\u2014');
+      var qty  = String(itm.qty          || 1);
+      var um   = String(itm.unit         || 'ea');
+      var cost = parseFloat(itm.cost) || 0;
+      var mfr  = String(itm.manufacturer || '\u2014');
+      var cat  = String(itm.category     || 'Other');
+      var num  = String(itm.item_num     || bi + 1);
+      totalCost += cost * (parseInt(qty) || 1);
+      rows += '<tr style="background:' + rowBg + ';border-bottom:1px solid rgba(155,27,27,0.15)">'
+            + '<td style="padding:5px 8px;color:var(--muted)">' + num + '</td>'
+            + '<td style="padding:5px 8px;color:#F4A9A8;font-weight:600">' + pn + '</td>'
+            + '<td style="padding:5px 8px;color:var(--white)">' + desc + '</td>'
+            + '<td style="padding:5px 8px;text-align:center;color:#81C784;font-weight:700">' + qty + '</td>'
+            + '<td style="padding:5px 8px;color:var(--muted)">' + um + '</td>'
+            + '<td style="padding:5px 8px;text-align:right;color:#81C784">$' + cost.toFixed(2) + '</td>'
+            + '<td style="padding:5px 8px;color:var(--lightblue)">' + mfr + '</td>'
+            + '<td style="padding:5px 8px"><span style="background:rgba(155,27,27,0.3);border-radius:4px;padding:2px 6px;font-size:10px;color:#F4A9A8">' + cat + '</span></td>'
+            + '</tr>';
+    }
+    previews += '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:#6B0A0A;color:#fff;position:sticky;top:0">'
+      + '<th style="padding:6px 8px;text-align:left;width:40px">#</th>'
+      + '<th style="padding:6px 8px;text-align:left;width:130px">Part Number</th>'
+      + '<th style="padding:6px 8px;text-align:left">Description</th>'
+      + '<th style="padding:6px 8px;text-align:center;width:45px">Qty</th>'
+      + '<th style="padding:6px 8px;text-align:left;width:40px">U/M</th>'
+      + '<th style="padding:6px 8px;text-align:right;width:90px">Cost</th>'
+      + '<th style="padding:6px 8px;text-align:left;width:120px">Manufacturer</th>'
+      + '<th style="padding:6px 8px;text-align:left;width:70px">Category</th>'
+      + '</tr></thead>'
+      + '<tbody>' + rows
+      + '<tr style="background:#6B0A0A">'
+      + '<td colspan="3" style="padding:6px 8px;text-align:right;color:#F4A9A8;font-weight:700">TOTAL:</td>'
+      + '<td style="padding:6px 8px;text-align:center;color:#fff;font-weight:700">' + items.length + '</td>'
+      + '<td style="padding:6px 8px"></td>'
+      + '<td style="padding:6px 8px;text-align:right;color:#81C784;font-weight:700">$' + totalCost.toFixed(2) + '</td>'
+      + '<td colspan="2" style="padding:6px 8px;color:rgba(255,255,255,0.5);font-size:10px">' + items.length + ' unique parts</td>'
+      + '</tr></tbody></table>';
+    previews += '</div></div>';
+  }
+  previewsDiv.innerHTML = previews;
+}
+
+async function downloadBomConverterZip() {
+  if (!lastConvertPanels || lastConvertPanels.length === 0) {
+    toast('No converted BOMs to download', 'error'); return;
+  }
+
+  try {
+    var res = await apiFetch('/api/bom_convert_excel', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        panels: lastConvertPanels,
+        customer_name: lastConvertMeta.customer_name || '',
+        project_name: lastConvertMeta.project_name || '',
+        job_number: lastConvertMeta.job_number || 'AAE-' + Date.now()
+      })
+    });
+    if (!res.ok) { toast('BOM download failed', 'error'); return; }
+    var blob = await res.blob();
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'AAE_BOM_Converter_Package.zip';
+    a.click();
+    toast('BOM Converter package downloaded! Open ZIP for per-panel Master BOM + vendor files.', 'success');
+  } catch(e) { toast('BOM download failed: ' + e.message, 'error'); }
+}
+
 
 // ── BOM EXPORT ─────────────────────────────────────────────────────────────
 async function exportBomPDF() {
