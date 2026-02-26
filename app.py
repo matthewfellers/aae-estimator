@@ -617,6 +617,14 @@ def scan_drawing(pdf_b64, filename="drawing.pdf"):
     # Stage 1 + 2 combined: classify and extract in one smart call
     prompt = """You are an expert electrical estimator at AAE Automation, a UL-508A certified industrial control panel shop. Analyze this electrical drawing set and extract ALL component quantities needed for a panel bid.
 
+CRITICAL ACCURACY RULES — READ FIRST:
+- Copy part numbers EXACTLY as printed on the drawing. Do NOT substitute, correct, or "improve" them.
+- Copy manufacturer names EXACTLY as shown. If the drawing says "SCE" do NOT change it to "Rittal".
+  If it says "Phoenix Contact" do NOT change it to "Allen Bradley". Transcribe what you see.
+- Copy quantities EXACTLY as shown in the BOM table. Do not estimate or round.
+- If a field is unclear or partially visible, include your best reading and flag it in review_flags.
+- Do NOT infer or hallucinate part numbers that are not visible in the document.
+
 Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object.
 
 {
@@ -624,11 +632,12 @@ Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object
     "drawing_types_found": ["BOM", "SCHEMATIC", "TERMINAL_SCHEDULE", "IO_LIST"],
     "confidence": 0.0,
     "scope_gap_flags": [],
-    "review_flags": []
+    "review_flags": [],
+    "total_bom_rows_on_drawing": 0
   },
   "quantities": {
-    "enc_qty": 1, "din_rail_runs": 3, "wire_duct_runs": 4, "enc_accessories": 0,
-    "main_amp": 100, "main_disconnect_type": "",
+    "enc_qty": 0, "din_rail_runs": 0, "wire_duct_runs": 0, "enc_accessories": 0,
+    "main_amp": 0, "main_disconnect_type": "",
     "branch_1p": 0, "branch_2p": 0, "branch_3p": 0,
     "fused_disconnects": 0, "cpt_present": "N", "cpt_kva": 0, "pdb_qty": 0,
     "relay_icecube": 0, "relay_din": 0,
@@ -647,12 +656,12 @@ Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object
   "bom_line_items": [
     {
       "item_num": 1,
-      "part_number": "WM483610NC",
-      "description": "Rittal Enclosure 48x36x10 NEMA 4",
+      "part_number": "<EXACT part number from drawing>",
+      "description": "<EXACT description from drawing>",
       "qty": 1,
       "unit": "ea",
-      "manufacturer": "RITTAL",
-      "category": "Enclosure",
+      "manufacturer": "<EXACT manufacturer from drawing>",
+      "category": "Other",
       "notes": ""
     }
   ]
@@ -665,14 +674,19 @@ Rules:
 - Count wire numbers if a wire schedule exists for wire_count
 - If no wire schedule: estimate wire_count as (DI+DO)*0.8 + (AI+AO)*1.0 + terminals*0.6
 - bom_line_items: extract EVERY SINGLE line item from any BOM table found in the drawings
-  - THIS IS CRITICAL: Do NOT skip or omit ANY rows. Every row in the BOM table must appear in bom_line_items.
-  - If the BOM table has 36 rows, you must return exactly 36 items. Count them.
-  - Include part numbers, descriptions, quantities, manufacturers exactly as shown
+  - THIS IS THE MOST IMPORTANT PART OF YOUR JOB. The BOM table is the primary deliverable.
+  - Do NOT skip or omit ANY rows. Every row in the BOM table MUST appear in bom_line_items.
+  - If the BOM table has 36 rows, you MUST return exactly 36 items. Count them carefully.
+  - TRANSCRIBE part numbers, descriptions, quantities, and manufacturers EXACTLY as printed.
+    Do NOT substitute one manufacturer for another. Do NOT modify part numbers.
+  - Common manufacturers you may see: SCE, Rittal, Phoenix Contact, Allen Bradley, Rockwell,
+    Siemens, Square D, Schneider, Hammond, Panduit, Hoffman, Eaton, ABB, Turck, Weidmuller,
+    Automation Direct, Banner — copy whichever one actually appears on the drawing.
   - Use these categories: Enclosure, Power, Motor Ctrl, Control Devices, PLC/Network, Terminals, Relays, Wiring, HMI/Computer, Markers, Other
   - If no BOM table found, return empty array []
-  - Set qty to numeric value (not "A/R" — use 1 for A/R items and note in notes field)
-  - Include a "total_bom_rows_on_drawing" field in extraction_summary with how many rows you see in the BOM table
-- Flag anything uncertain in review_flags
+  - Set qty to numeric value (not "A/R" — use 1 for A/R items and note "A/R" in notes field)
+  - Set total_bom_rows_on_drawing in extraction_summary to how many rows you count in the BOM table
+- Flag anything uncertain or hard to read in review_flags
 - confidence: 0.0 to 1.0"""
 
     import time
@@ -785,6 +799,176 @@ Rules:
 
     return {"error": "all_models_failed", "quantities": {}, "bom_line_items": [],
             "extraction_summary": {"confidence": 0}}
+
+
+# ── BOM Converter — AI Parser for QuickBooks BOMs & Vendor Quotes ─────────
+def convert_bom_pdf(pdf_b64, filename="bom.pdf"):
+    """Parse a QuickBooks BOM report or vendor quote PDF.
+    Extracts panel names (from 'Item Name/Number' headers) and all line items.
+    Returns structured JSON with panels[], each containing line_items[].
+    """
+    prompt = """You are an expert at parsing QuickBooks Bill of Materials (BOM) reports and vendor quotes for an industrial control panel shop (AAE Automation, UL-508A certified).
+
+Analyze this PDF and extract ALL panels/BOMs and their line items.
+
+Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object.
+
+{
+  "panels": [
+    {
+      "panel_name": "DVN-100HP-VFD",
+      "document_type": "quickbooks_bom",
+      "purchase_description": "Devon 100HP VFD, Rev. 1",
+      "line_items": [
+        {
+          "item_num": 1,
+          "part_number": "WF100LP",
+          "description": "Type 3R Drive Enclosure with (2) 10 inch Fans",
+          "qty": 1,
+          "unit": "ea",
+          "cost": 1947.97,
+          "manufacturer": "",
+          "category": "Enclosure",
+          "notes": ""
+        }
+      ]
+    }
+  ],
+  "extraction_summary": {
+    "total_panels_found": 1,
+    "total_line_items": 4,
+    "confidence": 0.95,
+    "review_flags": []
+  }
+}
+
+Rules:
+- A QuickBooks BOM starts with a header section containing "Item Name/Number" — use the value after this as panel_name.
+  Example: "Item Name/Number  DVN-100HP-VFD" → panel_name = "DVN-100HP-VFD"
+  Set document_type = "quickbooks_bom"
+- The Purchase Description field below it (e.g., "Devon 100HP VFD, Rev. 1") goes into purchase_description
+- If no "Item Name/Number" header is found (vendor quote / price list), set panel_name to "Unknown Panel"
+  and document_type = "quote". If there are multiple such quotes, append a number: "Unknown Panel 2", "Unknown Panel 3"
+- A single PDF may contain MANY BOMs back-to-back (each starts with its own "Item Name/Number" header section). Extract ALL of them.
+- THIS IS CRITICAL: Extract EVERY SINGLE line item from EVERY BOM table. Do NOT skip or omit ANY rows.
+  If a BOM has 30 rows, return exactly 30 items. Count them.
+- The line items table typically has columns: Item Name/Num | Description | Type | Cost | Qty | U/M | Total
+  - Map the "Item Name/Num" column → part_number
+  - Map "Description" → description (full text, do not truncate)
+  - Map "Qty" → qty (numeric, integer)
+  - Map "U/M" → unit (ea, ft, roll, etc.)
+  - Map "Cost" → cost (per-unit dollar amount as float)
+  - The "Type" column (Non-Inv Part, Inv Part, etc.) can be ignored
+  - The "Total" column can be ignored (it is qty × cost)
+- If you can confidently identify the manufacturer from the part number prefix or description, include it.
+  Examples: "1769-" prefix = Allen Bradley, "WM" prefix = Rittal, "2711R-" = Allen Bradley
+  If uncertain, leave manufacturer as empty string — do NOT guess.
+- Assign each line item a category from: Enclosure, Power, Motor Ctrl, Control Devices, PLC/Network,
+  Terminals, Relays, HMI/Computer, Wiring, Markers, Other
+  Use "Other" if the category is unclear.
+- Set qty to numeric value. If "A/R" use 1 and put "A/R" in notes field.
+- Set total_panels_found and total_line_items accurately in extraction_summary
+- Flag anything uncertain in review_flags
+- confidence: 0.0 to 1.0"""
+
+    import time
+
+    models_to_try = ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"]
+
+    for attempt, model in enumerate(models_to_try):
+        try:
+            with claude_client.messages.stream(
+                model=model,
+                max_tokens=32000,
+                temperature=0,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": pdf_b64
+                            }
+                        },
+                        {"type": "text", "text": prompt}
+                    ]
+                }]
+            ) as stream:
+                response = stream.get_final_message()
+
+            stop_reason = response.stop_reason
+            tokens_used = response.usage.output_tokens if response.usage else 0
+            if stop_reason == "max_tokens":
+                print(f"BOM_CONVERT WARNING: Response truncated at {tokens_used} output tokens (max_tokens hit). Some panels may be incomplete.", flush=True)
+
+            raw = response.content[0].text.strip()
+            raw = re.sub(r"^```json\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+
+            try:
+                result = json.loads(raw)
+            except json.JSONDecodeError:
+                print(f"BOM_CONVERT: JSON truncated, attempting repair (len={len(raw)})", flush=True)
+                last_brace = raw.rfind('}')
+                if last_brace > 0:
+                    trimmed = raw[:last_brace+1]
+                    opens_b  = trimmed.count('{') - trimmed.count('}')
+                    opens_sq = trimmed.count('[') - trimmed.count(']')
+                    trimmed += ']' * opens_sq + '}' * opens_b
+                    try:
+                        result = json.loads(trimmed)
+                        result["_truncated"] = True
+                        print("BOM_CONVERT: JSON repair succeeded", flush=True)
+                    except json.JSONDecodeError as e2:
+                        raise json.JSONDecodeError(
+                            f"JSON parse failed after repair attempt: {e2.msg} (original len={len(raw)})",
+                            e2.doc, e2.pos
+                        )
+                else:
+                    raise
+
+            result["_model_used"] = model
+            result["_stop_reason"] = stop_reason
+            result["_output_tokens"] = tokens_used
+            if stop_reason == "max_tokens":
+                result["_truncated"] = True
+                if "extraction_summary" not in result:
+                    result["extraction_summary"] = {}
+                if "review_flags" not in result.get("extraction_summary", {}):
+                    result["extraction_summary"]["review_flags"] = []
+                result["extraction_summary"]["review_flags"].append(
+                    "WARNING: Response was truncated — some panels or line items may be missing. Try uploading fewer BOMs per file."
+                )
+            return result
+
+        except Exception as e:
+            err_str = str(e)
+            print(f"BOM_CONVERT attempt {attempt+1} ({model}) ERROR: {err_str}")
+
+            if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
+                if attempt < len(models_to_try) - 1:
+                    time.sleep(2)
+                    continue
+                return {
+                    "error": "rate_limit",
+                    "error_message": "API rate limit reached. Please wait 60 seconds and try again.",
+                    "panels": [],
+                    "extraction_summary": {"confidence": 0, "total_panels_found": 0, "total_line_items": 0,
+                                           "review_flags": ["rate_limit"]}
+                }
+
+            import traceback
+            err_detail = traceback.format_exc()
+            print("BOM_CONVERT ERROR DETAIL:", err_detail)
+            return {"error": str(e), "error_detail": err_detail,
+                    "panels": [],
+                    "extraction_summary": {"confidence": 0, "total_panels_found": 0, "total_line_items": 0}}
+
+    return {"error": "all_models_failed", "panels": [],
+            "extraction_summary": {"confidence": 0, "total_panels_found": 0, "total_line_items": 0}}
+
 
 # ── PDF Quote Generator ────────────────────────────────────────────────────
 def generate_quote_pdf(bid_data, calc_results, quote_number):
@@ -2686,6 +2870,338 @@ def hours_report():
     fname=f"AAE_HourBreakdown_{project.replace(' ','_')}.xlsx"
     return send_file(buf,mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True,download_name=fname)
+
+
+# ── BOM Converter Routes ─────────────────────────────────────────────────────
+
+@app.route("/api/bom_convert", methods=["POST"])
+@require_auth
+def bom_convert():
+    """Upload one or more PDF files (QuickBooks BOMs or vendor quotes).
+    Each PDF is parsed by Claude to extract panels and line items.
+    Multiple files are merged into a single response."""
+    print("=== /api/bom_convert called ===", flush=True)
+
+    files = request.files.getlist("files")
+    if not files or len(files) == 0:
+        # Also check single-file upload key
+        if "file" in request.files:
+            files = [request.files["file"]]
+        else:
+            return jsonify({"error": "No files uploaded"}), 400
+
+    all_panels = []
+    total_tokens = 0
+    models_used = set()
+    all_flags = []
+    file_errors = []
+
+    for f in files:
+        pdf_bytes = f.read()
+        if len(pdf_bytes) > MAX_SCAN_SIZE:
+            file_errors.append(f"{f.filename}: File too large (max 25 MB)")
+            continue
+
+        if not pdf_bytes.startswith(PDF_MAGIC):
+            file_errors.append(f"{f.filename}: Only PDF files are accepted")
+            continue
+
+        # Audit the upload
+        file_hash = hashlib.sha256(pdf_bytes).hexdigest()[:16]
+        audit_log("bom_convert_upload", "bom_file", file_hash, {
+            "filename": f.filename,
+            "size_bytes": len(pdf_bytes),
+        })
+
+        pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+        result = convert_bom_pdf(pdf_b64, f.filename)
+
+        if "error" in result:
+            file_errors.append(f"{f.filename}: {result.get('error_message', result['error'])}")
+            continue
+
+        panels = result.get("panels", [])
+        # Tag each panel with source filename
+        for p in panels:
+            p["_source_file"] = f.filename
+        all_panels.extend(panels)
+
+        if result.get("_model_used"):
+            models_used.add(result["_model_used"])
+        total_tokens += result.get("_output_tokens", 0)
+        all_flags.extend(result.get("extraction_summary", {}).get("review_flags", []))
+
+    # Deduplicate panel names (append suffix if same name appears from different files)
+    name_counts = {}
+    for p in all_panels:
+        name = p["panel_name"]
+        if name in name_counts:
+            name_counts[name] += 1
+            # Only rename duplicates from different source files
+            if name_counts[name] > 1:
+                p["panel_name"] = f"{name} ({name_counts[name]})"
+        else:
+            name_counts[name] = 1
+
+    if file_errors:
+        all_flags.extend(file_errors)
+
+    total_items = sum(len(p.get("line_items", [])) for p in all_panels)
+
+    response_data = {
+        "panels": all_panels,
+        "extraction_summary": {
+            "total_panels_found": len(all_panels),
+            "total_line_items": total_items,
+            "confidence": 0.9 if all_panels else 0.0,
+            "review_flags": all_flags,
+            "files_processed": len(files) - len(file_errors),
+            "files_errored": len(file_errors),
+        },
+        "_models_used": list(models_used),
+        "_total_output_tokens": total_tokens,
+    }
+
+    if not all_panels and file_errors:
+        response_data["error"] = "all_files_failed"
+        response_data["error_message"] = "; ".join(file_errors)
+
+    return jsonify(response_data)
+
+
+@app.route("/api/bom_convert_excel", methods=["POST"])
+@require_auth
+def bom_convert_excel():
+    """Generate a ZIP containing Master BOM + per-vendor Excel files for each panel.
+    Input: { panels: [...], customer_name, project_name, job_number }
+    Output: ZIP file download with folder-per-panel structure."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from collections import defaultdict
+    import zipfile
+
+    data       = request.get_json()
+    panels     = data.get("panels", [])
+    customer   = data.get("customer_name", "")
+    project    = data.get("project_name", "")
+    job_num    = data.get("job_number", f"AAE-{datetime.now().strftime('%Y%m%d')}")
+
+    if not panels:
+        return jsonify({"error": "No panels to export"}), 400
+
+    routing_rules = load_routing_rules()
+
+    RED      = "9B1B1B"; DARK_RED = "6B0A0A"; WHITE = "FFFFFF"
+    LIGHT_RED= "FDECEA"; MID_GRAY = "F5F0F0"; DARK  = "2C2C2C"; TEAL = "00897A"
+
+    def s(cell, bold=False, bg=None, fg=WHITE, sz=10, ha="left", wrap=False):
+        cell.font = Font(name="Arial", bold=bold, color=fg, size=sz)
+        if bg: cell.fill = PatternFill("solid", fgColor=bg)
+        cell.alignment = Alignment(horizontal=ha, vertical="center", wrap_text=wrap)
+
+    thin = Side(style="thin", color="E0D0D0")
+    bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
+
+    safe_proj = (project or job_num).replace(" ", "_").replace("/", "-")[:40]
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+
+        for panel in panels:
+            panel_name = panel.get("panel_name", "Unknown Panel")
+            line_items = panel.get("line_items", [])
+            if not line_items:
+                continue
+
+            safe_panel = panel_name.replace(" ", "_").replace("/", "-").replace("\\", "-")[:40]
+
+            # ── Build Master BOM workbook for this panel ──────────────────────
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Master BOM"
+
+            for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",12),("I",14),("J",20)]:
+                ws.column_dimensions[col].width = w
+
+            # Row 1: Banner
+            ws.merge_cells("A1:J1"); ws.row_dimensions[1].height = 14
+            ws["A1"] = "AAE AUTOMATION, INC.  |  UL-NNNY  |  UL-508A Certified Industrial Control Panel Specialists"
+            s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
+
+            # Row 2: Title + Job#
+            ws.merge_cells("A2:E2"); ws.row_dimensions[2].height = 34
+            ws["A2"] = f"BILL OF MATERIALS — {panel_name}"
+            ws["A2"].font      = Font(name="Arial", bold=True, color=WHITE, size=18)
+            ws["A2"].fill      = PatternFill("solid", fgColor=DARK_RED)
+            ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+            ws.merge_cells("F2:J2")
+            ws["F2"] = job_num
+            s(ws["F2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
+
+            # Row 3: Customer + Project
+            ws.row_dimensions[3].height = 18
+            ws.merge_cells("A3:B3"); ws["A3"] = "Customer:"
+            s(ws["A3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+            ws.merge_cells("C3:E3"); ws["C3"] = customer
+            s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
+            ws["F3"] = "Project:"
+            s(ws["F3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+            ws.merge_cells("G3:J3"); ws["G3"] = project
+            s(ws["G3"], bg=LIGHT_RED, fg=DARK, sz=10)
+
+            # Row 4: Date + Panel Name
+            ws.row_dimensions[4].height = 16
+            ws.merge_cells("A4:B4"); ws["A4"] = "Date:"
+            s(ws["A4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+            ws.merge_cells("C4:E4"); ws["C4"] = datetime.now().strftime("%m/%d/%Y")
+            s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
+            ws["F4"] = "Panel:"
+            s(ws["F4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+            ws.merge_cells("G4:J4"); ws["G4"] = panel_name
+            s(ws["G4"], bg=MID_GRAY, fg=DARK, sz=9)
+
+            # Row 5: Internal notice
+            ws.merge_cells("A5:J5"); ws.row_dimensions[5].height = 15
+            ws["A5"] = "\u26a0  INTERNAL DOCUMENT ONLY \u2014 Not for Customer Distribution  \u26a0"
+            s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
+
+            # Row 6: Column headers
+            ws.row_dimensions[6].height = 20
+            for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","UNIT COST","TOTAL COST","NOTES"], 1):
+                c = ws.cell(row=6, column=ci, value=h)
+                s(c, bold=True, bg=DARK, sz=9, ha="center")
+                c.border = Border(bottom=Side(style="medium", color=RED))
+
+            # Group items by category
+            grouped = defaultdict(list)
+            cat_order = ["Enclosure","Power","Motor Ctrl","Control Devices","PLC/Network",
+                         "Terminals","Relays","HMI/Computer","Wiring","Markers","Other"]
+            for item in line_items:
+                cat = item.get("category", "Other")
+                if cat not in cat_order: cat = "Other"
+                grouped[cat].append(item)
+
+            row = 7; item_counter = 0
+            even_fill = PatternFill("solid", fgColor="FDF8F8")
+            odd_fill  = PatternFill("solid", fgColor=WHITE)
+
+            vendor_groups = defaultdict(list)
+
+            cats_with_items = [c for c in cat_order if grouped[c]]
+            for cat in cats_with_items:
+                items = grouped[cat]
+                # Section header
+                ws.merge_cells(f"A{row}:J{row}")
+                hc = ws.cell(row=row, column=1, value=f"  {cat.upper()}")
+                hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
+                hc.fill = PatternFill("solid", fgColor=RED)
+                hc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+                ws.row_dimensions[row].height = 16
+                row += 1
+
+                for itm in items:
+                    item_counter += 1
+                    fill = even_fill if item_counter % 2 == 0 else odd_fill
+                    ws.row_dimensions[row].height = 15
+                    mfr    = itm.get("manufacturer", "")
+                    pn     = itm.get("part_number", "")
+                    result = resolve_vendor(pn, mfr, routing_rules)
+                    vendor = result["vendor"]
+                    itm["_resolved_vendor"] = vendor
+
+                    # Collect for vendor grouping
+                    norm = dict(itm); norm["vendor"] = vendor
+                    vendor_groups[vendor].append(norm)
+
+                    unit_cost = itm.get("cost", 0.00) or 0.00
+                    qty = itm.get("qty", 1) or 1
+                    total_cost = round(float(unit_cost) * int(qty), 2)
+
+                    vals = [
+                        itm.get("item_num", item_counter),
+                        pn,
+                        itm.get("description", ""),
+                        qty,
+                        itm.get("unit", "ea"),
+                        mfr,
+                        vendor,
+                        unit_cost,
+                        total_cost,
+                        itm.get("notes", "")
+                    ]
+                    for ci, val in enumerate(vals, 1):
+                        c = ws.cell(row=row, column=ci, value=val)
+                        c.fill = fill; c.border = bdr
+                        c.font = Font(name="Arial", size=9, color=DARK)
+                        if ci in (1, 4):
+                            c.alignment = Alignment(horizontal="center", vertical="center")
+                        elif ci == 7:
+                            c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
+                            c.alignment = Alignment(horizontal="center", vertical="center")
+                        elif ci in (8, 9):
+                            c.alignment = Alignment(horizontal="right", vertical="center")
+                            c.number_format = '"$"#,##0.00'
+                        else:
+                            c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
+                    row += 1
+
+                row += 1  # spacer
+
+            # Total row
+            ws.merge_cells(f"A{row}:H{row}")
+            tl = ws.cell(row=row, column=1, value="TOTAL MATERIAL COST:")
+            tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
+            tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
+            tl.alignment = Alignment(horizontal="right", vertical="center")
+            tv = ws.cell(row=row, column=9, value=f"=SUM(I7:I{row-1})")
+            tv.font = Font(name="Arial", bold=True, color=DARK_RED, size=11)
+            tv.number_format = '"$"#,##0.00'
+            tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
+            tv.alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=row, column=10).fill = PatternFill("solid", fgColor=LIGHT_RED)
+            ws.row_dimensions[row].height = 20
+            row += 1
+
+            # QB note
+            ws.merge_cells(f"A{row}:J{row}")
+            note = ws.cell(row=row, column=1,
+                value="NOTE: Costs from QuickBooks BOM. Vendor column auto-assigned from AAE vendor database.")
+            note.font = Font(name="Arial", size=8, color="888080", italic=True)
+            note.alignment = Alignment(horizontal="left")
+            row += 2
+
+            # Footer
+            ws.merge_cells(f"A{row}:J{row}")
+            ft = ws.cell(row=row, column=1,
+                value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
+            ft.font = Font(name="Arial", size=8, color="888080", italic=True)
+            ft.alignment = Alignment(horizontal="center")
+
+            ws.freeze_panes = "A7"
+            ws.auto_filter.ref = f"A6:J{row-3}"
+            ws.page_setup.orientation = "landscape"
+            ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
+            ws.print_title_rows = "1:6"
+
+            # Save master BOM into ZIP
+            master_buf = io.BytesIO()
+            wb.save(master_buf)
+            zf.writestr(f"{safe_panel}/AAE_Master_BOM_{safe_panel}.xlsx", master_buf.getvalue())
+
+            # ── Build per-vendor Excel files for this panel ───────────────────
+            for vn in sorted(vendor_groups.keys()):
+                if vendor_groups[vn]:
+                    vbuf = _build_vendor_excel(vn, vendor_groups[vn],
+                                               customer, project or panel_name, job_num, "")
+                    safe_vn = vn.replace(" ", "_").replace("/", "-")[:20]
+                    zf.writestr(f"{safe_panel}/AAE_BOM_{safe_vn}_{safe_panel}.xlsx", vbuf.getvalue())
+
+    zip_buf.seek(0)
+    return send_file(zip_buf,
+                     mimetype="application/zip",
+                     as_attachment=True,
+                     download_name=f"AAE_BOM_Converter_{safe_proj}.zip")
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
