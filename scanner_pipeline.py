@@ -327,7 +327,7 @@ def _stage1_detect_structure(claude_client, pdf_b64):
         "You are reading an industrial electrical panel drawing PDF.\n"
         "Your ONLY job is to find the BOM (Bill of Materials) table and report its structure.\n\n"
         "DO NOT extract any row data yet. Just report the table structure.\n\n"
-        "Look through every page. Find any table that lists parts/components with quantities.\n\n"
+        "Look through EVERY page. Find any table that lists parts/components with quantities.\n\n"
         "Return this JSON:\n"
         "{\n"
         '  "bom_tables_found": 1,\n'
@@ -354,11 +354,23 @@ def _stage1_detect_structure(claude_client, pdf_b64):
         "- ITEM column: sequential row numbers (1, 2, 3...)\n"
         "- If a column header is ambiguous, read 2-3 cells below it to determine what data type it holds\n\n"
         "Count total_bom_rows by counting every data row in the table (not headers, not blank rows).\n"
-        "Count CAREFULLY -- go row by row and count each one.\n\n"
+        "Count CAREFULLY -- go row by row and count each one.\n"
+        "If the BOM spans MULTIPLE pages, add up ALL rows from ALL BOM pages.\n\n"
         "CRITICAL: Report the EXACT page number(s) where the BOM table appears in pages_with_bom.\n"
-        "This drawing may have 30+ pages of schematics, wiring diagrams, etc.\n"
-        "The BOM table is usually titled 'BILL OF MATERIALS' or 'BOM' — identify those pages.\n"
-        "Do NOT include pages with wire schedules, terminal schedules, nameplate schedules, or schematics."
+        "This drawing may have 30+ pages of schematics, wiring diagrams, etc.\n\n"
+        "WHERE TO FIND THE BOM:\n"
+        '- Look for tables titled "BILL OF MATERIALS", "BOM", "B.O.M.", "PARTS LIST", or "MATERIAL LIST"\n'
+        "- The BOM may appear on a DEDICATED page, OR it may be embedded within a schematic page\n"
+        '- Pages titled "Schematic and B.O.M." or similar CONTAIN a BOM — include those pages!\n'
+        "- The BOM could be on page 1, the last page, or ANY page in between — check them ALL\n"
+        "- If the BOM spans multiple pages (e.g., B.O.M. I, B.O.M. II, B.O.M. III), list ALL those pages\n\n"
+        "WHAT IS NOT A BOM:\n"
+        "- Wire schedules (list wire numbers and terminations — no part numbers)\n"
+        "- Terminal schedules (list terminal block assignments)\n"
+        "- Nameplate schedules (list nameplates/labels)\n"
+        "- Cable schedules\n"
+        "- Pages with ONLY schematics and NO parts table are not BOM pages\n"
+        "- But a page with BOTH a schematic AND a parts/BOM table IS a BOM page — include it!"
     )
 
     result = _call_claude(claude_client, pdf_b64, prompt,
