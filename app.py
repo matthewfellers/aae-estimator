@@ -2430,24 +2430,24 @@ def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estima
     thin = Side(style="thin", color="E0D0D0")
     bdr  = Border(bottom=thin, left=thin, right=thin, top=thin)
 
-    # 6 columns: A=Item, B=Part#, C=Description, D=Qty, E=Manufacturer, F=Vendor
-    for col, w in [("A",8),("B",24),("C",52),("D",8),("E",26),("F",18)]:
+    # 8 columns: Item, Part Number, Description, Qty, U/M, Manufacturer, Vendor, Notes
+    for col, w in [("A",8),("B",24),("C",52),("D",8),("E",8),("F",26),("G",18),("H",24)]:
         ws.column_dimensions[col].width = w
 
     # Row 1: Banner
-    ws.merge_cells("A1:F1"); ws.row_dimensions[1].height = 14
+    ws.merge_cells("A1:H1"); ws.row_dimensions[1].height = 14
     ws["A1"] = f"AAE AUTOMATION — VENDOR ORDER: {vendor_name.upper()}  |  UL-508A Certified Industrial Control Panel Specialists"
     s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
 
     # Row 2: Title | Quote#
-    ws.merge_cells("A2:D2"); ws.row_dimensions[2].height = 34
+    ws.merge_cells("A2:E2"); ws.row_dimensions[2].height = 34
     ws["A2"] = f"PURCHASE ORDER — {vendor_name.upper()}"
     ws["A2"].font = Font(name="Arial", bold=True, color=WHITE, size=16)
     ws["A2"].fill = PatternFill("solid", fgColor=DARK_RED)
     ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.merge_cells("E2:F2")
-    ws["E2"] = quote_num
-    s(ws["E2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
+    ws.merge_cells("F2:H2")
+    ws["F2"] = quote_num
+    s(ws["F2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
 
     # Row 3: Customer | Project
     ws.row_dimensions[3].height = 18
@@ -2457,7 +2457,7 @@ def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estima
     s(ws["B3"], bg=LIGHT_RED, fg=DARK, sz=10)
     ws["D3"] = "Project:"
     s(ws["D3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("E3:F3"); ws["E3"] = project
+    ws.merge_cells("E3:H3"); ws["E3"] = project
     s(ws["E3"], bg=LIGHT_RED, fg=DARK, sz=10)
 
     # Row 4: Date | Vendor
@@ -2468,12 +2468,12 @@ def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estima
     s(ws["B4"], bg=MID_GRAY, fg=DARK, sz=9)
     ws["D4"] = "Send To:"
     s(ws["D4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
-    ws.merge_cells("E4:F4"); ws["E4"] = vendor_name
+    ws.merge_cells("E4:H4"); ws["E4"] = vendor_name
     s(ws["E4"], bg=MID_GRAY, fg=DARK, sz=9)
 
     # Row 5: Column headers
     ws.row_dimensions[5].height = 20
-    for ci, h in enumerate(["ITEM", "PART NUMBER", "DESCRIPTION", "QTY", "MANUFACTURER", "VENDOR"], 1):
+    for ci, h in enumerate(["ITEM", "PART NUMBER", "DESCRIPTION", "QTY", "U/M", "MANUFACTURER", "VENDOR", "NOTES"], 1):
         c = ws.cell(row=5, column=ci, value=h)
         s(c, bold=True, bg=DARK, sz=9, ha="center")
         c.border = Border(bottom=Side(style="medium", color=RED))
@@ -2487,12 +2487,14 @@ def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estima
         fill = even_fill if i % 2 == 0 else odd_fill
         ws.row_dimensions[row].height = 15
         vals = [
-            itm.get("item_num", i),
+            i,
             itm.get("part_number") or itm.get("part_num", ""),
             itm.get("description", ""),
             itm.get("qty", 1),
+            itm.get("unit", "ea"),
             itm.get("manufacturer", ""),
             itm.get("vendor", "") or vendor_name,
+            itm.get("notes", ""),
         ]
         for ci, val in enumerate(vals, 1):
             c = ws.cell(row=row, column=ci, value=val)
@@ -2500,7 +2502,9 @@ def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estima
             c.font = Font(name="Arial", size=9, color=DARK)
             if ci in (1, 4):
                 c.alignment = Alignment(horizontal="center", vertical="center")
-            elif ci == 6:  # Vendor — teal accent
+            elif ci == 5:  # U/M
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif ci == 7:  # Vendor — teal accent
                 c.font = Font(name="Arial", size=9, color=TEAL, bold=True)
                 c.alignment = Alignment(horizontal="center", vertical="center")
             else:
@@ -2518,20 +2522,20 @@ def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estima
     tv.font = Font(name="Arial", bold=True, color="008800", size=11)
     tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
     tv.alignment = Alignment(horizontal="center", vertical="center")
-    ws.cell(row=row, column=5).fill = PatternFill("solid", fgColor=LIGHT_RED)
-    ws.cell(row=row, column=6).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    for ci in range(5, 9):
+        ws.cell(row=row, column=ci).fill = PatternFill("solid", fgColor=LIGHT_RED)
     ws.row_dimensions[row].height = 20
     row += 2
 
     # Footer
-    ws.merge_cells(f"A{row}:F{row}")
+    ws.merge_cells(f"A{row}:H{row}")
     ft = ws.cell(row=row, column=1,
         value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
     ft.font = Font(name="Arial", size=8, color="888080", italic=True)
     ft.alignment = Alignment(horizontal="center")
 
     ws.freeze_panes = "A6"
-    ws.auto_filter.ref = f"A5:F{row - 3}"
+    ws.auto_filter.ref = f"A5:H{row - 3}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:5"
@@ -3435,11 +3439,12 @@ def bom_convert_excel():
             ws = wb.active
             ws.title = "Master BOM"
 
-            for col, w in [("A",8),("B",22),("C",48),("D",6),("E",6),("F",22),("G",14),("H",12),("I",14),("J",20)]:
+            # 8 columns: Item, Part Number, Description, Qty, U/M, Manufacturer, Vendor, Notes
+            for col, w in [("A",8),("B",24),("C",52),("D",8),("E",8),("F",26),("G",18),("H",24)]:
                 ws.column_dimensions[col].width = w
 
             # Row 1: Banner
-            ws.merge_cells("A1:J1"); ws.row_dimensions[1].height = 14
+            ws.merge_cells("A1:H1"); ws.row_dimensions[1].height = 14
             ws["A1"] = "AAE AUTOMATION, INC.  |  UL-NNNY  |  UL-508A Certified Industrial Control Panel Specialists"
             s(ws["A1"], bold=True, bg=RED, sz=11, ha="center")
 
@@ -3449,154 +3454,111 @@ def bom_convert_excel():
             ws["A2"].font      = Font(name="Arial", bold=True, color=WHITE, size=18)
             ws["A2"].fill      = PatternFill("solid", fgColor=DARK_RED)
             ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-            ws.merge_cells("F2:J2")
+            ws.merge_cells("F2:H2")
             ws["F2"] = job_num
             s(ws["F2"], bold=True, bg=DARK_RED, fg="F4A9A8", sz=12, ha="right")
 
             # Row 3: Customer + Project
             ws.row_dimensions[3].height = 18
-            ws.merge_cells("A3:B3"); ws["A3"] = "Customer:"
+            ws["A3"] = "Customer:"
             s(ws["A3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
-            ws.merge_cells("C3:E3"); ws["C3"] = customer
-            s(ws["C3"], bg=LIGHT_RED, fg=DARK, sz=10)
-            ws["F3"] = "Project:"
-            s(ws["F3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
-            ws.merge_cells("G3:J3"); ws["G3"] = project
-            s(ws["G3"], bg=LIGHT_RED, fg=DARK, sz=10)
+            ws.merge_cells("B3:C3"); ws["B3"] = customer
+            s(ws["B3"], bg=LIGHT_RED, fg=DARK, sz=10)
+            ws["D3"] = "Project:"
+            s(ws["D3"], bold=True, bg=LIGHT_RED, fg=DARK_RED, sz=9, ha="right")
+            ws.merge_cells("E3:H3"); ws["E3"] = project
+            s(ws["E3"], bg=LIGHT_RED, fg=DARK, sz=10)
 
             # Row 4: Date + Panel Name
             ws.row_dimensions[4].height = 16
-            ws.merge_cells("A4:B4"); ws["A4"] = "Date:"
+            ws["A4"] = "Date:"
             s(ws["A4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
-            ws.merge_cells("C4:E4"); ws["C4"] = datetime.now().strftime("%m/%d/%Y")
-            s(ws["C4"], bg=MID_GRAY, fg=DARK, sz=9)
-            ws["F4"] = "Panel:"
-            s(ws["F4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
-            ws.merge_cells("G4:J4"); ws["G4"] = panel_name
-            s(ws["G4"], bg=MID_GRAY, fg=DARK, sz=9)
+            ws.merge_cells("B4:C4"); ws["B4"] = datetime.now().strftime("%m/%d/%Y")
+            s(ws["B4"], bg=MID_GRAY, fg=DARK, sz=9)
+            ws["D4"] = "Panel:"
+            s(ws["D4"], bold=True, bg=MID_GRAY, fg=DARK_RED, sz=9, ha="right")
+            ws.merge_cells("E4:H4"); ws["E4"] = panel_name
+            s(ws["E4"], bg=MID_GRAY, fg=DARK, sz=9)
 
-            # Row 5: Internal notice
-            ws.merge_cells("A5:J5"); ws.row_dimensions[5].height = 15
-            ws["A5"] = "\u26a0  INTERNAL DOCUMENT ONLY \u2014 Not for Customer Distribution  \u26a0"
-            s(ws["A5"], bold=True, bg="FFF8E1", fg="CC6600", sz=9, ha="center")
-
-            # Row 6: Column headers
-            ws.row_dimensions[6].height = 20
-            for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","UNIT COST","TOTAL COST","NOTES"], 1):
-                c = ws.cell(row=6, column=ci, value=h)
+            # Row 5: Column headers
+            ws.row_dimensions[5].height = 20
+            for ci, h in enumerate(["ITEM","PART NUMBER","DESCRIPTION","QTY","U/M","MANUFACTURER","VENDOR","NOTES"], 1):
+                c = ws.cell(row=5, column=ci, value=h)
                 s(c, bold=True, bg=DARK, sz=9, ha="center")
                 c.border = Border(bottom=Side(style="medium", color=RED))
 
-            # Group items by category
-            grouped = defaultdict(list)
-            cat_order = ["Enclosure","Power","Motor Ctrl","Control Devices","PLC/Network",
-                         "Terminals","Relays","HMI/Computer","Wiring","Markers","Other"]
-            for item in line_items:
-                cat = item.get("category", "Other")
-                if cat not in cat_order: cat = "Other"
-                grouped[cat].append(item)
-
-            row = 7; item_counter = 0
+            # Data rows — chronological order (same order as BOM), no category sections
+            row = 6
             even_fill = PatternFill("solid", fgColor="FDF8F8")
             odd_fill  = PatternFill("solid", fgColor=WHITE)
 
             vendor_groups = defaultdict(list)
 
-            cats_with_items = [c for c in cat_order if grouped[c]]
-            for cat in cats_with_items:
-                items = grouped[cat]
-                # Section header
-                ws.merge_cells(f"A{row}:J{row}")
-                hc = ws.cell(row=row, column=1, value=f"  {cat.upper()}")
-                hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
-                hc.fill = PatternFill("solid", fgColor=RED)
-                hc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-                ws.row_dimensions[row].height = 16
+            for item_counter, itm in enumerate(line_items, 1):
+                fill = even_fill if item_counter % 2 == 0 else odd_fill
+                ws.row_dimensions[row].height = 15
+                mfr    = itm.get("manufacturer", "")
+                pn     = itm.get("part_number", "")
+                result = resolve_vendor(pn, mfr, routing_rules)
+                vendor = result["vendor"]
+                itm["_resolved_vendor"] = vendor
+
+                # Collect for vendor grouping
+                norm = dict(itm); norm["vendor"] = vendor
+                vendor_groups[vendor].append(norm)
+
+                vals = [
+                    item_counter,
+                    pn,
+                    itm.get("description", ""),
+                    itm.get("qty", 1) or 1,
+                    itm.get("unit", "ea"),
+                    mfr,
+                    vendor,
+                    itm.get("notes", "")
+                ]
+                for ci, val in enumerate(vals, 1):
+                    c = ws.cell(row=row, column=ci, value=val)
+                    c.fill = fill; c.border = bdr
+                    c.font = Font(name="Arial", size=9, color=DARK)
+                    if ci in (1, 4):
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    elif ci == 5:  # U/M
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    elif ci == 7:  # Vendor — teal accent
+                        c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    else:
+                        c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
                 row += 1
 
-                for itm in items:
-                    item_counter += 1
-                    fill = even_fill if item_counter % 2 == 0 else odd_fill
-                    ws.row_dimensions[row].height = 15
-                    mfr    = itm.get("manufacturer", "")
-                    pn     = itm.get("part_number", "")
-                    result = resolve_vendor(pn, mfr, routing_rules)
-                    vendor = result["vendor"]
-                    itm["_resolved_vendor"] = vendor
-
-                    # Collect for vendor grouping
-                    norm = dict(itm); norm["vendor"] = vendor
-                    vendor_groups[vendor].append(norm)
-
-                    unit_cost = itm.get("cost", 0.00) or 0.00
-                    qty = itm.get("qty", 1) or 1
-                    total_cost = round(float(unit_cost) * int(qty), 2)
-
-                    vals = [
-                        itm.get("item_num", item_counter),
-                        pn,
-                        itm.get("description", ""),
-                        qty,
-                        itm.get("unit", "ea"),
-                        mfr,
-                        vendor,
-                        unit_cost,
-                        total_cost,
-                        itm.get("notes", "")
-                    ]
-                    for ci, val in enumerate(vals, 1):
-                        c = ws.cell(row=row, column=ci, value=val)
-                        c.fill = fill; c.border = bdr
-                        c.font = Font(name="Arial", size=9, color=DARK)
-                        if ci in (1, 4):
-                            c.alignment = Alignment(horizontal="center", vertical="center")
-                        elif ci == 7:
-                            c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
-                            c.alignment = Alignment(horizontal="center", vertical="center")
-                        elif ci in (8, 9):
-                            c.alignment = Alignment(horizontal="right", vertical="center")
-                            c.number_format = '"$"#,##0.00'
-                        else:
-                            c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
-                    row += 1
-
-                row += 1  # spacer
-
-            # Total row
-            ws.merge_cells(f"A{row}:H{row}")
-            tl = ws.cell(row=row, column=1, value="TOTAL MATERIAL COST:")
+            # Total line items row
+            ws.merge_cells(f"A{row}:C{row}")
+            tl = ws.cell(row=row, column=1, value=f"TOTAL LINE ITEMS: {len(line_items)}")
             tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
             tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
             tl.alignment = Alignment(horizontal="right", vertical="center")
-            tv = ws.cell(row=row, column=9, value=f"=SUM(I7:I{row-1})")
-            tv.font = Font(name="Arial", bold=True, color=DARK_RED, size=11)
-            tv.number_format = '"$"#,##0.00'
+            tv = ws.cell(row=row, column=4, value=sum(int(itm.get("qty") or 1) for itm in line_items))
+            tv.font = Font(name="Arial", bold=True, color="008800", size=11)
             tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
-            tv.alignment = Alignment(horizontal="right", vertical="center")
-            ws.cell(row=row, column=10).fill = PatternFill("solid", fgColor=LIGHT_RED)
+            tv.alignment = Alignment(horizontal="center", vertical="center")
+            for ci in range(5, 9):
+                ws.cell(row=row, column=ci).fill = PatternFill("solid", fgColor=LIGHT_RED)
             ws.row_dimensions[row].height = 20
-            row += 1
-
-            # QB note
-            ws.merge_cells(f"A{row}:J{row}")
-            note = ws.cell(row=row, column=1,
-                value="NOTE: Costs from QuickBooks BOM. Vendor column auto-assigned from AAE vendor database.")
-            note.font = Font(name="Arial", size=8, color="888080", italic=True)
-            note.alignment = Alignment(horizontal="left")
             row += 2
 
             # Footer
-            ws.merge_cells(f"A{row}:J{row}")
+            ws.merge_cells(f"A{row}:H{row}")
             ft = ws.cell(row=row, column=1,
                 value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
             ft.font = Font(name="Arial", size=8, color="888080", italic=True)
             ft.alignment = Alignment(horizontal="center")
 
-            ws.freeze_panes = "A7"
-            ws.auto_filter.ref = f"A6:J{row-3}"
+            ws.freeze_panes = "A6"
+            ws.auto_filter.ref = f"A5:H{row-3}"
             ws.page_setup.orientation = "landscape"
             ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
-            ws.print_title_rows = "1:6"
+            ws.print_title_rows = "1:5"
 
             # Save master BOM into ZIP
             master_buf = io.BytesIO()
