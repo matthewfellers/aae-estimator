@@ -39,6 +39,13 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
     }
 
     if "sonnet" in model and thinking_budget > 0:
+        # API requires max_tokens > thinking.budget_tokens
+        # Ensure max_tokens is always at least thinking_budget + output room
+        if max_tokens <= thinking_budget:
+            max_tokens = thinking_budget + max(8000, max_tokens)
+            api_kwargs["max_tokens"] = max_tokens
+            print(f"_call_claude: Bumped max_tokens to {max_tokens} "
+                  f"(must exceed thinking_budget={thinking_budget})", flush=True)
         api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
     elif "haiku" in model:
         api_kwargs["temperature"] = 0
