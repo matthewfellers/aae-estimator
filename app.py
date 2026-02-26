@@ -617,13 +617,38 @@ def scan_drawing(pdf_b64, filename="drawing.pdf"):
     # Stage 1 + 2 combined: classify and extract in one smart call
     prompt = """You are an expert electrical estimator at AAE Automation, a UL-508A certified industrial control panel shop. Analyze this electrical drawing set and extract ALL component quantities needed for a panel bid.
 
-CRITICAL ACCURACY RULES — READ FIRST:
-- Copy part numbers EXACTLY as printed on the drawing. Do NOT substitute, correct, or "improve" them.
-- Copy manufacturer names EXACTLY as shown. If the drawing says "SCE" do NOT change it to "Rittal".
-  If it says "Phoenix Contact" do NOT change it to "Allen Bradley". Transcribe what you see.
-- Copy quantities EXACTLY as shown in the BOM table. Do not estimate or round.
-- If a field is unclear or partially visible, include your best reading and flag it in review_flags.
-- Do NOT infer or hallucinate part numbers that are not visible in the document.
+═══════════════════════════════════════════════════════════════════
+CRITICAL ACCURACY RULES — YOU MUST FOLLOW THESE OR THE BOM IS USELESS
+═══════════════════════════════════════════════════════════════════
+
+RULE 1 — NEVER INVENT PART NUMBERS:
+  Your #1 failure mode is HALLUCINATING part numbers that don't exist in the document.
+  If you cannot clearly read a part number, write "[UNREADABLE]" — do NOT guess or invent one.
+  A wrong part number is WORSE than no part number. We will order the wrong parts.
+  NEVER generate a part number from your training data. ONLY copy what is printed on the page.
+
+RULE 2 — RECOGNIZE ALL COLUMN HEADER VARIATIONS:
+  The part number column may be labeled ANY of these:
+    "Catalog", "Catalog Number", "Catalog No", "Catalog #", "Cat No", "Cat #",
+    "Part Number", "Part No", "Part #", "P/N", "PN", "Model", "Model Number",
+    "Item Number", "Item No", "Order Number", "Order No", "MFR Part No"
+  ALL of these mean THE SAME THING — they are the part/catalog number to extract.
+  Read the ACTUAL text in that column cell for each row. Do not make up values.
+
+RULE 3 — COPY EXACTLY, CHARACTER BY CHARACTER:
+  - Part numbers: copy the EXACT string. "1769-L33ER" not "1769-L33E" or "1769L33ER".
+  - Manufacturer names: copy EXACTLY. "C3CONTROLS" not "Euchner". "BUSSMANN" not "Bussman".
+    If drawing says "SCE" write "SCE". If it says "Phoenix Contact" write "Phoenix Contact".
+  - Quantities: copy the exact number from the QTY column. Do not estimate.
+  - Descriptions: copy the text from the description column as-is.
+
+RULE 4 — CROSS-CHECK YOUR WORK:
+  After extracting, verify: does each part_number you wrote actually appear CHARACTER-FOR-CHARACTER
+  in the PDF? If you cannot point to where it appears on the page, you invented it — replace with "[UNREADABLE]".
+
+RULE 5 — FLAG UNCERTAINTY:
+  If ANY part number, manufacturer, or quantity is hard to read, add it to review_flags
+  with the row number and what you're uncertain about. Better to flag than to guess wrong.
 
 Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object.
 
@@ -656,7 +681,7 @@ Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object
   "bom_line_items": [
     {
       "item_num": 1,
-      "part_number": "<EXACT part number from drawing>",
+      "part_number": "<EXACT catalog/part number from drawing — NEVER invent>",
       "description": "<EXACT description from drawing>",
       "qty": 1,
       "unit": "ea",
@@ -679,9 +704,10 @@ Rules:
   - If the BOM table has 36 rows, you MUST return exactly 36 items. Count them carefully.
   - TRANSCRIBE part numbers, descriptions, quantities, and manufacturers EXACTLY as printed.
     Do NOT substitute one manufacturer for another. Do NOT modify part numbers.
+  - The "Catalog" or "Catalog Number" column IS the part number — read it character by character.
   - Common manufacturers you may see: SCE, Rittal, Phoenix Contact, Allen Bradley, Rockwell,
     Siemens, Square D, Schneider, Hammond, Panduit, Hoffman, Eaton, ABB, Turck, Weidmuller,
-    Automation Direct, Banner — copy whichever one actually appears on the drawing.
+    Automation Direct, Banner, C3Controls, Bussmann, Mersen — copy whichever actually appears.
   - Use these categories: Enclosure, Power, Motor Ctrl, Control Devices, PLC/Network, Terminals, Relays, Wiring, HMI/Computer, Markers, Other
   - If no BOM table found, return empty array []
   - Set qty to numeric value (not "A/R" — use 1 for A/R items and note "A/R" in notes field)
@@ -838,6 +864,17 @@ def convert_bom_pdf(pdf_b64, filename="bom.pdf"):
     prompt = """You are an expert at parsing QuickBooks Bill of Materials (BOM) reports and vendor quotes for an industrial control panel shop (AAE Automation, UL-508A certified).
 
 Analyze this PDF and extract ALL panels/BOMs and their line items.
+
+═══════════════════════════════════════════════════════════════════
+CRITICAL: NEVER INVENT OR HALLUCINATE PART NUMBERS
+═══════════════════════════════════════════════════════════════════
+- Copy part numbers CHARACTER BY CHARACTER from the PDF. Do NOT guess or generate them.
+- If you cannot read a part number clearly, write "[UNREADABLE]" instead of inventing one.
+- The part number column may be labeled "Catalog", "Catalog Number", "Cat No", "Part Number",
+  "Item Name/Num", "P/N", "Model", or similar — they ALL mean the same thing.
+- Copy manufacturer names EXACTLY as printed. Do NOT substitute one for another.
+- After extracting, mentally verify: does each part_number actually appear on the PDF page?
+  If not, you hallucinated it — replace with "[UNREADABLE]" and flag in review_flags.
 
 Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object.
 
