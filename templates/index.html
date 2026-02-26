@@ -1373,17 +1373,30 @@ async function startScan(file) {
         ⚠️ MISSING ITEMS: Drawing BOM has ${totalBomRows} rows but only ${bomItemCount} were extracted (${missing} missing). Re-scan recommended.</div>`;
     }
 
+    // Part number verification summary from Stage 5
+    const vs = data.extraction_summary?.verification_summary || {};
+    if (vs.verified || vs.corrected || vs.not_found) {
+      let vsHtml = '<div style="padding:6px 10px;margin-bottom:6px;border-radius:6px;background:rgba(0,0,0,0.2);font-size:12px">';
+      vsHtml += '<strong>Part Number Verification:</strong> ';
+      if (vs.verified) vsHtml += `<span style="color:#81C784">${vs.verified} verified</span> `;
+      if (vs.corrected) vsHtml += `<span style="color:#FFB74D">${vs.corrected} corrected</span> `;
+      if (vs.not_found) vsHtml += `<span style="color:#FF6B6B">${vs.not_found} not found</span> `;
+      if (vs.unverified) vsHtml += `<span style="color:#999">${vs.unverified} unverified</span>`;
+      vsHtml += '</div>';
+      flagsDiv.innerHTML += vsHtml;
+    }
+
     // Review flags
     const flags = [
       ...(data.extraction_summary?.review_flags || []),
       ...(data.extraction_summary?.scope_gap_flags || [])
     ];
     if (flags.length) {
-      flagsDiv.innerHTML += flags.map(f => `<div class="flag-item">⚠ ${f}</div>`).join('');
+      flagsDiv.innerHTML += flags.map(f => `<div class="flag-item">\u26A0 ${f}</div>`).join('');
     }
 
-    document.getElementById('uploadText').textContent = `✅ ${file.name} — scan complete`;
-    toast(`Drawing scanned — ${bomItemCount} items, ${Math.round(displayConf*100)}% confidence [${isHaiku ? '⚠️ HAIKU fallback — reduced accuracy' : 'Sonnet'}]`,
+    document.getElementById('uploadText').textContent = `\u2705 ${file.name} \u2014 scan complete`;
+    toast(`Drawing scanned \u2014 ${bomItemCount} items, ${Math.round(displayConf*100)}% confidence [${isHaiku ? '\u26A0\uFE0F HAIKU fallback' : 'Sonnet'}]`,
       isHaiku ? 'error' : (displayConf >= 0.75 ? 'success' : 'info'));
 
     // Store BOM line items for download
@@ -1399,11 +1412,26 @@ async function startScan(file) {
       bomRow.style.display = 'block';
       document.getElementById('scanBomLabel').textContent =
         '\u{1F4E6} ' + lastScanBOM.length + ' BOM line items extracted \u2014 review below, then download';
-      // Render inline BOM preview table using safe string building
+      // Render inline BOM preview table with verification status
       var rows = '';
+      var needsReviewHtml = '';
+      var reviewCount = 0;
       for (var bi = 0; bi < lastScanBOM.length; bi++) {
         var itm = lastScanBOM[bi];
-        var rowBg = bi % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(155,27,27,0.06)';
+        var vstatus = itm._verification_status || 'unverified';
+        // Color-code rows by verification status
+        var rowBg;
+        if (vstatus === 'not_found') rowBg = 'rgba(255,80,80,0.12)';
+        else if (vstatus === 'corrected') rowBg = 'rgba(255,183,77,0.12)';
+        else if (vstatus === 'verified') rowBg = bi % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(155,27,27,0.06)';
+        else rowBg = bi % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(155,27,27,0.06)';
+        // Status icon
+        var statusIcon;
+        if (vstatus === 'verified') statusIcon = '<span title="Verified against drawing" style="color:#81C784">\u2705</span>';
+        else if (vstatus === 'corrected') statusIcon = '<span title="Corrected by AI verification" style="color:#FFB74D">\u26A0\uFE0F</span>';
+        else if (vstatus === 'not_found') statusIcon = '<span title="Could not verify in drawing" style="color:#FF6B6B">\u274C</span>';
+        else if (vstatus === 'no_pn') statusIcon = '<span title="No part number" style="color:#666">\u2014</span>';
+        else statusIcon = '<span title="Not verified" style="color:#666">\u2022</span>';
         var pn   = String(itm.part_number   || '\u2014');
         var desc = String(itm.description   || '\u2014');
         var qty  = String(itm.qty           || 1);
@@ -1411,15 +1439,35 @@ async function startScan(file) {
         var mfr  = String(itm.manufacturer  || '\u2014');
         var cat  = String(itm.category      || 'Other');
         var num  = String(itm.item_num      || bi + 1);
+        var notes = String(itm.notes        || '');
+        // Part number display — show original if corrected
+        var pnDisplay = pn;
+        if (vstatus === 'corrected' && itm._original_pn) {
+          pnDisplay = pn + ' <span style="color:#FFB74D;font-size:10px;font-weight:normal" title="Original: ' + itm._original_pn + '">(was: ' + itm._original_pn + ')</span>';
+        }
         rows += '<tr style="background:' + rowBg + ';border-bottom:1px solid rgba(155,27,27,0.15)">'
-              + '<td style="padding:5px 8px;color:var(--muted)">' + num + '</td>'
-              + '<td style="padding:5px 8px;color:#F4A9A8;font-weight:600">' + pn + '</td>'
+              + '<td style="padding:5px 4px;text-align:center;width:28px">' + statusIcon + '</td>'
+              + '<td style="padding:5px 8px;color:var(--muted);width:30px">' + num + '</td>'
+              + '<td style="padding:5px 8px;color:#F4A9A8;font-weight:600">' + pnDisplay + '</td>'
               + '<td style="padding:5px 8px;color:var(--white)">' + desc + '</td>'
               + '<td style="padding:5px 8px;text-align:center;color:#81C784;font-weight:700">' + qty + '</td>'
               + '<td style="padding:5px 8px;color:var(--muted)">' + um + '</td>'
               + '<td style="padding:5px 8px;color:var(--lightblue)">' + mfr + '</td>'
               + '<td style="padding:5px 8px"><span style="background:rgba(155,27,27,0.3);border-radius:4px;padding:2px 6px;font-size:10px;color:#F4A9A8">' + cat + '</span></td>'
               + '</tr>';
+        // Build NEEDS_REVIEW items
+        if (vstatus === 'corrected' || vstatus === 'not_found') {
+          reviewCount++;
+          var reviewBg = vstatus === 'not_found' ? 'rgba(255,80,80,0.15)' : 'rgba(255,183,77,0.15)';
+          var reviewIcon = vstatus === 'not_found' ? '\u274C' : '\u26A0\uFE0F';
+          var reviewDetail = vstatus === 'corrected'
+            ? 'AI corrected: <s style="color:#FF6B6B">' + (itm._original_pn || '') + '</s> \u2192 <strong style="color:#81C784">' + pn + '</strong>'
+            : 'Could not verify this part number in the drawing. <input type="text" data-review-idx="' + bi + '" value="' + pn + '" style="background:#1a1a2e;border:1px solid #FF6B6B;color:#fff;padding:2px 6px;border-radius:4px;width:180px;font-size:11px" onchange="lastScanBOM[' + bi + '].part_number=this.value">';
+          needsReviewHtml += '<div style="padding:6px 10px;margin-bottom:4px;background:' + reviewBg + ';border-radius:4px;font-size:12px">'
+            + reviewIcon + ' <strong>Item ' + num + '</strong>: ' + reviewDetail
+            + (notes ? ' <span style="color:#999;font-size:10px">(' + notes + ')</span>' : '')
+            + '</div>';
+        }
       }
       var totalQty = 0;
       for (var bi2 = 0; bi2 < lastScanBOM.length; bi2++) {
@@ -1427,7 +1475,8 @@ async function startScan(file) {
       }
       var tblHtml = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
         + '<thead><tr style="background:#6B0A0A;color:#fff;position:sticky;top:0">'
-        + '<th style="padding:6px 8px;text-align:left;width:40px">#</th>'
+        + '<th style="padding:6px 4px;text-align:center;width:28px">\u2714</th>'
+        + '<th style="padding:6px 8px;text-align:left;width:30px">#</th>'
         + '<th style="padding:6px 8px;text-align:left;width:130px">Part Number</th>'
         + '<th style="padding:6px 8px;text-align:left">Description</th>'
         + '<th style="padding:6px 8px;text-align:center;width:45px">Qty</th>'
@@ -1437,10 +1486,18 @@ async function startScan(file) {
         + '</tr></thead>'
         + '<tbody>' + rows
         + '<tr style="background:#6B0A0A">'
-        + '<td colspan="3" style="padding:6px 8px;text-align:right;color:#F4A9A8;font-weight:700">TOTAL LINE ITEMS:</td>'
+        + '<td colspan="4" style="padding:6px 8px;text-align:right;color:#F4A9A8;font-weight:700">TOTAL LINE ITEMS:</td>'
         + '<td style="padding:6px 8px;text-align:center;color:#fff;font-weight:700">' + totalQty + '</td>'
         + '<td colspan="3" style="padding:6px 8px;color:rgba(255,255,255,0.5);font-size:10px">' + lastScanBOM.length + ' unique parts</td>'
         + '</tr></tbody></table>';
+      // NEEDS_REVIEW section
+      if (reviewCount > 0) {
+        tblHtml += '<div style="margin-top:12px;padding:10px;background:rgba(255,183,77,0.08);border:1px solid rgba(255,183,77,0.3);border-radius:8px">'
+          + '<div style="font-weight:700;color:#FFB74D;margin-bottom:8px;font-size:13px">\u{1F50D} NEEDS REVIEW (' + reviewCount + ' items)</div>'
+          + '<div style="font-size:11px;color:#999;margin-bottom:8px">These part numbers were flagged during AI verification. Corrected values are shown. For "not found" items, you can type the correct PN directly.</div>'
+          + needsReviewHtml
+          + '</div>';
+      }
       bomPreview.innerHTML = tblHtml;
     } else if (data.quantities) {
       bomRow.style.display = 'block';
