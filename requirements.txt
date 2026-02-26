@@ -7,3 +7,4 @@ gunicorn==22.0.0
 pyjwt[crypto]==2.9.0
 requests==2.32.3
 flask-limiter==3.8.0
+pypdf==4.3.1
