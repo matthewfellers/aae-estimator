@@ -776,11 +776,39 @@ Rules:
             err_str = str(e)
             print(f"SCAN attempt {attempt+1} ({model}) ERROR: {err_str}")
 
-            # Rate limit — wait briefly and try fallback
+            # Rate limit handling — distinguish "too many tokens" from "too many requests"
             if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
-                if attempt < len(models_to_try) - 1:
+                # Check if the issue is input tokens exceeding per-minute limit
+                is_token_limit = "input tokens per minute" in err_str.lower()
+
+                if is_token_limit:
+                    # The PDF itself exceeds the account's token-per-minute rate limit.
+                    # Falling back to Haiku will NOT help — the PDF is too large for this tier.
+                    # Return a clear error telling the user to upgrade their Anthropic plan.
+                    print(f"SCAN: PDF exceeds token rate limit — Haiku fallback skipped (would give bad results)", flush=True)
+                    return {
+                        "error": "token_rate_limit",
+                        "error_message": "This PDF is too large for your current Anthropic API tier. "
+                                         "Your rate limit is 30,000 input tokens/minute but this document needs ~50,000+. "
+                                         "To fix: go to console.anthropic.com → Settings → Billing → load more credit "
+                                         "to increase your tier. $25 total gets you 80K tokens/min. "
+                                         "Or try scanning a smaller PDF (fewer pages).",
+                        "quantities": {}, "bom_line_items": [],
+                        "extraction_summary": {"confidence": 0, "scope_gap_flags": ["token_rate_limit"],
+                                               "review_flags": ["PDF exceeds API tier token limit. Upgrade at console.anthropic.com or scan fewer pages."]}
+                    }
+
+                # Regular rate limit (too many requests) — wait and retry with same model first
+                if attempt == 0:
+                    print(f"SCAN: Rate limit on {model}, waiting 30s then retrying same model...", flush=True)
+                    time.sleep(30)
+                    # Re-insert the same model for one more try before falling to Haiku
+                    models_to_try.insert(attempt + 1, model)
+                    continue
+                elif attempt < len(models_to_try) - 1:
+                    print(f"SCAN: Rate limit on {model} after retry, falling back to next model...", flush=True)
                     time.sleep(2)
-                    continue  # try next model
+                    continue
                 # All models failed with rate limit
                 return {
                     "error": "rate_limit",
@@ -948,7 +976,26 @@ Rules:
             print(f"BOM_CONVERT attempt {attempt+1} ({model}) ERROR: {err_str}")
 
             if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
-                if attempt < len(models_to_try) - 1:
+                is_token_limit = "input tokens per minute" in err_str.lower()
+
+                if is_token_limit:
+                    print(f"BOM_CONVERT: PDF exceeds token rate limit — skipping Haiku fallback", flush=True)
+                    return {
+                        "error": "token_rate_limit",
+                        "error_message": "This PDF is too large for your current Anthropic API tier. "
+                                         "Go to console.anthropic.com → Billing → load more credit to increase your tier, "
+                                         "or upload fewer BOMs per file.",
+                        "panels": [],
+                        "extraction_summary": {"confidence": 0, "total_panels_found": 0, "total_line_items": 0,
+                                               "review_flags": ["PDF exceeds API tier token limit."]}
+                    }
+
+                if attempt == 0:
+                    print(f"BOM_CONVERT: Rate limit on {model}, waiting 30s then retrying...", flush=True)
+                    time.sleep(30)
+                    models_to_try.insert(attempt + 1, model)
+                    continue
+                elif attempt < len(models_to_try) - 1:
                     time.sleep(2)
                     continue
                 return {
@@ -1903,16 +1950,19 @@ def bom_from_scan():
             result = resolve_vendor(pn, mfr, routing_rules)
             vendor = result["vendor"]
             itm["_resolved_vendor"] = vendor  # store for vendor sheet grouping
+            unit_cost = float(itm.get("aae_cost", 0) or 0)
+            qty_val   = int(itm.get("qty", 1) or 1)
             vals = [
-                itm.get("item_num", item_counter),
-                itm.get("part_number", ""),
-                itm.get("description", ""),
-                itm.get("qty", 1),
-                itm.get("unit", "ea"),
-                mfr,
-                vendor,
-                0.00,  # AAE cost — will pull from QB
-                itm.get("notes", "")
+                itm.get("item_num", item_counter),   # A: ITEM
+                itm.get("part_number", ""),            # B: PART NUMBER
+                itm.get("description", ""),            # C: DESCRIPTION
+                qty_val,                               # D: QTY
+                itm.get("unit", "ea"),                 # E: U/M
+                mfr,                                   # F: MANUFACTURER
+                vendor,                                # G: VENDOR
+                unit_cost,                             # H: UNIT COST
+                unit_cost * qty_val,                   # I: TOTAL COST
+                itm.get("notes", "")                   # J: NOTES
             ]
             for ci, val in enumerate(vals, 1):
                 c = ws.cell(row=row, column=ci, value=val)
@@ -1923,7 +1973,7 @@ def bom_from_scan():
                 elif ci == 7:  # Vendor — teal, centered
                     c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
                     c.alignment = Alignment(horizontal="center", vertical="center")
-                elif ci == 8:  # AAE Cost
+                elif ci in (8, 9):  # Unit Cost / Total Cost
                     c.alignment = Alignment(horizontal="right", vertical="center")
                     c.number_format = '"$"#,##0.00'
                     c.font = Font(name="Arial", size=9, color="AAAAAA", italic=True)
