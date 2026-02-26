@@ -2372,6 +2372,13 @@ async function exportBomPDF() {
 }
 
 async function exportBomExcel() {
+  // ── If we have AI-scanned BOM data, use the REAL scanned part numbers ──
+  // This prevents the "wonky BOM" issue where generic placeholders (ENCLOSURE,
+  // DIN-RAIL, BREAKER-1P) would appear instead of actual scanned parts.
+  if (lastScanBOM && lastScanBOM.length > 0) {
+    return downloadScanBOM();
+  }
+  // ── Fallback: no scan data available → use generic calculator BOM ──────
   if (!currentCalcResults || !currentBidData) { toast("Calculate a bid first","error"); return; }
   try {
     const res = await apiFetch("/api/bom_excel", {
