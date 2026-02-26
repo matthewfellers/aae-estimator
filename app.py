@@ -223,22 +223,195 @@ _DEFAULT_PART_OVERRIDES = {
 }
 
 _DEFAULT_PREFIX_RULES_RAW = [
+    # ── Schneider Electric / Square D ────────────────────────────────────────
     {"prefix": "QO",     "pattern": "^QO",                                       "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider breakers",  "priority": 20},
     {"prefix": "9070TF", "pattern": "^9070TF",                                   "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider xfmrs",     "priority": 60},
     {"prefix": "LV",     "pattern": "^LV\\d+",                                   "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider LV",        "priority": 20},
     {"prefix": "BGA/BJA/HJA/JJA/RJA", "pattern": "^(BGA|BJA|HJA|JJA|RJA)\\d+", "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider breakers",  "priority": 30},
+    {"prefix": "NQ",     "pattern": "^NQ\\d+",                                   "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Schneider panelboards","priority": 20},
+    {"prefix": "HOM",    "pattern": "^HOM",                                      "manufacturer": "Schneider Electric",                "vendor": "Graybar", "note": "Homeline breakers",   "priority": 20},
+
+    # ── Rockwell Automation / Allen-Bradley ──────────────────────────────────
+    # PLC / I/O modules
     {"prefix": "1769-",  "pattern": "^1769-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "CompactLogix I/O",    "priority": 50},
     {"prefix": "1756-",  "pattern": "^1756-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "ControlLogix",        "priority": 50},
     {"prefix": "1734-",  "pattern": "^1734-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "POINT I/O",           "priority": 50},
     {"prefix": "5034-",  "pattern": "^5034-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Flex 5000",           "priority": 50},
     {"prefix": "1794-",  "pattern": "^1794-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "FLEX I/O",            "priority": 50},
     {"prefix": "5094-",  "pattern": "^5094-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "FLEX 5000",           "priority": 50},
+    {"prefix": "5069-",  "pattern": "^5069-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Compact 5000",        "priority": 50},
+    {"prefix": "2080-",  "pattern": "^2080-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Micro800",            "priority": 50},
+    # Networking
     {"prefix": "1783-",  "pattern": "^1783-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Stratix switches",    "priority": 50},
-    {"prefix": "20F",    "pattern": "^20F",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex VFDs",      "priority": 30},
+    # VFDs / Drives
+    {"prefix": "20F",    "pattern": "^20F",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 753",       "priority": 30},
+    {"prefix": "20G",    "pattern": "^20G",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 755",       "priority": 30},
+    {"prefix": "20P",    "pattern": "^20P",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 700",       "priority": 30},
+    {"prefix": "20A",    "pattern": "^20A",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 70",        "priority": 30},
+    {"prefix": "20B",    "pattern": "^20B",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 700L",      "priority": 30},
+    {"prefix": "20D",    "pattern": "^20D",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 700S",      "priority": 30},
     {"prefix": "22B",    "pattern": "^22B",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 40",        "priority": 30},
+    {"prefix": "22C",    "pattern": "^22C",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 400",       "priority": 30},
+    {"prefix": "22D",    "pattern": "^22D",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 40P",       "priority": 30},
+    {"prefix": "25A",    "pattern": "^25A",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 523",       "priority": 30},
     {"prefix": "25B",    "pattern": "^25B",                                      "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex 525",       "priority": 30},
-    {"prefix": "140G-",  "pattern": "^140G-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Molded case breakers", "priority": 50},
+    # Drive accessories
+    {"prefix": "20-HIM", "pattern": "^20-HIM",                                   "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex HIM",       "priority": 60},
+    {"prefix": "20-750", "pattern": "^20-750",                                   "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex comm/opt",  "priority": 60},
+    {"prefix": "20-COMM","pattern": "^20-COMM",                                  "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PowerFlex comms",     "priority": 60},
+    # Breakers / Protection
+    {"prefix": "140G-",  "pattern": "^140G-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Molded case breakers","priority": 50},
+    {"prefix": "140M-",  "pattern": "^140M-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Motor protectors",    "priority": 50},
+    {"prefix": "140MG-", "pattern": "^140MG-",                                   "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Motor protectors",    "priority": 60},
+    {"prefix": "150-",   "pattern": "^150-",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "SMC soft starters",   "priority": 50},
+    # Terminal blocks / Wiring
     {"prefix": "1492-",  "pattern": "^1492-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Terminal blocks",     "priority": 50},
+    # Transformers
+    {"prefix": "1497-",  "pattern": "^1497-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Control transformers","priority": 50},
+    # Contactors / Relays
+    {"prefix": "100-",   "pattern": "^100-",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Contactors",          "priority": 50},
+    {"prefix": "100S-",  "pattern": "^100S-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Safety contactors",   "priority": 60},
+    {"prefix": "700-",   "pattern": "^700-",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Relays",              "priority": 50},
+    {"prefix": "700S-",  "pattern": "^700S-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Safety relays",       "priority": 60},
+    # Pushbuttons / Pilot devices
+    {"prefix": "800F",   "pattern": "^800F",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "22mm pilot devices",  "priority": 40},
+    {"prefix": "800T",   "pattern": "^800T",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "30mm pilot devices",  "priority": 40},
+    {"prefix": "800H",   "pattern": "^800H",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "NEMA pilot devices",  "priority": 40},
+    # HMI / Displays
+    {"prefix": "2711R-", "pattern": "^2711R-",                                   "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PanelView 800",       "priority": 50},
+    {"prefix": "2711P-", "pattern": "^2711P-",                                   "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "PanelView Plus",      "priority": 50},
+    {"prefix": "6189-",  "pattern": "^6189-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Industrial computers","priority": 50},
+    # Safety
+    {"prefix": "440R-",  "pattern": "^440R-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Safety relays",       "priority": 50},
+    {"prefix": "440G-",  "pattern": "^440G-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Safety interlocks",   "priority": 50},
+    {"prefix": "440N-",  "pattern": "^440N-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Safety switches",     "priority": 50},
+    # Overloads / Starters
+    {"prefix": "193-",   "pattern": "^193-",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Overload relays",     "priority": 50},
+    {"prefix": "509-",   "pattern": "^509-",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "NEMA starters",       "priority": 50},
+    # DIN Rail / Accessories
+    {"prefix": "199-",   "pattern": "^199-",                                     "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "DIN rail/accessories","priority": 50},
+    # Power supplies
+    {"prefix": "1606-",  "pattern": "^1606-",                                    "manufacturer": "Rockwell Automation / Allen-Bradley","vendor": "Rexel",   "note": "Power supplies",      "priority": 50},
+
+    # ── nVent HOFFMAN / Wiegmann ─────────────────────────────────────────────
+    {"prefix": "A##P##",    "pattern": "^A\\d+P\\d+",                            "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Enclosure panels",    "priority": 40},
+    {"prefix": "A##N##",    "pattern": "^A\\d+N\\d+",                            "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "NEMA enclosures",     "priority": 40},
+    {"prefix": "A##SA##",   "pattern": "^A\\d+SA\\d+",                           "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "NEMA 4X enclosures",  "priority": 40},
+    {"prefix": "A##H##",    "pattern": "^A\\d+H\\d+",                            "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Enclosures w/hinges", "priority": 40},
+    {"prefix": "DAH",       "pattern": "^DAH\\d+",                               "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Electric heaters",    "priority": 50},
+    {"prefix": "EF",        "pattern": "^EF\\d+",                                "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Filter fans",         "priority": 40},
+    {"prefix": "TF",        "pattern": "^TF\\d+",                                "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Top fans",            "priority": 40},
+    {"prefix": "T1##S",     "pattern": "^T1\\d+S",                               "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Thermostats",         "priority": 40},
+    {"prefix": "A-4AXF",    "pattern": "^A-4AXF",                                "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Axial fans",          "priority": 50},
+    {"prefix": "WF",        "pattern": "^WF\\d+",                                "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Wiegmann enclosures", "priority": 40},
+    {"prefix": "WA",        "pattern": "^WA\\d+",                                "manufacturer": "nVent HOFFMAN",                     "vendor": "Rexel",   "note": "Wiegmann accessories","priority": 40},
+
+    # ── Panduit ──────────────────────────────────────────────────────────────
+    {"prefix": "F#X#WH",    "pattern": "^F\\d+X\\d+WH",                          "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct (narrow)",  "priority": 50},
+    {"prefix": "H#X#WH",    "pattern": "^H\\d+X\\d+WH",                          "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct (hinged)",  "priority": 50},
+    {"prefix": "G#X#WH",    "pattern": "^G\\d+X\\d+WH",                          "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct (wide)",    "priority": 50},
+    {"prefix": "E#X#WH",    "pattern": "^E\\d+X\\d+WH",                          "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct",           "priority": 50},
+    {"prefix": "C#WH",      "pattern": "^C\\d+WH",                               "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct covers",    "priority": 50},
+    {"prefix": "DIN rail",  "pattern": "^(DIN15|DIN35)",                          "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "DIN rails",           "priority": 30},
+    {"prefix": "PLT/PLF",   "pattern": "^(PLT|PLF|PLM)\\d+",                     "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Cable ties",          "priority": 40},
+    {"prefix": "S#-E",      "pattern": "^S\\d+-E",                               "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Marker cards",        "priority": 40},
+    {"prefix": "PCMB-",     "pattern": "^PCMB-",                                 "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Marker books",        "priority": 40},
+
+    # ── Littelfuse / Bussmann / Mersen (Fuses & Protection) ──────────────────
+    {"prefix": "LP-CC",     "pattern": "^LP-CC",                                 "manufacturer": "Littelfuse",                        "vendor": "Rexel",   "note": "Low-Peak fuses",      "priority": 50},
+    {"prefix": "KLDR",      "pattern": "^KLDR",                                  "manufacturer": "Littelfuse",                        "vendor": "Rexel",   "note": "Class CC fuses",      "priority": 50},
+    {"prefix": "KLNR",      "pattern": "^KLNR",                                  "manufacturer": "Littelfuse",                        "vendor": "Rexel",   "note": "Class CC fuses",      "priority": 50},
+    {"prefix": "FLNR",      "pattern": "^FLNR",                                  "manufacturer": "Littelfuse",                        "vendor": "Rexel",   "note": "Class RK5 fuses",     "priority": 50},
+    {"prefix": "FLSR",      "pattern": "^FLSR",                                  "manufacturer": "Littelfuse",                        "vendor": "Rexel",   "note": "Class RK5 fuses",     "priority": 50},
+    {"prefix": "JTD-",      "pattern": "^JTD-?\\d+",                             "manufacturer": "Littelfuse",                        "vendor": "Rexel",   "note": "Class J fuses",       "priority": 50},
+    {"prefix": "JLLN",      "pattern": "^JLLN",                                  "manufacturer": "Littelfuse",                        "vendor": "Rexel",   "note": "Class T fuses",       "priority": 50},
+    {"prefix": "JLLS",      "pattern": "^JLLS",                                  "manufacturer": "Littelfuse",                        "vendor": "Rexel",   "note": "Class T fuses",       "priority": 50},
+    {"prefix": "FNM-",      "pattern": "^FNM-",                                  "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Midget fuses",        "priority": 50},
+    {"prefix": "FNQ-",      "pattern": "^FNQ-",                                  "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Midget fuses",        "priority": 50},
+    {"prefix": "FRN-R",     "pattern": "^FRN-?R",                                "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Class RK5 fuses",     "priority": 50},
+    {"prefix": "FRS-R",     "pattern": "^FRS-?R",                                "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Class RK5 fuses",     "priority": 50},
+    {"prefix": "LPJ-",      "pattern": "^LPJ-",                                  "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Class J fuses",       "priority": 50},
+    {"prefix": "LPN-RK",    "pattern": "^LPN-RK",                                "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Low-Peak fuses",      "priority": 50},
+    {"prefix": "LPS-RK",    "pattern": "^LPS-RK",                                "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Low-Peak fuses",      "priority": 50},
+    {"prefix": "NON-",      "pattern": "^NON-",                                  "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Class K5 fuses",      "priority": 50},
+    {"prefix": "NOS-",      "pattern": "^NOS-",                                  "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Class K5 fuses",      "priority": 50},
+    {"prefix": "ATQR",      "pattern": "^ATQR",                                  "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Midget fuses",        "priority": 40},
+    {"prefix": "TRS",       "pattern": "^TRS\\d+",                               "manufacturer": "Eaton Bussmann",                    "vendor": "AWC",     "note": "Class RK5 fuses",     "priority": 40},
+    {"prefix": "STP",       "pattern": "^STP\\d+",                               "manufacturer": "Mersen",                            "vendor": "Rexel",   "note": "Surge protection",    "priority": 40},
+    {"prefix": "STZ",       "pattern": "^STZ\\d+",                               "manufacturer": "Mersen",                            "vendor": "Rexel",   "note": "Surge protection",    "priority": 40},
+    {"prefix": "CEP-",      "pattern": "^CEP-",                                  "manufacturer": "Mersen",                            "vendor": "Rexel",   "note": "Fuse holders",        "priority": 40},
+
+    # ── Burndy (Compression Lugs) ────────────────────────────────────────────
+    {"prefix": "YA",        "pattern": "^YA\\d+",                                "manufacturer": "Burndy",                            "vendor": "Rexel",   "note": "Compression lugs",    "priority": 50},
+    {"prefix": "YAV",       "pattern": "^YAV\\d+",                               "manufacturer": "Burndy",                            "vendor": "Rexel",   "note": "Vibration-resistant",  "priority": 50},
+    {"prefix": "KA",        "pattern": "^KA\\d+",                                "manufacturer": "Burndy",                            "vendor": "Rexel",   "note": "Crimping lugs",       "priority": 50},
+    {"prefix": "HYLUG",     "pattern": "^HYLUG",                                 "manufacturer": "Burndy",                            "vendor": "Rexel",   "note": "Hylug terminals",     "priority": 50},
+
+    # ── TCI (Line Reactors / Filters) ────────────────────────────────────────
+    {"prefix": "KDRH",      "pattern": "^KDRH",                                  "manufacturer": "TCI",                               "vendor": "Rexel",   "note": "Line reactors",       "priority": 50},
+    {"prefix": "KDR",       "pattern": "^KDR\\d+",                               "manufacturer": "TCI",                               "vendor": "Rexel",   "note": "Drive reactors",      "priority": 40},
+    {"prefix": "KLR",       "pattern": "^KLR\\d+",                               "manufacturer": "TCI",                               "vendor": "Rexel",   "note": "Load reactors",       "priority": 40},
+    {"prefix": "HG",        "pattern": "^HG[LP]\\d+",                            "manufacturer": "TCI",                               "vendor": "Rexel",   "note": "Harmonic filters",    "priority": 40},
+
+    # ── Ilsco (Ground Bars / Lugs) ───────────────────────────────────────────
+    {"prefix": "2S",        "pattern": "^2S\\d+",                                "manufacturer": "Ilsco",                             "vendor": "Rexel",   "note": "Ground lugs",         "priority": 40},
+    {"prefix": "GBL",       "pattern": "^GBL",                                   "manufacturer": "Ilsco",                             "vendor": "Rexel",   "note": "Ground bars",         "priority": 40},
+    {"prefix": "PDB",       "pattern": "^PDB",                                   "manufacturer": "Ilsco",                             "vendor": "Rexel",   "note": "Power dist blocks",   "priority": 40},
+    {"prefix": "PDBS",      "pattern": "^PDBS",                                  "manufacturer": "Ilsco",                             "vendor": "Rexel",   "note": "Splicer blocks",      "priority": 50},
+
+    # ── Phoenix Contact ──────────────────────────────────────────────────────
+    {"prefix": "UT",        "pattern": "^UT\\d+",                                "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "Terminal blocks",     "priority": 40},
+    {"prefix": "UK",        "pattern": "^UK\\d+",                                "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "Terminal blocks",     "priority": 40},
+    {"prefix": "PT",        "pattern": "^PT\\s?\\d+",                            "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "Push-in terminals",   "priority": 40},
+    {"prefix": "DIN-",      "pattern": "^DIN-\\d+",                              "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "DIN terminal blocks", "priority": 40},
+    {"prefix": "QUINT",     "pattern": "^QUINT",                                 "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "Power supplies",      "priority": 50},
+    {"prefix": "TRIO",      "pattern": "^TRIO",                                  "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "Power supplies",      "priority": 50},
+    {"prefix": "STEP",      "pattern": "^STEP-",                                 "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "Power supplies",      "priority": 50},
+    {"prefix": "PLC-",      "pattern": "^PLC-",                                  "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "Relay modules",       "priority": 40},
+    {"prefix": "FL ",       "pattern": "^FL\\s",                                 "manufacturer": "Phoenix Contact",                   "vendor": "AWC",     "note": "Ethernet switches",   "priority": 40},
+
+    # ── Rittal ───────────────────────────────────────────────────────────────
+    {"prefix": "WM",        "pattern": "^WM\\d+",                                "manufacturer": "Rittal",                            "vendor": "AWC",     "note": "Enclosures",          "priority": 40},
+    {"prefix": "TS",        "pattern": "^TS\\s?\\d{4}",                          "manufacturer": "Rittal",                            "vendor": "AWC",     "note": "TS8 enclosures",      "priority": 40},
+    {"prefix": "AE",        "pattern": "^AE\\d{4}",                              "manufacturer": "Rittal",                            "vendor": "AWC",     "note": "AE enclosures",       "priority": 40},
+
+    # ── Hammond Power / Hammond Enclosures ───────────────────────────────────
+    {"prefix": "HPS",       "pattern": "^HPS\\w+",                               "manufacturer": "Hammond Power",                     "vendor": "Rexel",   "note": "Transformers",        "priority": 40},
+    {"prefix": "EJ",        "pattern": "^EJ\\d{4,}",                             "manufacturer": "Hammond Enclosures",                "vendor": "AWC",     "note": "Enclosures",          "priority": 40},
+
+    # ── Automation Direct ────────────────────────────────────────────────────
+    {"prefix": "GS",        "pattern": "^GS[123]-",                              "manufacturer": "Automation Direct",                 "vendor": "Automation Direct", "note": "VFDs (GS series)", "priority": 40},
+    {"prefix": "EA",        "pattern": "^EA[27]-",                               "manufacturer": "Automation Direct",                 "vendor": "Automation Direct", "note": "HMI (EA series)",  "priority": 40},
+    {"prefix": "BX-DM",     "pattern": "^BX-DM",                                 "manufacturer": "Automation Direct",                 "vendor": "Automation Direct", "note": "BRX PLC",          "priority": 50},
+    {"prefix": "P2-",       "pattern": "^P2-",                                   "manufacturer": "Automation Direct",                 "vendor": "Automation Direct", "note": "Productivity PLC", "priority": 40},
+
+    # ── Turck ────────────────────────────────────────────────────────────────
+    {"prefix": "NI",        "pattern": "^NI\\d+",                                "manufacturer": "Turck",                             "vendor": "A-Tech",  "note": "Prox sensors",        "priority": 40},
+    {"prefix": "BI",        "pattern": "^BI\\d+",                                "manufacturer": "Turck",                             "vendor": "A-Tech",  "note": "Prox sensors",        "priority": 40},
+    {"prefix": "TBEN-",     "pattern": "^TBEN-",                                 "manufacturer": "Turck",                             "vendor": "A-Tech",  "note": "Multiprotocol I/O",   "priority": 50},
+    {"prefix": "FCS-",      "pattern": "^FCS-",                                  "manufacturer": "Turck",                             "vendor": "A-Tech",  "note": "Flow sensors",        "priority": 40},
+
+    # ── Red Lion ─────────────────────────────────────────────────────────────
+    {"prefix": "G0#",       "pattern": "^G0\\d[SCR]\\d+",                        "manufacturer": "Red Lion Controls",                 "vendor": "A-Tech",  "note": "Graphite HMIs",       "priority": 50},
+    {"prefix": "G1#",       "pattern": "^G1\\d[SCR]\\d+",                        "manufacturer": "Red Lion Controls",                 "vendor": "A-Tech",  "note": "Graphite HMIs",       "priority": 50},
+    {"prefix": "CR1000/3000","pattern": "^CR[13]000",                            "manufacturer": "Red Lion Controls",                 "vendor": "A-Tech",  "note": "CR series HMIs",      "priority": 50},
+
+    # ── Mean Well (Power Supplies) ───────────────────────────────────────────
+    {"prefix": "MDR-",      "pattern": "^MDR-",                                  "manufacturer": "Mean Well",                         "vendor": "RS America","note": "DIN rail PSU",       "priority": 40},
+    {"prefix": "SDR-",      "pattern": "^SDR-",                                  "manufacturer": "Mean Well",                         "vendor": "RS America","note": "DIN rail PSU",       "priority": 40},
+    {"prefix": "NDR-",      "pattern": "^NDR-",                                  "manufacturer": "Mean Well",                         "vendor": "RS America","note": "DIN rail PSU",       "priority": 40},
+    {"prefix": "EDR-",      "pattern": "^EDR-",                                  "manufacturer": "Mean Well",                         "vendor": "RS America","note": "DIN rail PSU",       "priority": 40},
+    {"prefix": "DRP-",      "pattern": "^DRP-",                                  "manufacturer": "Mean Well",                         "vendor": "RS America","note": "DIN rail PSU",       "priority": 40},
+
+    # ── MOXA ─────────────────────────────────────────────────────────────────
+    {"prefix": "EDS-",      "pattern": "^EDS-",                                  "manufacturer": "MOXA",                              "vendor": "AWC",     "note": "Ethernet switches",   "priority": 50},
+    {"prefix": "MB31",      "pattern": "^MB31",                                  "manufacturer": "MOXA",                              "vendor": "AWC",     "note": "Serial converters",   "priority": 50},
+    {"prefix": "NPort",     "pattern": "^NPORT",                                 "manufacturer": "MOXA",                              "vendor": "AWC",     "note": "Serial servers",      "priority": 50},
+
+    # ── Weidmuller ───────────────────────────────────────────────────────────
+    {"prefix": "WDU",       "pattern": "^WDU",                                   "manufacturer": "Weidmuller",                        "vendor": "AWC",     "note": "Terminal blocks",     "priority": 40},
+    {"prefix": "WTR",       "pattern": "^WTR",                                   "manufacturer": "Weidmuller",                        "vendor": "AWC",     "note": "Relay modules",       "priority": 40},
+    {"prefix": "PRO ",      "pattern": "^PRO\\s",                                "manufacturer": "Weidmuller",                        "vendor": "AWC",     "note": "Power supplies",      "priority": 40},
 ]
 
 def _compile_default_prefix_rules():
@@ -403,6 +576,20 @@ _MFR_ALIASES = {
 }
 
 
+def strip_custom_prefix(part_number):
+    """Strip Devon/custom prefixes (DVN-, SPC-) to reveal the real manufacturer part number.
+    Returns the stripped part number for routing purposes.
+    """
+    pn = (part_number or "").strip()
+    # Strip DVN- prefix (Devon internal numbering)
+    if pn.upper().startswith("DVN-"):
+        pn = pn[4:]
+    # Strip SPC- prefix (Spare Parts Catalog numbering)
+    elif pn.upper().startswith("SPC-"):
+        pn = pn[4:]
+    return pn
+
+
 def resolve_vendor(part_number, manufacturer, rules=None):
     """Deterministic 4-tier vendor resolution.
 
@@ -424,7 +611,7 @@ def resolve_vendor(part_number, manufacturer, rules=None):
     # Normalize manufacturer via alias map before Tier 3 lookup
     mfr_lower = _MFR_ALIASES.get(mfr_lower, mfr_lower)
 
-    # Tier 1: Exact part number override
+    # Tier 1: Exact part number override (try original first, then stripped)
     if pn_upper and pn_upper in rules["part_overrides"]:
         match = rules["part_overrides"][pn_upper]
         return {
@@ -434,16 +621,30 @@ def resolve_vendor(part_number, manufacturer, rules=None):
             "matched_tier": "part_override",
         }
 
-    # Tier 2: Prefix / regex rules (sorted by priority desc, then longest prefix)
-    if pn_upper:
-        for rule in rules["prefix_rules"]:
-            if rule["pattern"].search(pn_upper):
-                return {
-                    "vendor": rule["vendor"],
-                    "manufacturer": rule.get("manufacturer") or manufacturer,
-                    "note": rule.get("note", ""),
-                    "matched_tier": "prefix_rule",
-                }
+    # Strip DVN-/SPC- prefixes for matching
+    pn_stripped = strip_custom_prefix(pn_upper).upper()
+
+    # Tier 1b: Check part overrides with stripped part number
+    if pn_stripped != pn_upper and pn_stripped in rules["part_overrides"]:
+        match = rules["part_overrides"][pn_stripped]
+        return {
+            "vendor": match["vendor"],
+            "manufacturer": match.get("manufacturer") or manufacturer,
+            "note": match.get("note", ""),
+            "matched_tier": "part_override",
+        }
+
+    # Tier 2: Prefix / regex rules (try stripped part number first, then original)
+    for pn_try in ([pn_stripped, pn_upper] if pn_stripped != pn_upper else [pn_upper]):
+        if pn_try:
+            for rule in rules["prefix_rules"]:
+                if rule["pattern"].search(pn_try):
+                    return {
+                        "vendor": rule["vendor"],
+                        "manufacturer": rule.get("manufacturer") or manufacturer,
+                        "note": rule.get("note", ""),
+                        "matched_tier": "prefix_rule",
+                    }
 
     # Tier 3: Manufacturer default
     if mfr_lower and mfr_lower in rules["vendor_defaults"]:
@@ -880,9 +1081,34 @@ Rules:
   If a BOM has 30 rows, return exactly 30 items. Count them.
 - Read the ACTUAL column headers for each table — do NOT assume column positions.
   Use your column_mapping to place each cell's value in the correct output field.
-- If you can confidently identify the manufacturer from the part number prefix or description, include it.
-  Examples: "1769-" prefix = Allen Bradley, "WM" prefix = Rittal, "2711R-" = Allen Bradley
-  If uncertain, leave manufacturer as empty string — do NOT guess.
+- MANUFACTURER IDENTIFICATION: Even if the document has no manufacturer column, you MUST identify the
+  manufacturer from the part number prefix/pattern and description. Use this reference:
+
+  ALLEN-BRADLEY / ROCKWELL: 1756-, 1769-, 1734-, 1794-, 5094-, 5069-, 5034-, 2080-, 1783-, 1492-,
+    1497-, 1606-, 20F, 20G, 20P, 22B, 22C, 25A, 25B, 20-HIM, 20-750, 20-COMM, 140G-, 140M-,
+    150-, 100-, 100S-, 193-, 199-, 509-, 700-, 700S-, 800F, 800T, 800H, 440R-, 440G-, 2711R-, 2711P-, 6189-
+  nVent HOFFMAN: A##P## (panels), A##N## (enclosures), DAH (heaters), EF/TF (fans), WF (Wiegmann), WA
+  PANDUIT: F#X#WH, H#X#WH, G#X#WH, C#WH (wire duct/covers), PLT/PLF (ties), S#-E (markers), PCMB-
+  LITTELFUSE: LP-CC, KLDR, KLNR, FLNR, FLSR, JTD, JLLN, JLLS
+  EATON BUSSMANN: FNM-, FNQ-, FRN-R, FRS-R, LPJ-, LPN-RK, LPS-RK, NON-, NOS-, ATQR, TRS
+  MERSEN: STP, STZ, CEP-
+  BURNDY: YA## (lugs), YAV, KA##, HYLUG
+  TCI: KDRH, KDR, KLR, HGL/HGP (reactors/filters)
+  ILSCO: 2S (ground lugs), GBL (ground bars), PDB/PDBS (power dist blocks)
+  PHOENIX CONTACT: UT, UK, PT (terminals), QUINT/TRIO/STEP (PSU), PLC- (relays), FL (switches)
+  SCHNEIDER ELECTRIC: QO, 9070TF, LV, HOM, NQ, BGA/BJA/HJA/JJA
+  RITTAL: WM, TS, AE (enclosures)
+  MEAN WELL: MDR-, SDR-, NDR-, EDR-, DRP-
+  AUTOMATION DIRECT: GS#-, EA#-, BX-DM, P2-
+  TURCK: NI##, BI## (sensors), TBEN- (I/O), FCS-
+  MOXA: EDS-, MB31, NPort
+  HAMMOND POWER: HPS (transformers)
+
+  IMPORTANT: Devon part numbers often have a "DVN-" prefix. Strip it to identify the real part.
+  Example: "DVN-1492-JG4" → real part is "1492-JG4" → Allen-Bradley terminal block.
+  Similarly, "SPC-" is a spare parts prefix — strip it too.
+
+  If you still cannot identify the manufacturer, leave it as empty string — do NOT guess.
 - Assign each line item a category from: Enclosure, Power, Motor Ctrl, Control Devices, PLC/Network,
   Terminals, Relays, HMI/Computer, Wiring, Markers, Other
   Use "Other" if the category is unclear.
@@ -1021,6 +1247,128 @@ Rules:
 
     return {"error": "all_models_failed", "panels": [],
             "extraction_summary": {"confidence": 0, "total_panels_found": 0, "total_line_items": 0}}
+
+
+def enrich_manufacturers(panels, routing_rules=None):
+    """Post-extraction manufacturer enrichment.
+
+    Two-pass approach:
+      Pass 1 (deterministic): Run every part number through the prefix rules engine.
+              This catches everything the regex patterns cover with zero API cost.
+      Pass 2 (AI): For remaining unknowns, batch them into a single cheap AI call
+              that identifies manufacturers from part numbers + descriptions.
+
+    Modifies panels in-place and returns the count of enriched items.
+    """
+    if routing_rules is None:
+        routing_rules = load_routing_rules()
+
+    enriched_count = 0
+    unknown_items = []  # items still missing manufacturer after Pass 1
+
+    # ── Pass 1: Deterministic prefix/override matching ───────────────────
+    for panel in panels:
+        for item in panel.get("line_items", []):
+            if item.get("manufacturer"):
+                continue  # already has manufacturer
+
+            pn = (item.get("part_number") or "").strip()
+            if not pn:
+                continue
+
+            # Try resolve_vendor which now handles DVN-/SPC- stripping
+            result = resolve_vendor(pn, "", routing_rules)
+            if result["matched_tier"] in ("part_override", "prefix_rule"):
+                item["manufacturer"] = result["manufacturer"]
+                enriched_count += 1
+            else:
+                unknown_items.append(item)
+
+    # ── Pass 2: AI enrichment for remaining unknowns ─────────────────────
+    if not unknown_items or not claude_client:
+        return enriched_count
+
+    # Build a compact list for the AI
+    unknown_list = []
+    for item in unknown_items:
+        pn = (item.get("part_number") or "").strip()
+        desc = (item.get("description") or "").strip()
+        if pn:
+            unknown_list.append({"pn": pn, "desc": desc})
+
+    if not unknown_list:
+        return enriched_count
+
+    # Limit batch size to avoid excessive cost (typically < 50 unknowns)
+    if len(unknown_list) > 100:
+        unknown_list = unknown_list[:100]
+
+    prompt = f"""You are an expert at identifying industrial electrical component manufacturers from part numbers.
+
+For each part number below, identify the manufacturer. If a part starts with "DVN-" or "SPC-", strip that prefix first.
+
+Common manufacturers in this industry:
+- Allen-Bradley/Rockwell: 1756-, 1769-, 1734-, 1794-, 5094-, 1492-, 1497-, 20F, 140G-, 150-, 100-, 700-, 800F/T/H, 199-, 2711-, etc.
+- nVent HOFFMAN: A##P##, A##N##, DAH, EF, TF, WF, WA
+- Panduit: F#X#WH, C#WH, H#X#WH, PLT, S#-E, PCMB-
+- Littelfuse: LP-CC, KLDR, KLNR, FLNR, FLSR, JTD, JLLN
+- Eaton Bussmann: FNM-, FNQ-, FRN-R, FRS-R, LPJ-, TRS, ATQR, NON-, NOS-
+- Mersen: STP, STZ, CEP-
+- Burndy: YA##, YAV, KA##, HYLUG
+- TCI: KDRH, KDR, KLR
+- Ilsco: 2S, GBL, PDB, PDBS
+- Phoenix Contact: UT, UK, PT, QUINT, TRIO, STEP-, PLC-, FL
+- Schneider Electric: QO, 9070TF, LV, HOM
+- Rittal: WM, TS, AE
+- Hammond Power: HPS
+- Mean Well: MDR-, SDR-, NDR-, DRP-
+- Automation Direct: GS#-, EA#-, BX-DM, P2-
+- Turck: NI##, BI##, TBEN-, FCS-
+- MOXA: EDS-, MB31, NPort
+- 3M: 5-8 digit numeric part numbers for electrical products
+- Essex Wire/Encore Wire: wire products starting with "EG WI"
+- Generic hardware (Hillman, etc.): OLW, OHN bolt/screw part numbers
+
+Return ONLY valid JSON — a list of objects with "pn" and "manufacturer" fields.
+If you cannot identify a manufacturer, use empty string "".
+
+Input parts:
+{json.dumps(unknown_list, indent=2)}"""
+
+    try:
+        response = claude_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4000,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        raw = response.content[0].text.strip()
+        raw = re.sub(r"^```json\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        ai_results = json.loads(raw)
+
+        # Build lookup: part_number -> manufacturer
+        ai_mfr_map = {}
+        for r in ai_results:
+            pn = (r.get("pn") or "").strip()
+            mfr = (r.get("manufacturer") or "").strip()
+            if pn and mfr:
+                ai_mfr_map[pn.upper()] = mfr
+
+        # Apply AI results to unknown items
+        for item in unknown_items:
+            pn = (item.get("part_number") or "").strip().upper()
+            if pn in ai_mfr_map:
+                item["manufacturer"] = ai_mfr_map[pn]
+                enriched_count += 1
+
+        print(f"MFR_ENRICH: AI identified {len(ai_mfr_map)} manufacturers from {len(unknown_list)} unknowns", flush=True)
+
+    except Exception as e:
+        print(f"MFR_ENRICH: AI enrichment failed (non-fatal): {e}", flush=True)
+
+    return enriched_count
 
 
 # ── PDF Quote Generator ────────────────────────────────────────────────────
@@ -3001,6 +3349,17 @@ def bom_convert():
 
     if file_errors:
         all_flags.extend(file_errors)
+
+    # ── Manufacturer Enrichment Pass ─────────────────────────────────────
+    # Run all extracted panels through prefix rules + AI to fill in missing manufacturers
+    if all_panels:
+        try:
+            enriched = enrich_manufacturers(all_panels)
+            if enriched > 0:
+                print(f"BOM_CONVERT: Enriched {enriched} manufacturer fields", flush=True)
+                all_flags.append(f"Auto-identified {enriched} manufacturer(s) from part numbers")
+        except Exception as e:
+            print(f"BOM_CONVERT: Manufacturer enrichment error (non-fatal): {e}", flush=True)
 
     total_items = sum(len(p.get("line_items", [])) for p in all_panels)
 
