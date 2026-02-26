@@ -1,19 +1,20 @@
 """
-AAE Scanner Pipeline v2.3 — Multi-Stage BOM Extraction
+AAE Scanner Pipeline v2.5 — Multi-Stage BOM Extraction
 =======================================================
 5-stage pipeline with hardened anti-hallucination measures:
   Stage 1: Detect BOM table structure & column headers (full PDF)
-  Stage 2: Extract every BOM row (BOM PAGE(S) ONLY — extracted via pypdf)
+  Stage 2: Extract every BOM row (BOM PAGE IMAGE — rendered via PyMuPDF)
   Stage 3: Derive estimator quantity buckets from BOM data
   Stage 4: Validate extraction (row count, column swap detection)
-  Stage 5: AI-powered part number cross-verification (BOM PAGE(S) ONLY)
+  Stage 5: AI-powered part number cross-verification (BOM PAGE IMAGE)
 
-v2.3 — THE FIX FOR 35-PAGE DRAWINGS:
-  After Stage 1 identifies which page(s) contain the BOM, we use pypdf to
-  physically extract ONLY those pages into a smaller PDF. Stages 2 and 5
-  then receive the small, focused PDF instead of the full 35-page drawing.
-  This eliminates the noise from schematics, wiring diagrams, etc. that was
-  causing Claude to hallucinate.
+v2.5 — HIGH-RES IMAGE RENDERING FIX:
+  After Stage 1 identifies BOM page(s), we:
+  1. Extract those pages with pypdf (smaller PDF)
+  2. Render to 300 DPI PNG image(s) with PyMuPDF
+  3. Send the IMAGE to Claude (Stages 2 & 5), not the PDF
+  This bypasses all PDF font/resource issues that caused hallucinated
+  part numbers in v2.3/v2.4. Claude sees exactly what a human would see.
 """
 
 import json, re, time, base64, io
@@ -109,6 +110,62 @@ def _extract_pages(pdf_b64, page_numbers):
         return pdf_b64, ""
 
 
+# ---------------------------------------------------------------------------
+# PDF-to-Image Rendering — THE v2.5 FIX for hallucinated part numbers
+# ---------------------------------------------------------------------------
+def _render_pdf_to_image(pdf_b64, dpi=300):
+    """Render each page of a PDF to a high-resolution PNG image.
+
+    This is the key fix: CAD-generated PDFs store BOM text as vector graphics,
+    not as searchable text. When pypdf extracts pages, font resources can be
+    lost, causing Claude to hallucinate characters. By rendering to a bitmap
+    image at 300 DPI, Claude sees EXACTLY what a human would see — no font
+    issues, no resource dependencies.
+
+    Args:
+        pdf_b64: Base64-encoded PDF (typically the extracted BOM page(s))
+        dpi: Rendering resolution (300 = high quality for small CAD text)
+
+    Returns:
+        List of base64-encoded PNG strings (one per page).
+        Empty list on failure (caller should fall back to PDF).
+    """
+    try:
+        import fitz  # PyMuPDF
+
+        pdf_bytes = base64.b64decode(pdf_b64)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+        images_b64 = []
+        zoom = dpi / 72  # PDF default resolution is 72 DPI
+        mat = fitz.Matrix(zoom, zoom)
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            png_bytes = pix.tobytes("png")
+            img_b64 = base64.b64encode(png_bytes).decode("ascii")
+            images_b64.append(img_b64)
+
+            print(f"  [Render] Page {page_num+1}: {pix.width}x{pix.height} @ {dpi}DPI, "
+                  f"{len(png_bytes)/1024:.0f}KB PNG", flush=True)
+
+        doc.close()
+
+        total_kb = sum(len(img) * 3 / 4 / 1024 for img in images_b64)
+        print(f"  [Render] Total: {len(images_b64)} page(s), "
+              f"{total_kb:.0f}KB image data", flush=True)
+        return images_b64
+
+    except ImportError:
+        print("  [Render] PyMuPDF (fitz) not installed — cannot render PDF to image",
+              flush=True)
+        return []
+    except Exception as exc:
+        print(f"  [Render] ERROR rendering PDF to image: {exc}", flush=True)
+        return []
+
+
 # System-level instruction that forces JSON-only output.
 _SYSTEM_JSON = (
     "You are a JSON-only API endpoint. Your ENTIRE response must be a single "
@@ -120,10 +177,46 @@ _SYSTEM_JSON = (
 
 
 def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514",
-                 thinking_budget=16000, max_tokens=16000, stage_label=""):
-    """Shared helper: call Claude with a PDF + text prompt, return parsed JSON."""
+                 thinking_budget=16000, max_tokens=16000, stage_label="",
+                 images_b64=None):
+    """Shared helper: call Claude with a PDF or images + text prompt, return parsed JSON.
+
+    If images_b64 is provided (list of base64 PNG strings), sends high-res images
+    instead of the PDF document. This bypasses PDF font/resource issues that cause
+    hallucinated part numbers in CAD-generated drawings.
+    """
 
     t0 = time.time()
+
+    # Build content blocks — images or PDF
+    if images_b64:
+        # v2.5: Send rendered PNG images instead of PDF
+        content_blocks = []
+        for img_b64 in images_b64:
+            content_blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": img_b64
+                }
+            })
+        content_blocks.append({"type": "text", "text": prompt})
+        print(f"  [{stage_label}] Sending {len(images_b64)} image(s) to Claude",
+              flush=True)
+    else:
+        # Original: send PDF document
+        content_blocks = [
+            {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": pdf_b64
+                }
+            },
+            {"type": "text", "text": prompt}
+        ]
 
     api_kwargs = {
         "model": model,
@@ -131,17 +224,7 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
         "system": _SYSTEM_JSON,
         "messages": [{
             "role": "user",
-            "content": [
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": pdf_b64
-                    }
-                },
-                {"type": "text", "text": prompt}
-            ]
+            "content": content_blocks
         }]
     }
 
@@ -290,10 +373,13 @@ def _stage1_detect_structure(claude_client, pdf_b64):
 # ---------------------------------------------------------------------------
 # Stage 2: Extract every BOM row — HARDENED ANTI-HALLUCINATION
 # ---------------------------------------------------------------------------
-def _stage2_extract_bom(claude_client, pdf_b64, structure):
+def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     """Pure transcription of every BOM row. This is the critical stage
     where accuracy matters most. Uses double-read strategy and explicit
-    anti-hallucination guardrails."""
+    anti-hallucination guardrails.
+
+    If bom_images is provided, sends high-res PNG images to Claude instead
+    of the PDF — this fixes hallucination from PDF font/resource issues."""
 
     col_map = structure.get("column_mapping", {})
     headers = structure.get("column_headers_left_to_right", [])
@@ -311,14 +397,22 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
 
     # Critical: tell Claude exactly what it's looking at
     bom_extracted = structure.get("_bom_extracted", False)
+    using_images = bom_images is not None and len(bom_images) > 0
     if bom_extracted:
-        # PDF has been pre-extracted to contain ONLY BOM pages
-        page_instruction = (
-            "THIS PDF CONTAINS ONLY THE BOM TABLE PAGE(S).\n"
-            "All schematics, wiring diagrams, and other pages have been removed.\n"
-            "Read EVERY page in this PDF — every page is part of the BOM table.\n"
-            "Do NOT skip any page. The entire document is your BOM source.\n\n"
-        )
+        if using_images:
+            page_instruction = (
+                "THIS IMAGE SHOWS ONLY THE BOM (BILL OF MATERIALS) TABLE.\n"
+                "All schematics, wiring diagrams, and other pages have been removed.\n"
+                "This is a high-resolution rendering of the BOM page from the drawing.\n"
+                "Read EVERY row visible in this image. The entire image is your BOM source.\n\n"
+            )
+        else:
+            page_instruction = (
+                "THIS PDF CONTAINS ONLY THE BOM TABLE PAGE(S).\n"
+                "All schematics, wiring diagrams, and other pages have been removed.\n"
+                "Read EVERY page in this PDF — every page is part of the BOM table.\n"
+                "Do NOT skip any page. The entire document is your BOM source.\n\n"
+            )
     elif bom_pages:
         page_instruction = (
             f"IMPORTANT: The BOM table is on page(s) {bom_pages} of this PDF.\n"
@@ -437,10 +531,11 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
     max_out = min(max_out, 128000)
 
     print(f"SCAN Stage 2: Extracting {total_rows} rows "
-          f"(thinking={think_budget}, max_tokens={max_out})", flush=True)
+          f"(thinking={think_budget}, max_tokens={max_out}, "
+          f"images={'yes' if bom_images else 'no'})", flush=True)
     result = _call_claude(claude_client, pdf_b64, prompt,
                           thinking_budget=think_budget, max_tokens=max_out,
-                          stage_label="Stage2")
+                          stage_label="Stage2", images_b64=bom_images)
 
     items = result.get("bom_line_items", [])
     rows_reported = result.get("rows_extracted", len(items))
@@ -618,7 +713,7 @@ def _stage4_validate(structure, bom_items):
 # ---------------------------------------------------------------------------
 def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
                                 bom_pages=None, bom_extracted=False,
-                                bom_raw_text=""):
+                                bom_raw_text="", bom_images=None):
     pn_lines = []
     for item in bom_items:
         pn = item.get("part_number", "")
@@ -627,13 +722,21 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
             pn_lines.append(f"  Item {item_num}: {pn}")
     pn_list = "\n".join(pn_lines)
 
+    using_images = bom_images is not None and len(bom_images) > 0
     page_note = ""
     if bom_extracted:
-        page_note = (
-            "This PDF contains ONLY the BOM table page(s) — all other pages "
-            "have been removed. Verify each part number against what you see "
-            "on every page of this PDF.\n\n"
-        )
+        if using_images:
+            page_note = (
+                "This high-resolution IMAGE shows ONLY the BOM table from the drawing — "
+                "all other pages have been removed. Verify each part number against "
+                "what you see in this image, character by character.\n\n"
+            )
+        else:
+            page_note = (
+                "This PDF contains ONLY the BOM table page(s) — all other pages "
+                "have been removed. Verify each part number against what you see "
+                "on every page of this PDF.\n\n"
+            )
     elif bom_pages:
         page_note = (
             f"The BOM table is on page(s) {bom_pages}. "
@@ -697,6 +800,7 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
         thinking_budget=20000,
         max_tokens=max(8000, len(bom_items) * 150),
         stage_label="Stage5",
+        images_b64=bom_images,
     )
 
     verifications = result.get("verifications", [])
@@ -881,6 +985,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         bom_pages = structure.get("pages_with_bom", [])
         bom_extracted = False
         bom_raw_text = ""
+        bom_images = None  # v2.5: rendered PNG images for Stages 2 & 5
         if bom_pages:
             bom_pdf_b64, bom_raw_text = _extract_pages(pdf_b64, bom_pages)
             # Check if extraction actually produced a different (smaller) PDF
@@ -890,9 +995,18 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 # the extracted PDF contains ONLY BOM pages starting at page 1
                 structure["_bom_extracted"] = True
                 structure["_bom_raw_text"] = bom_raw_text
-                print(f"SCAN [{filename}]: BOM pages extracted successfully, "
-                      f"Stage 2 & 5 will use BOM-only PDF "
+                print(f"SCAN [{filename}]: BOM pages extracted successfully "
                       f"(raw text: {len(bom_raw_text)} chars)", flush=True)
+
+                # v2.5: Render BOM pages to high-res PNG images
+                # This is THE FIX — bypasses all PDF font/resource issues
+                bom_images = _render_pdf_to_image(bom_pdf_b64, dpi=300)
+                if bom_images:
+                    print(f"SCAN [{filename}]: Rendered {len(bom_images)} BOM page(s) "
+                          f"to 300 DPI PNG — Stage 2 & 5 will use IMAGES", flush=True)
+                else:
+                    print(f"SCAN [{filename}]: Image rendering failed, "
+                          f"falling back to extracted PDF", flush=True)
         else:
             print(f"SCAN [{filename}]: No BOM pages identified, using full PDF", flush=True)
             bom_pdf_b64 = pdf_b64
@@ -900,17 +1014,20 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # == STAGE 2 ========================================================
         # Uses BOM-ONLY PDF (not full drawing)
         t2 = time.time()
+        input_mode = "IMAGES" if bom_images else ("BOM PDF" if bom_extracted else "full PDF")
         print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows "
-              f"(BOM pages only: {bom_pages}, extracted: {bom_extracted})", flush=True)
+              f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
         try:
-            extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure)
+            extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure,
+                                             bom_images=bom_images)
         except Exception as e2:
             err_str = str(e2)
             if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
                 print(f"SCAN: Rate limit on Stage 2, waiting 30s...", flush=True)
                 time.sleep(30)
                 try:
-                    extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure)
+                    extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure,
+                                                     bom_images=bom_images)
                 except Exception:
                     raise e2
             else:
@@ -930,12 +1047,12 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # Uses BOM-ONLY PDF (not full drawing) — same extracted pages as Stage 2
         t5 = time.time()
         print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification "
-              f"(BOM pages only: {bom_pages}, extracted: {bom_extracted})", flush=True)
+              f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
         try:
             verify_result = _stage5_verify_part_numbers(
                 claude_client, bom_pdf_b64, bom_items,
                 bom_pages=bom_pages, bom_extracted=bom_extracted,
-                bom_raw_text=bom_raw_text
+                bom_raw_text=bom_raw_text, bom_images=bom_images
             )
             total_tokens += verify_result.get("_output_tokens", 0)
             bom_items, correction_flags, verification_summary = _apply_corrections(
@@ -951,7 +1068,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     verify_result = _stage5_verify_part_numbers(
                         claude_client, bom_pdf_b64, bom_items,
                         bom_pages=bom_pages, bom_extracted=bom_extracted,
-                        bom_raw_text=bom_raw_text
+                        bom_raw_text=bom_raw_text, bom_images=bom_images
                     )
                     total_tokens += verify_result.get("_output_tokens", 0)
                     bom_items, correction_flags, verification_summary = _apply_corrections(
