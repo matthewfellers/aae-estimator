@@ -1254,12 +1254,13 @@ async function startScan(file) {
   flagsDiv.innerHTML = '';
 
   const steps = [
-    'Classifying drawing pages...',
-    'Extracting components from BOM...',
-    'Reading schematic reference designators...',
-    'Processing terminal schedule...',
-    'Calculating accessories and wire...',
-    'Aggregating results...'
+    'Stage 1: Detecting BOM table structure...',
+    'Stage 2: Extracting every row character-by-character...',
+    'Stage 2: Still reading — large tables take time...',
+    'Stage 4: Validating column mapping and row counts...',
+    'Stage 5: Cross-verifying part numbers against drawing...',
+    'Stage 3: Classifying components for estimation...',
+    'Assembling final results...'
   ];
   let si = 0;
   const interval = setInterval(() => {
