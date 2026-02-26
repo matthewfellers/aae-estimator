@@ -618,41 +618,56 @@ def scan_drawing(pdf_b64, filename="drawing.pdf"):
     prompt = """You are an expert electrical estimator at AAE Automation, a UL-508A certified industrial control panel shop. Analyze this electrical drawing set and extract ALL component quantities needed for a panel bid.
 
 ═══════════════════════════════════════════════════════════════════
-CRITICAL ACCURACY RULES — YOU MUST FOLLOW THESE OR THE BOM IS USELESS
+STEP 1 — READ THE BOM TABLE COLUMN HEADERS FIRST
 ═══════════════════════════════════════════════════════════════════
+Before extracting ANY data, read the column headers of the BOM table exactly as printed.
+Different customers use different column names. YOU must figure out which column is which.
 
-RULE 1 — NEVER INVENT PART NUMBERS:
-  Your #1 failure mode is HALLUCINATING part numbers that don't exist in the document.
-  If you cannot clearly read a part number, write "[UNREADABLE]" — do NOT guess or invent one.
-  A wrong part number is WORSE than no part number. We will order the wrong parts.
-  NEVER generate a part number from your training data. ONLY copy what is printed on the page.
+Map each column header to one of these data fields:
+  → part_number:  the catalog/part/model number (could be labeled: CATALOG, CATALOG NUMBER,
+                  CAT NO, CAT #, PART NUMBER, PART NO, PART #, P/N, PN, MODEL, MODEL NUMBER,
+                  MFR PART NO, ORDER NUMBER, ORDER NO, ITEM NUMBER, or similar)
+  → manufacturer: the maker/brand (could be labeled: MFG, MANUFACTURER, MFR, VENDOR, BRAND, MAKE, or similar)
+  → description:  what the part is (could be labeled: DESC, DESCRIPTION, ITEM DESCRIPTION, REMARKS, or similar)
+  → qty:          how many (could be labeled: QTY, QUANTITY, COUNT, EA, AMT, or similar)
+  → unit:         unit of measure (could be labeled: U/M, UOM, UNIT, EA, or similar)
+  → item_num:     row/item number (could be labeled: ITEM, ITEM NO, LINE, #, NO, or similar)
+  → notes:        additional info (could be labeled: NOTES, REMARKS, COMMENTS, REF, or similar)
 
-RULE 2 — RECOGNIZE ALL COLUMN HEADER VARIATIONS:
-  The part number column may be labeled ANY of these:
-    "Catalog", "Catalog Number", "Catalog No", "Catalog #", "Cat No", "Cat #",
-    "Part Number", "Part No", "Part #", "P/N", "PN", "Model", "Model Number",
-    "Item Number", "Item No", "Order Number", "Order No", "MFR Part No"
-  ALL of these mean THE SAME THING — they are the part/catalog number to extract.
-  Read the ACTUAL text in that column cell for each row. Do not make up values.
+Report your detected mapping in the "column_mapping" field of the output.
+CRITICAL: Do NOT guess the mapping. Read the actual header row printed on the drawing.
 
-RULE 3 — COPY EXACTLY, CHARACTER BY CHARACTER:
-  - Part numbers: copy the EXACT string. "1769-L33ER" not "1769-L33E" or "1769L33ER".
-  - Manufacturer names: copy EXACTLY. "C3CONTROLS" not "Euchner". "BUSSMANN" not "Bussman".
-    If drawing says "SCE" write "SCE". If it says "Phoenix Contact" write "Phoenix Contact".
-  - Quantities: copy the exact number from the QTY column. Do not estimate.
-  - Descriptions: copy the text from the description column as-is.
+═══════════════════════════════════════════════════════════════════
+STEP 2 — EXTRACT EACH ROW USING YOUR MAPPING
+═══════════════════════════════════════════════════════════════════
+For EACH row, read the cell value under each mapped column. Copy text CHARACTER BY CHARACTER.
 
-RULE 4 — CROSS-CHECK YOUR WORK:
-  After extracting, verify: does each part_number you wrote actually appear CHARACTER-FOR-CHARACTER
-  in the PDF? If you cannot point to where it appears on the page, you invented it — replace with "[UNREADABLE]".
+ABSOLUTE RULES:
+  1. NEVER INVENT OR HALLUCINATE DATA. If you cannot clearly read a cell, write "[UNREADABLE]".
+     A wrong part number means we order the wrong parts. "[UNREADABLE]" is always better than a guess.
+  2. DO NOT MIX UP COLUMNS. The manufacturer goes in "manufacturer", NOT in "description".
+     The description goes in "description", NOT in "notes". Use your column mapping from Step 1.
+  3. COPY EXACTLY — do not paraphrase, abbreviate, re-word, or "clean up" any value.
+     If the drawing says "SCE-484812WFLP", write exactly "SCE-484812WFLP".
+     If the drawing says "SAGINAW", write "SAGINAW" — do NOT change it to "SCE".
+  4. Every single row in the BOM table MUST appear in your output. Count them.
+  5. Flag ANYTHING uncertain in review_flags (row number + what's unclear).
 
-RULE 5 — FLAG UNCERTAINTY:
-  If ANY part number, manufacturer, or quantity is hard to read, add it to review_flags
-  with the row number and what you're uncertain about. Better to flag than to guess wrong.
+═══════════════════════════════════════════════════════════════════
 
 Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object.
 
 {
+  "column_mapping": {
+    "detected_headers": ["ITEM", "QTY", "CATALOG", "MFG", "DESC"],
+    "mapping": {
+      "ITEM": "item_num",
+      "QTY": "qty",
+      "CATALOG": "part_number",
+      "MFG": "manufacturer",
+      "DESC": "description"
+    }
+  },
   "extraction_summary": {
     "drawing_types_found": ["BOM", "SCHEMATIC", "TERMINAL_SCHEDULE", "IO_LIST"],
     "confidence": 0.0,
@@ -681,11 +696,11 @@ Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object
   "bom_line_items": [
     {
       "item_num": 1,
-      "part_number": "<EXACT catalog/part number from drawing — NEVER invent>",
-      "description": "<EXACT description from drawing>",
+      "part_number": "<value from part_number column — NEVER invent>",
+      "description": "<value from description column — NEVER put manufacturer here>",
       "qty": 1,
       "unit": "ea",
-      "manufacturer": "<EXACT manufacturer from drawing>",
+      "manufacturer": "<value from manufacturer column — NEVER put description here>",
       "category": "Other",
       "notes": ""
     }
@@ -701,13 +716,11 @@ Rules:
 - bom_line_items: extract EVERY SINGLE line item from any BOM table found in the drawings
   - THIS IS THE MOST IMPORTANT PART OF YOUR JOB. The BOM table is the primary deliverable.
   - Do NOT skip or omit ANY rows. Every row in the BOM table MUST appear in bom_line_items.
-  - If the BOM table has 36 rows, you MUST return exactly 36 items. Count them carefully.
-  - TRANSCRIBE part numbers, descriptions, quantities, and manufacturers EXACTLY as printed.
-    Do NOT substitute one manufacturer for another. Do NOT modify part numbers.
-  - The "Catalog" or "Catalog Number" column IS the part number — read it character by character.
-  - Common manufacturers you may see: SCE, Rittal, Phoenix Contact, Allen Bradley, Rockwell,
-    Siemens, Square D, Schneider, Hammond, Panduit, Hoffman, Eaton, ABB, Turck, Weidmuller,
-    Automation Direct, Banner, C3Controls, Bussmann, Mersen — copy whichever actually appears.
+  - If the BOM table has 48 rows, you MUST return exactly 48 items. Count them carefully.
+  - Use your column mapping from Step 1 to put each value in the CORRECT field.
+  - If a BOM table has no manufacturer column, leave manufacturer as "" — do NOT guess.
+  - If a BOM table has no description column but has a part number, leave description as the
+    part number and note "no description column" in notes.
   - Use these categories: Enclosure, Power, Motor Ctrl, Control Devices, PLC/Network, Terminals, Relays, Wiring, HMI/Computer, Markers, Other
   - If no BOM table found, return empty array []
   - Set qty to numeric value (not "A/R" — use 1 for A/R items and note "A/R" in notes field)
@@ -866,15 +879,26 @@ def convert_bom_pdf(pdf_b64, filename="bom.pdf"):
 Analyze this PDF and extract ALL panels/BOMs and their line items.
 
 ═══════════════════════════════════════════════════════════════════
-CRITICAL: NEVER INVENT OR HALLUCINATE PART NUMBERS
+STEP 1 — READ COLUMN HEADERS FIRST, THEN MAP THEM
 ═══════════════════════════════════════════════════════════════════
-- Copy part numbers CHARACTER BY CHARACTER from the PDF. Do NOT guess or generate them.
-- If you cannot read a part number clearly, write "[UNREADABLE]" instead of inventing one.
-- The part number column may be labeled "Catalog", "Catalog Number", "Cat No", "Part Number",
-  "Item Name/Num", "P/N", "Model", or similar — they ALL mean the same thing.
-- Copy manufacturer names EXACTLY as printed. Do NOT substitute one for another.
-- After extracting, mentally verify: does each part_number actually appear on the PDF page?
-  If not, you hallucinated it — replace with "[UNREADABLE]" and flag in review_flags.
+Before extracting data, read each BOM table's column headers exactly as printed.
+Different documents use different column names. YOU must figure out which column is which.
+
+Map each column header to a data field:
+  → part_number:  the catalog/part/model number (could be: CATALOG, CAT NO, PART NUMBER,
+                  P/N, ITEM NAME/NUM, MODEL, MFR PART NO, ORDER NUMBER, etc.)
+  → manufacturer: the maker/brand (could be: MFG, MANUFACTURER, MFR, VENDOR, BRAND, MAKE, etc.)
+  → description:  what the part is (could be: DESC, DESCRIPTION, ITEM DESCRIPTION, REMARKS, etc.)
+  → qty:          how many (could be: QTY, QUANTITY, COUNT, EA, AMT, etc.)
+  → unit:         unit of measure (could be: U/M, UOM, UNIT, etc.)
+  → cost:         per-unit price (could be: COST, PRICE, UNIT COST, UNIT PRICE, RATE, etc.)
+
+CRITICAL RULES:
+  1. NEVER INVENT OR HALLUCINATE DATA. Copy text CHARACTER BY CHARACTER from the PDF.
+     If you cannot read a cell, write "[UNREADABLE]". A wrong part number is worse than none.
+  2. DO NOT MIX UP COLUMNS. Use your header mapping. Manufacturer goes in "manufacturer",
+     description goes in "description". Do NOT swap them.
+  3. COPY EXACTLY — do not paraphrase, abbreviate, or "fix" any value.
 
 Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object.
 
@@ -884,6 +908,10 @@ Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object
       "panel_name": "DVN-100HP-VFD",
       "document_type": "quickbooks_bom",
       "purchase_description": "Devon 100HP VFD, Rev. 1",
+      "column_mapping": {
+        "detected_headers": ["Item Name/Num", "Description", "Type", "Cost", "Qty", "U/M", "Total"],
+        "mapping": {"Item Name/Num": "part_number", "Description": "description", "Qty": "qty", "U/M": "unit", "Cost": "cost"}
+      },
       "line_items": [
         {
           "item_num": 1,
@@ -917,14 +945,8 @@ Rules:
 - A single PDF may contain MANY BOMs back-to-back (each starts with its own "Item Name/Number" header section). Extract ALL of them.
 - THIS IS CRITICAL: Extract EVERY SINGLE line item from EVERY BOM table. Do NOT skip or omit ANY rows.
   If a BOM has 30 rows, return exactly 30 items. Count them.
-- The line items table typically has columns: Item Name/Num | Description | Type | Cost | Qty | U/M | Total
-  - Map the "Item Name/Num" column → part_number
-  - Map "Description" → description (full text, do not truncate)
-  - Map "Qty" → qty (numeric, integer)
-  - Map "U/M" → unit (ea, ft, roll, etc.)
-  - Map "Cost" → cost (per-unit dollar amount as float)
-  - The "Type" column (Non-Inv Part, Inv Part, etc.) can be ignored
-  - The "Total" column can be ignored (it is qty × cost)
+- Read the ACTUAL column headers for each table — do NOT assume column positions.
+  Use your column_mapping to place each cell's value in the correct output field.
 - If you can confidently identify the manufacturer from the part number prefix or description, include it.
   Examples: "1769-" prefix = Allen Bradley, "WM" prefix = Rittal, "2711R-" = Allen Bradley
   If uncertain, leave manufacturer as empty string — do NOT guess.
