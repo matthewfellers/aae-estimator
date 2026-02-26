@@ -289,8 +289,17 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
             mapping_lines.append(f'  - Column "{v}" -> field "{k}"')
     mapping_info = "\n".join(mapping_lines)
 
-    # Critical: tell Claude exactly which page(s) to look at
-    if bom_pages:
+    # Critical: tell Claude exactly what it's looking at
+    bom_extracted = structure.get("_bom_extracted", False)
+    if bom_extracted:
+        # PDF has been pre-extracted to contain ONLY BOM pages
+        page_instruction = (
+            "THIS PDF CONTAINS ONLY THE BOM TABLE PAGE(S).\n"
+            "All schematics, wiring diagrams, and other pages have been removed.\n"
+            "Read EVERY page in this PDF — every page is part of the BOM table.\n"
+            "Do NOT skip any page. The entire document is your BOM source.\n\n"
+        )
+    elif bom_pages:
         page_instruction = (
             f"IMPORTANT: The BOM table is on page(s) {bom_pages} of this PDF.\n"
             f"IGNORE ALL OTHER PAGES. Only read the BOM table on page(s) {bom_pages}.\n"
@@ -555,7 +564,8 @@ def _stage4_validate(structure, bom_items):
 # ---------------------------------------------------------------------------
 # Stage 5: AI-powered part number verification
 # ---------------------------------------------------------------------------
-def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items, bom_pages=None):
+def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
+                                bom_pages=None, bom_extracted=False):
     pn_lines = []
     for item in bom_items:
         pn = item.get("part_number", "")
@@ -565,7 +575,13 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items, bom_pages=Non
     pn_list = "\n".join(pn_lines)
 
     page_note = ""
-    if bom_pages:
+    if bom_extracted:
+        page_note = (
+            "This PDF contains ONLY the BOM table page(s) — all other pages "
+            "have been removed. Verify each part number against what you see "
+            "on every page of this PDF.\n\n"
+        )
+    elif bom_pages:
         page_note = (
             f"The BOM table is on page(s) {bom_pages}. "
             "Look ONLY at the BOM table on those pages to verify — "
@@ -793,8 +809,17 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # ONLY the BOM page(s) into a small PDF. This eliminates the noise from
         # schematics, wiring diagrams, etc. that was causing hallucination.
         bom_pages = structure.get("pages_with_bom", [])
+        bom_extracted = False
         if bom_pages:
             bom_pdf_b64 = _extract_pages(pdf_b64, bom_pages)
+            # Check if extraction actually produced a different (smaller) PDF
+            bom_extracted = (bom_pdf_b64 != pdf_b64)
+            if bom_extracted:
+                # Signal to Stage 2 that page numbers no longer apply —
+                # the extracted PDF contains ONLY BOM pages starting at page 1
+                structure["_bom_extracted"] = True
+                print(f"SCAN [{filename}]: BOM pages extracted successfully, "
+                      f"Stage 2 & 5 will use BOM-only PDF", flush=True)
         else:
             print(f"SCAN [{filename}]: No BOM pages identified, using full PDF", flush=True)
             bom_pdf_b64 = pdf_b64
@@ -803,7 +828,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # Uses BOM-ONLY PDF (not full drawing)
         t2 = time.time()
         print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows "
-              f"(BOM pages only: {bom_pages})", flush=True)
+              f"(BOM pages only: {bom_pages}, extracted: {bom_extracted})", flush=True)
         try:
             extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure)
         except Exception as e2:
@@ -832,10 +857,11 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # Uses BOM-ONLY PDF (not full drawing) — same extracted pages as Stage 2
         t5 = time.time()
         print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification "
-              f"(BOM pages only: {bom_pages})", flush=True)
+              f"(BOM pages only: {bom_pages}, extracted: {bom_extracted})", flush=True)
         try:
             verify_result = _stage5_verify_part_numbers(
-                claude_client, bom_pdf_b64, bom_items, bom_pages=bom_pages
+                claude_client, bom_pdf_b64, bom_items,
+                bom_pages=bom_pages, bom_extracted=bom_extracted
             )
             total_tokens += verify_result.get("_output_tokens", 0)
             bom_items, correction_flags, verification_summary = _apply_corrections(
@@ -849,7 +875,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 time.sleep(30)
                 try:
                     verify_result = _stage5_verify_part_numbers(
-                        claude_client, bom_pdf_b64, bom_items, bom_pages=bom_pages
+                        claude_client, bom_pdf_b64, bom_items,
+                        bom_pages=bom_pages, bom_extracted=bom_extracted
                     )
                     total_tokens += verify_result.get("_output_tokens", 0)
                     bom_items, correction_flags, verification_summary = _apply_corrections(
