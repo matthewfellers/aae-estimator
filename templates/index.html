@@ -1637,12 +1637,14 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
   // Handle invite / password-recovery links.
   // Parse the URL hash manually — avoids supabase-js auto-processing which
   // can throw uncaught errors on expired/malformed tokens.
+  let _isInviteFlow = false;   // guards restoreSession from racing the invite handler
   try {
     const _hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
     const _tokenType  = _hashParams.get('type');
     const _accessTok  = _hashParams.get('access_token');
     const _refreshTok = _hashParams.get('refresh_token');
     if ((_tokenType === 'invite' || _tokenType === 'recovery') && _accessTok) {
+      _isInviteFlow = true;    // set BEFORE any async work so restoreSession sees it
       // Clean token from URL immediately so refresh doesn't re-trigger
       window.history.replaceState(null, '', window.location.pathname);
       // Exchange token for a live session
@@ -1656,6 +1658,7 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
         })
         .catch(err => {
           console.warn('Invite token error:', err.message);
+          _isInviteFlow = false;  // allow normal login flow on error
           // Token expired — just show normal login with a hint
           document.getElementById('login_err').textContent = 'Invite link expired. Please request a new one.';
           document.getElementById('login_err').style.display = 'block';
@@ -1668,6 +1671,12 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
   // Auto-restore session on page load (persisted from previous login)
   // This skips the login screen if the session + MFA are still valid
   (async function restoreSession() {
+    // If we're processing an invite / recovery link, don't auto-login —
+    // the user must set their password first.
+    if (_isInviteFlow) {
+      console.log("[auth] Invite/recovery flow detected — skipping session restore");
+      return;
+    }
     try {
       const { data: { session } } = await _sbClient.auth.getSession();
       if (session && session.access_token) {
