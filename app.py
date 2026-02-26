@@ -4,6 +4,7 @@ from anthropic import Anthropic
 from supabase import create_client
 import io
 from datetime import datetime
+from scanner_pipeline import scan_drawing as _pipeline_scan_drawing
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -613,9 +614,8 @@ def calculate_bid(data):
     }
 
 # ── AI Drawing Scan ────────────────────────────────────────────────────────
-def scan_drawing(pdf_b64, filename="drawing.pdf"):
-    # Stage 1 + 2 combined: classify and extract in one smart call
-    prompt = """You are an expert electrical estimator at AAE Automation, a UL-508A certified industrial control panel shop. Analyze this electrical drawing set and extract ALL component quantities needed for a panel bid.
+_OLD_PROMPT_DEAD_CODE = """placeholder"""
+_DEAD_TRIPLE_QUOTE_OPEN = """
 
 ═══════════════════════════════════════════════════════════════════
 STEP 1 — READ THE BOM TABLE COLUMN HEADERS
@@ -731,166 +731,12 @@ Rules:
   - Set total_bom_rows_on_drawing to how many rows you count in the BOM table
 - Flag anything uncertain or hard to read in review_flags
 - confidence: 0.0 to 1.0"""
+# (old single-prompt scan_drawing removed -- see scanner_pipeline.py for v2 multi-stage pipeline)
 
-    import time
-
-    # Try primary model first, fall back to haiku on rate limit
-    models_to_try = ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"]
-
-    for attempt, model in enumerate(models_to_try):
-        try:
-            # Build API call kwargs — enable extended thinking for Sonnet
-            # Extended thinking lets the model carefully reason through the table
-            # structure before generating the JSON, dramatically improving accuracy.
-            api_kwargs = {
-                "model": model,
-                "max_tokens": 40000,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": pdf_b64
-                            }
-                        },
-                        {"type": "text", "text": prompt}
-                    ]
-                }]
-            }
-
-            if "sonnet" in model:
-                # Extended thinking for Sonnet — gives the model time to carefully
-                # read column headers, map them, and extract each cell accurately.
-                # Temperature cannot be set with extended thinking.
-                api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 16000}
-                print(f"SCAN: Using extended thinking with {model} (16K thinking budget)", flush=True)
-            else:
-                # Haiku fallback — no extended thinking, use temperature=0
-                api_kwargs["temperature"] = 0
-
-            with claude_client.messages.stream(**api_kwargs) as stream:
-                response = stream.get_final_message()
-
-            # Check if response was truncated due to token limit
-            stop_reason = response.stop_reason
-            tokens_used = response.usage.output_tokens if response.usage else 0
-            if stop_reason == "max_tokens":
-                print(f"SCAN WARNING: Response truncated at {tokens_used} output tokens (max_tokens hit). BOM may be incomplete.", flush=True)
-
-            # Extract the text block (skip thinking blocks when extended thinking is used)
-            raw = ""
-            for block in response.content:
-                if block.type == "text":
-                    raw = block.text.strip()
-                    break
-            if not raw:
-                # Fallback — grab first block if no text block found
-                raw = response.content[0].text.strip()
-            # Strip markdown if model wrapped it anyway
-            raw = re.sub(r"^```json\s*", "", raw)
-            raw = re.sub(r"\s*```$", "", raw)
-
-            # Attempt 1: clean parse
-            try:
-                result = json.loads(raw)
-            except json.JSONDecodeError:
-                # Attempt 2: response was truncated — find the last complete
-                # top-level key and close the JSON gracefully.
-                # This happens when max_tokens is hit mid-response on large BOMs.
-                print(f"SCAN: JSON truncated, attempting repair (len={len(raw)})", flush=True)
-                # Find the last complete bom_line_item entry
-                last_brace = raw.rfind('}')
-                if last_brace > 0:
-                    # Trim to last complete object and close the structure
-                    trimmed = raw[:last_brace+1]
-                    # Count unclosed braces/brackets and close them
-                    opens_b  = trimmed.count('{') - trimmed.count('}')
-                    opens_sq = trimmed.count('[') - trimmed.count(']')
-                    trimmed += ']' * opens_sq + '}' * opens_b
-                    try:
-                        result = json.loads(trimmed)
-                        result["_truncated"] = True
-                        print("SCAN: JSON repair succeeded", flush=True)
-                    except json.JSONDecodeError as e2:
-                        raise json.JSONDecodeError(
-                            f"JSON parse failed after repair attempt: {e2.msg} (original len={len(raw)})",
-                            e2.doc, e2.pos
-                        )
-                else:
-                    raise
-
-            result["_model_used"] = model
-            result["_stop_reason"] = stop_reason
-            result["_output_tokens"] = tokens_used
-            if stop_reason == "max_tokens":
-                result["_truncated"] = True
-                if "extraction_summary" not in result:
-                    result["extraction_summary"] = {}
-                if "review_flags" not in result.get("extraction_summary", {}):
-                    result["extraction_summary"]["review_flags"] = []
-                result["extraction_summary"]["review_flags"].append(
-                    "WARNING: Response was truncated — some BOM items may be missing. Re-scan if item count looks low."
-                )
-            return result
-
-        except Exception as e:
-            err_str = str(e)
-            print(f"SCAN attempt {attempt+1} ({model}) ERROR: {err_str}")
-
-            # Rate limit handling — distinguish "too many tokens" from "too many requests"
-            if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
-                # Check if the issue is input tokens exceeding per-minute limit
-                is_token_limit = "input tokens per minute" in err_str.lower()
-
-                if is_token_limit:
-                    # The PDF itself exceeds the account's token-per-minute rate limit.
-                    # Falling back to Haiku will NOT help — the PDF is too large for this tier.
-                    # Return a clear error telling the user to upgrade their Anthropic plan.
-                    print(f"SCAN: PDF exceeds token rate limit — Haiku fallback skipped (would give bad results)", flush=True)
-                    return {
-                        "error": "token_rate_limit",
-                        "error_message": "This PDF is too large for your current Anthropic API tier. "
-                                         "Your rate limit is 30,000 input tokens/minute but this document needs ~50,000+. "
-                                         "To fix: go to console.anthropic.com → Settings → Billing → load more credit "
-                                         "to increase your tier. $25 total gets you 80K tokens/min. "
-                                         "Or try scanning a smaller PDF (fewer pages).",
-                        "quantities": {}, "bom_line_items": [],
-                        "extraction_summary": {"confidence": 0, "scope_gap_flags": ["token_rate_limit"],
-                                               "review_flags": ["PDF exceeds API tier token limit. Upgrade at console.anthropic.com or scan fewer pages."]}
-                    }
-
-                # Regular rate limit (too many requests) — wait and retry with same model first
-                if attempt == 0:
-                    print(f"SCAN: Rate limit on {model}, waiting 30s then retrying same model...", flush=True)
-                    time.sleep(30)
-                    # Re-insert the same model for one more try before falling to Haiku
-                    models_to_try.insert(attempt + 1, model)
-                    continue
-                elif attempt < len(models_to_try) - 1:
-                    print(f"SCAN: Rate limit on {model} after retry, falling back to next model...", flush=True)
-                    time.sleep(2)
-                    continue
-                # All models failed with rate limit
-                return {
-                    "error": "rate_limit",
-                    "error_message": "API rate limit reached. Please wait 60 seconds and try again, or check your Anthropic account usage at console.anthropic.com.",
-                    "quantities": {}, "bom_line_items": [],
-                    "extraction_summary": {"confidence": 0, "scope_gap_flags": ["rate_limit"]}
-                }
-
-            # Other error — return detail
-            import traceback
-            err_detail = traceback.format_exc()
-            print("SCAN ERROR DETAIL:", err_detail)
-            return {"error": str(e), "error_detail": err_detail,
-                    "quantities": {}, "bom_line_items": [],
-                    "extraction_summary": {"confidence": 0}}
-
-    return {"error": "all_models_failed", "quantities": {}, "bom_line_items": [],
-            "extraction_summary": {"confidence": 0}}
+def scan_drawing(pdf_b64, filename="drawing.pdf"):
+    """Thin wrapper that delegates to the multi-stage pipeline in scanner_pipeline.py.
+    Passes the module-level claude_client so the pipeline can make API calls."""
+    return _pipeline_scan_drawing(claude_client, pdf_b64, filename)
 
 
 # ── BOM Converter — AI Parser for QuickBooks BOMs & Vendor Quotes ─────────
