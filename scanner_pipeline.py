@@ -1,22 +1,24 @@
 """
-AAE Scanner Pipeline v2.1 — Multi-Stage BOM Extraction
+AAE Scanner Pipeline v2.2 — Multi-Stage BOM Extraction
 =======================================================
-Replaces the old single-prompt scan_drawing() with a focused 5-stage pipeline:
+5-stage pipeline with hardened anti-hallucination measures:
   Stage 1: Detect BOM table structure & column headers
-  Stage 2: Extract every BOM row (pure transcription)
+  Stage 2: Extract every BOM row (pure transcription, double-read)
   Stage 3: Derive estimator quantity buckets from BOM data
   Stage 4: Validate extraction (row count, column swap detection)
   Stage 5: AI-powered part number cross-verification
 
-This eliminates hallucination by separating table-reading from interpretation.
+v2.2 changes:
+  - Stronger Stage 2 prompts (double-read, confusable chars, segment checks)
+  - _verification_status tagged on every BOM item for UI display
+  - verification_summary included in response for frontend
+  - Improved JSON extraction robustness
 """
 
 import json, re, time
 from collections import Counter
 
 # System-level instruction that forces JSON-only output.
-# This prevents Claude from adding preamble text ("Here is the analysis...")
-# which caused JSON parse failures in v2.0.
 _SYSTEM_JSON = (
     "You are a JSON-only API endpoint. Your ENTIRE response must be a single "
     "valid JSON object. Do NOT include any text before or after the JSON. "
@@ -28,8 +30,7 @@ _SYSTEM_JSON = (
 
 def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514",
                  thinking_budget=16000, max_tokens=16000, stage_label=""):
-    """Shared helper: call Claude with a PDF + text prompt, return parsed JSON.
-    Handles extended thinking, robust JSON extraction, markdown stripping."""
+    """Shared helper: call Claude with a PDF + text prompt, return parsed JSON."""
 
     t0 = time.time()
 
@@ -54,7 +55,6 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
     }
 
     if "sonnet" in model and thinking_budget > 0:
-        # API requires max_tokens > thinking.budget_tokens
         if max_tokens <= thinking_budget:
             max_tokens = thinking_budget + max(8000, max_tokens)
             api_kwargs["max_tokens"] = max_tokens
@@ -75,7 +75,6 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
         if block.type == "text":
             raw = block.text.strip()
             break
-    # Fallback: if no text block, try to get content safely
     if not raw:
         first = response.content[0] if response.content else None
         if first:
@@ -84,37 +83,33 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
             raw = raw.strip()
 
     if not raw:
-        raise ValueError(f"Claude returned empty response (no text content) [{stage_label}]")
+        raise ValueError(f"Claude returned empty response [{stage_label}]")
 
     print(f"  [{stage_label}] API call: {elapsed:.1f}s, {tokens_used} tokens, "
-          f"stop={stop_reason}, response_len={len(raw)}", flush=True)
+          f"stop={stop_reason}, len={len(raw)}", flush=True)
 
-    # ── Robust JSON extraction ──────────────────────────────────────────
-
-    # Step 1: Strip markdown fences (```json ... ``` in various forms)
+    # ── Robust JSON extraction ──
     raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)
     raw = re.sub(r"\n?\s*```\s*$", "", raw)
     raw = raw.strip()
 
-    # Step 2: Try direct parse
+    # Step 1: direct parse
     try:
         result = json.loads(raw)
     except json.JSONDecodeError:
-        # Step 3: Find JSON object within the text
-        # Claude may have added preamble ("Here is the JSON:") before the actual object
+        # Step 2: find JSON object in text (strip preamble)
         first_brace = raw.find('{')
         last_brace = raw.rfind('}')
 
         if first_brace >= 0 and last_brace > first_brace:
             json_str = raw[first_brace:last_brace + 1]
             if first_brace > 0:
-                preamble = raw[:first_brace].strip()
-                print(f"  [{stage_label}] Stripped preamble ({len(preamble)} chars): "
-                      f"{preamble[:120]}...", flush=True)
+                print(f"  [{stage_label}] Stripped {first_brace} chars of preamble",
+                      flush=True)
             try:
                 result = json.loads(json_str)
             except json.JSONDecodeError:
-                # Step 4: Bracket repair for truncated JSON
+                # Step 3: bracket repair for truncated JSON
                 opens_b = json_str.count('{') - json_str.count('}')
                 opens_sq = json_str.count('[') - json_str.count(']')
                 repaired = json_str
@@ -126,21 +121,20 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
                     result = json.loads(repaired)
                     result["_truncated"] = True
                     print(f"  [{stage_label}] JSON repaired "
-                          f"(closed {opens_b} braces, {opens_sq} brackets)", flush=True)
+                          f"(+{opens_b} braces, +{opens_sq} brackets)", flush=True)
                 except json.JSONDecodeError:
                     preview = raw[:300].replace('\n', '\\n')
-                    print(f"  [{stage_label}] JSON FAILED. Preview: {preview}", flush=True)
+                    print(f"  [{stage_label}] JSON FAILED: {preview}", flush=True)
                     raise ValueError(
-                        f"Could not parse JSON from Claude response [{stage_label}] "
-                        f"(len={len(raw)}). First 200 chars: {raw[:200]}"
+                        f"Could not parse JSON [{stage_label}] (len={len(raw)}). "
+                        f"First 200 chars: {raw[:200]}"
                     )
         else:
             preview = raw[:300].replace('\n', '\\n')
-            print(f"  [{stage_label}] No JSON object in response. Preview: {preview}",
-                  flush=True)
+            print(f"  [{stage_label}] No JSON in response: {preview}", flush=True)
             raise ValueError(
-                f"Claude response contains no JSON object [{stage_label}] "
-                f"(len={len(raw)}). First 200 chars: {raw[:200]}"
+                f"No JSON object in response [{stage_label}] (len={len(raw)}). "
+                f"First 200 chars: {raw[:200]}"
             )
 
     result["_stop_reason"] = stop_reason
@@ -155,9 +149,6 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
 # Stage 1: Detect BOM table structure
 # ---------------------------------------------------------------------------
 def _stage1_detect_structure(claude_client, pdf_b64):
-    """Find BOM tables, read column headers exactly, count rows.
-    This is a quick, focused call -- no data extraction yet."""
-
     prompt = (
         "You are reading an industrial electrical panel drawing PDF.\n"
         "Your ONLY job is to find the BOM (Bill of Materials) table and report its structure.\n\n"
@@ -189,7 +180,7 @@ def _stage1_detect_structure(claude_client, pdf_b64):
         "- ITEM column: sequential row numbers (1, 2, 3...)\n"
         "- If a column header is ambiguous, read 2-3 cells below it to determine what data type it holds\n\n"
         "Count total_bom_rows by counting every data row in the table (not headers, not blank rows).\n"
-        "Count CAREFULLY -- go row by row and count each one. This number is critical for verification."
+        "Count CAREFULLY -- go row by row and count each one."
     )
 
     result = _call_claude(claude_client, pdf_b64, prompt,
@@ -202,11 +193,12 @@ def _stage1_detect_structure(claude_client, pdf_b64):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: Extract every BOM row
+# Stage 2: Extract every BOM row — HARDENED ANTI-HALLUCINATION
 # ---------------------------------------------------------------------------
 def _stage2_extract_bom(claude_client, pdf_b64, structure):
-    """Given the table structure from Stage 1, extract every row.
-    This is pure transcription -- no interpretation, no classification."""
+    """Pure transcription of every BOM row. This is the critical stage
+    where accuracy matters most. Uses double-read strategy and explicit
+    anti-hallucination guardrails."""
 
     col_map = structure.get("column_mapping", {})
     headers = structure.get("column_headers_left_to_right", [])
@@ -214,7 +206,6 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
     has_mfg = structure.get("has_manufacturer_column", True)
     has_desc = structure.get("has_description_column", True)
 
-    # Build a dynamic prompt using the actual column mapping from Stage 1
     col_info = f"The column headers from left to right are: {headers}"
     mapping_lines = []
     for k, v in col_map.items():
@@ -229,27 +220,48 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
         f"Has manufacturer column: {has_mfg}\n"
         f"Has description column: {has_desc}\n"
         f"Expected row count: {total_rows}\n\n"
-        "YOUR TASK: Read EVERY row of the BOM table, going LEFT TO RIGHT across each row.\n"
-        "Copy each cell value EXACTLY as printed -- character for character.\n\n"
-        "CRITICAL RULES:\n"
-        "1. ONE ROW = ONE ITEM. If the QTY column says 32, output qty:32 -- do NOT create 32 separate items.\n"
-        "2. PART NUMBERS ARE THE MOST IMPORTANT FIELD. We will ORDER parts using these numbers.\n"
-        '   Copy EVERY character EXACTLY: dashes, slashes, letters, numbers, spaces.\n'
-        '   Examples of what matters: "5069-L306ERS2" is NOT "5069-L306ERS" (missing 2).\n'
-        '   "2090-CSBM1DG-14LN03" is NOT "2090-CSBM1DG-14LN3" (missing 0).\n'
-        '   "9861/15-04/12" has slashes and dashes -- copy them EXACTLY.\n'
-        '   If you cannot read even ONE character clearly, write "[UNREADABLE]" for the whole part number.\n'
-        "   NEVER reconstruct a part number from your training data. That is hallucination.\n"
-        '3. If there is no manufacturer column, leave manufacturer as empty string "".\n'
-        '4. If there is no description column, leave description as empty string "".\n'
-        "5. Do NOT skip ANY rows. Every physical row in the table = one item in your output.\n"
-        '6. For qty values like "A/R", "AR", "REF", use qty:1 and put the original text in notes.\n'
-        "7. Read the ACTUAL cells -- do not use your knowledge of electrical parts to correct anything.\n"
-        "   Even if you KNOW a part number looks wrong, copy what the drawing says. The drawing is the source of truth.\n\n"
-        "SELF-CHECK after each row:\n"
-        "  - Is description a long spec string? (Good) Or just 1-2 words like a company name? (Wrong -- you swapped columns)\n"
-        "  - Is manufacturer a short company name? (Good) Or a long spec string? (Wrong -- you swapped columns)\n"
-        "  - Does the part number appear somewhere in the PDF? (Good) Or did you generate it from memory? (Wrong)\n\n"
+
+        "YOUR TASK: Read EVERY row of the BOM table. Copy each cell value EXACTLY as printed.\n\n"
+
+        "=== CRITICAL RULES ===\n\n"
+
+        "RULE 1 — ONE ROW = ONE ITEM:\n"
+        "If the QTY column says 32, output qty:32 as ONE item.\n"
+        "Do NOT create 32 separate items. That is wrong.\n\n"
+
+        "RULE 2 — PART NUMBERS ARE SACRED:\n"
+        "These part numbers will be used to ORDER real parts. A wrong character = wrong part delivered.\n"
+        "Copy EVERY character EXACTLY: dashes, slashes, letters, numbers, spaces.\n"
+        "  DOUBLE-READ STRATEGY: For each part number:\n"
+        "    a) Read it LEFT to RIGHT. Write it down.\n"
+        "    b) Read it RIGHT to LEFT, character by character. Compare.\n"
+        "    c) Count the total characters. Does your extraction have the same count?\n"
+        "    d) If the PN has dashes (e.g., 2090-CSBM1DG-14LN03), verify each segment between dashes independently.\n"
+        "  CONFUSABLE CHARACTERS — pay extra attention to:\n"
+        "    O (letter) vs 0 (zero), l (lowercase L) vs 1 (one), I (letter I) vs 1 (one),\n"
+        "    B vs 8, S vs 5, G vs 6, Z vs 2, D vs 0\n"
+        '  If you cannot read even ONE character clearly, write "[UNREADABLE]" for the whole part number.\n'
+        "  NEVER fill in a character from your training knowledge. Read it from the PDF or mark it unreadable.\n\n"
+
+        "RULE 3 — ANTI-HALLUCINATION:\n"
+        "  You have been trained on millions of part numbers. That is DANGEROUS here.\n"
+        "  Your memory of what part numbers SHOULD look like can override what you actually SEE.\n"
+        "  For EVERY part number you write, ask yourself:\n"
+        '    "Did I read this specific string from the PDF image, or am I writing what I think it should be?"\n'
+        "  If you are writing from memory rather than reading, STOP. Go back to the PDF cell and re-read.\n"
+        "  The drawing is the ONLY source of truth. Your training data is NOT a source of truth.\n\n"
+
+        "RULE 4 — COLUMN MAPPING:\n"
+        '  If there is no manufacturer column, leave manufacturer as "".\n'
+        '  If there is no description column, leave description as "".\n'
+        "  SELF-CHECK each row:\n"
+        "  - Is description a long spec string? (Good) Or 1-2 words like a company name? (Wrong — you swapped columns)\n"
+        "  - Is manufacturer a short company name? (Good) Or a long spec string? (Wrong — you swapped columns)\n\n"
+
+        "RULE 5 — COMPLETENESS:\n"
+        "  Do NOT skip ANY rows. Every physical row in the table = one item in your output.\n"
+        '  For qty values like "A/R", "AR", "REF", use qty:1 and put the original text in notes.\n\n'
+
         "Return this JSON:\n"
         "{\n"
         '  "bom_line_items": [\n'
@@ -266,10 +278,9 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
         f'  "rows_extracted": 0\n'
         "}\n\n"
         f"Set rows_extracted to the actual count of items you return. It MUST equal {total_rows}.\n"
-        "If it doesn't match, you missed rows -- go back and find them."
+        "If it does not match, you missed rows — go back and find them."
     )
 
-    # Use generous thinking and output budgets for large tables
     think_budget = max(32000, total_rows * 600)
     think_budget = min(think_budget, 100000)
     max_out = max(20000, total_rows * 350)
@@ -292,10 +303,6 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure):
 # Stage 3: Derive estimator quantities from BOM
 # ---------------------------------------------------------------------------
 def _stage3_derive_quantities(claude_client, pdf_b64, bom_items):
-    """Classify BOM items into estimator quantity buckets.
-    Uses a quick AI call to interpret component types from the BOM data."""
-
-    # Build a compact text summary of the BOM for classification
     bom_summary_lines = []
     for item in bom_items:
         pn = item.get("part_number", "")
@@ -363,9 +370,6 @@ def _stage3_derive_quantities(claude_client, pdf_b64, bom_items):
 # Stage 4: Validate extraction (deterministic, no AI)
 # ---------------------------------------------------------------------------
 def _stage4_validate(structure, bom_items):
-    """Deterministic validation -- no AI call needed.
-    Checks for common extraction errors and flags them."""
-
     flags = []
     expected_rows = structure.get("total_bom_rows", 0)
     actual_rows = len(bom_items)
@@ -423,7 +427,7 @@ def _stage4_validate(structure, bom_items):
                 f"Possible column swap on {swap_count} item(s) -- "
                 "review manufacturer/description fields")
 
-    # Check 3: Duplicate part numbers suggesting qty expansion error
+    # Check 3: Duplicate part numbers
     pn_counts = Counter(
         item.get("part_number", "")
         for item in bom_items
@@ -446,7 +450,7 @@ def _stage4_validate(structure, bom_items):
             f"{blank_pns} item(s) have blank or unreadable part numbers -- "
             "verify against drawing")
 
-    # Check 5: All qty=1 might indicate qty column wasn't read
+    # Check 5: All qty=1
     if len(bom_items) > 5:
         try:
             all_qty_1 = all(int(item.get("qty", 1)) == 1 for item in bom_items)
@@ -463,9 +467,6 @@ def _stage4_validate(structure, bom_items):
 # Stage 5: AI-powered part number verification
 # ---------------------------------------------------------------------------
 def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items):
-    """Send the extracted part numbers back to Claude and ask it to verify
-    each one exists VERBATIM in the PDF."""
-
     pn_lines = []
     for item in bom_items:
         pn = item.get("part_number", "")
@@ -476,15 +477,17 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items):
 
     prompt = (
         "I extracted these part numbers from the BOM table in this drawing PDF.\n"
-        "Your job: look at the ACTUAL PDF and verify each part number.\n\n"
+        "Your job: look at the ACTUAL PDF and verify each part number CHARACTER BY CHARACTER.\n\n"
         "EXTRACTED PART NUMBERS:\n"
         f"{pn_list}\n\n"
         "For EACH part number above:\n"
         "1. Find it in the actual BOM table in the PDF\n"
-        "2. Compare character by character\n"
-        "3. If it matches exactly, mark it verified\n"
-        "4. If ANY character is wrong (even one digit or letter), provide the CORRECT value from the PDF\n"
-        "5. If you cannot find it in the PDF at all, mark it as not_found\n\n"
+        "2. Compare character by character — read left to right, then right to left\n"
+        "3. Check for commonly confused characters: O vs 0, l vs 1, B vs 8, S vs 5\n"
+        "4. Count the characters — does the extracted version have the same count as the PDF?\n"
+        "5. If it matches exactly, mark it verified\n"
+        "6. If ANY character is wrong, provide the CORRECT value from the PDF\n"
+        "7. If you cannot find it in the PDF at all, mark it as not_found\n\n"
         "Return this JSON:\n"
         "{\n"
         '  "verifications": [\n'
@@ -518,8 +521,7 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items):
     verified_count = sum(1 for v in verifications if v.get("status") == "verified")
 
     print(
-        f"SCAN Stage 5: Verification complete -- "
-        f"{verified_count} verified, {corrected_count} corrected, "
+        f"SCAN Stage 5: {verified_count} verified, {corrected_count} corrected, "
         f"{not_found_count} not found",
         flush=True,
     )
@@ -528,11 +530,12 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items):
 
 
 def _apply_corrections(bom_items, verification_result):
-    """Apply part number corrections from Stage 5 back to the BOM items."""
+    """Apply corrections from Stage 5 AND tag every item with _verification_status."""
 
     flags = []
     verifications = verification_result.get("verifications", [])
 
+    # Build lookup by item_num
     corrections = {}
     for v in verifications:
         item_num = v.get("item_num")
@@ -541,9 +544,17 @@ def _apply_corrections(bom_items, verification_result):
 
     corrected_count = 0
     not_found_count = 0
+    verified_count = 0
 
     for item in bom_items:
         item_num = item.get("item_num")
+        pn = (item.get("part_number") or "").strip()
+
+        # Items with no PN or UNREADABLE get special status
+        if not pn or pn == "[UNREADABLE]":
+            item["_verification_status"] = "no_pn"
+            continue
+
         if item_num in corrections:
             v = corrections[item_num]
             status = v.get("status", "")
@@ -552,6 +563,8 @@ def _apply_corrections(bom_items, verification_result):
                 old_pn = item.get("part_number", "")
                 new_pn = v["corrected"]
                 item["part_number"] = new_pn
+                item["_verification_status"] = "corrected"
+                item["_original_pn"] = old_pn
                 item["notes"] = (
                     (item.get("notes", "") +
                      f" [PN corrected: {old_pn} -> {new_pn}]").strip()
@@ -559,11 +572,22 @@ def _apply_corrections(bom_items, verification_result):
                 corrected_count += 1
 
             elif status == "not_found":
+                item["_verification_status"] = "not_found"
                 item["notes"] = (
                     (item.get("notes", "") +
                      " [WARNING: PN not verified in drawing]").strip()
                 )
                 not_found_count += 1
+
+            elif status == "verified":
+                item["_verification_status"] = "verified"
+                verified_count += 1
+
+            else:
+                item["_verification_status"] = "unverified"
+        else:
+            # Stage 5 didn't return a result for this item
+            item["_verification_status"] = "unverified"
 
     if corrected_count > 0:
         flags.append(
@@ -576,26 +600,32 @@ def _apply_corrections(bom_items, verification_result):
             "could not be verified -- review these manually"
         )
 
-    return bom_items, flags
+    summary = {
+        "verified": verified_count,
+        "corrected": corrected_count,
+        "not_found": not_found_count,
+        "unverified": sum(1 for i in bom_items if i.get("_verification_status") == "unverified"),
+        "no_pn": sum(1 for i in bom_items if i.get("_verification_status") == "no_pn"),
+    }
+
+    return bom_items, flags, summary
 
 
 # ---------------------------------------------------------------------------
 # Main entry point: scan_drawing()
 # ---------------------------------------------------------------------------
 def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
-    """Multi-stage BOM extraction pipeline.
-    Returns the same JSON contract as the old single-prompt version so the
-    frontend and /api/scan endpoint don't need any changes.
-    """
+    """Multi-stage BOM extraction pipeline."""
 
     model = "claude-sonnet-4-20250514"
     total_tokens = 0
     was_truncated = False
     all_flags = []
+    verification_summary = {}
     pipeline_start = time.time()
 
     try:
-        # == STAGE 1: Detect table structure ================================
+        # == STAGE 1 ========================================================
         t1 = time.time()
         print(f"SCAN [{filename}]: Starting Stage 1 -- structure detection", flush=True)
         try:
@@ -635,9 +665,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         row_count = structure.get("total_bom_rows", 0)
         drawing_types = structure.get("drawing_types_found", [])
 
-        # No BOM table found
         if bom_count == 0 or row_count == 0:
-            print(f"SCAN: No BOM table found -- skipping to Stage 3 for quantity-only scan", flush=True)
+            print(f"SCAN: No BOM table found -- quantity-only scan", flush=True)
             all_flags.append("No BOM table found in drawing -- quantities estimated from schematics only")
             try:
                 qty_result = _stage3_derive_quantities(claude_client, pdf_b64, [])
@@ -661,7 +690,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 "_output_tokens": total_tokens,
             }
 
-        # == STAGE 2: Extract BOM rows ======================================
+        # == STAGE 2 ========================================================
         t2 = time.time()
         print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows", flush=True)
         try:
@@ -683,20 +712,20 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         bom_items = extraction.get("bom_line_items", [])
         print(f"SCAN Stage 2 done in {time.time()-t2:.1f}s", flush=True)
 
-        # == STAGE 4: Validate (deterministic, instant) =====================
-        print(f"SCAN [{filename}]: Starting Stage 4 -- validation", flush=True)
+        # == STAGE 4 (deterministic) ========================================
+        print(f"SCAN [{filename}]: Stage 4 -- validation", flush=True)
         validation_flags = _stage4_validate(structure, bom_items)
         all_flags.extend(validation_flags)
 
-        # == STAGE 5: Verify part numbers against PDF =======================
+        # == STAGE 5 ========================================================
         t5 = time.time()
-        print(f"SCAN [{filename}]: Starting Stage 5 -- part number verification", flush=True)
+        print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification", flush=True)
         try:
             verify_result = _stage5_verify_part_numbers(
                 claude_client, pdf_b64, bom_items
             )
             total_tokens += verify_result.get("_output_tokens", 0)
-            bom_items, correction_flags = _apply_corrections(
+            bom_items, correction_flags, verification_summary = _apply_corrections(
                 bom_items, verify_result
             )
             all_flags.extend(correction_flags)
@@ -710,26 +739,30 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         claude_client, pdf_b64, bom_items
                     )
                     total_tokens += verify_result.get("_output_tokens", 0)
-                    bom_items, correction_flags = _apply_corrections(
+                    bom_items, correction_flags, verification_summary = _apply_corrections(
                         bom_items, verify_result
                     )
                     all_flags.extend(correction_flags)
                 except Exception:
-                    print(f"SCAN: Stage 5 failed, proceeding with unverified PNs", flush=True)
+                    print(f"SCAN: Stage 5 failed, PNs unverified", flush=True)
                     all_flags.append(
                         "Part number verification skipped due to rate limit -- "
                         "review all part numbers manually"
                     )
+                    for item in bom_items:
+                        item["_verification_status"] = "unverified"
             else:
                 print(f"SCAN: Stage 5 error: {err_str}, continuing unverified", flush=True)
                 all_flags.append(
                     "Part number verification failed -- review all part numbers manually"
                 )
+                for item in bom_items:
+                    item["_verification_status"] = "unverified"
         print(f"SCAN Stage 5 done in {time.time()-t5:.1f}s", flush=True)
 
-        # == STAGE 3: Derive quantities =====================================
+        # == STAGE 3 ========================================================
         t3 = time.time()
-        print(f"SCAN [{filename}]: Starting Stage 3 -- deriving quantities", flush=True)
+        print(f"SCAN [{filename}]: Starting Stage 3 -- quantities", flush=True)
         try:
             qty_result = _stage3_derive_quantities(claude_client, pdf_b64, bom_items)
         except Exception as e3:
@@ -740,17 +773,17 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 try:
                     qty_result = _stage3_derive_quantities(claude_client, pdf_b64, bom_items)
                 except Exception:
-                    print(f"SCAN: Stage 3 failed, returning BOM without quantities", flush=True)
+                    print(f"SCAN: Stage 3 failed, BOM without quantities", flush=True)
                     qty_result = {"quantities": {}}
             else:
-                print(f"SCAN: Stage 3 error: {err_str}, continuing with BOM only", flush=True)
+                print(f"SCAN: Stage 3 error: {err_str}, continuing", flush=True)
                 qty_result = {"quantities": {}}
 
         total_tokens += qty_result.get("_output_tokens", 0)
         quantities = qty_result.get("quantities", {})
         print(f"SCAN Stage 3 done in {time.time()-t3:.1f}s", flush=True)
 
-        # Apply category assignments from Stage 3 to BOM items
+        # Apply categories
         cat_map = {}
         for ca in qty_result.get("category_assignments", []):
             cat_map[ca.get("item_num")] = ca.get("category", "Other")
@@ -760,7 +793,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
             elif "category" not in item or not item["category"]:
                 item["category"] = "Other"
 
-        # == Assemble final result ==========================================
+        # == Assemble result ================================================
         col_map_raw = structure.get("column_mapping", {})
         detected_headers = structure.get("column_headers_left_to_right", [])
         column_mapping = {
@@ -795,6 +828,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 "scope_gap_flags": [],
                 "review_flags": all_flags,
                 "total_bom_rows_on_drawing": row_count,
+                "verification_summary": verification_summary,
             },
             "quantities": quantities,
             "bom_line_items": bom_items,
@@ -808,14 +842,14 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         print(
             f"SCAN [{filename}]: COMPLETE -- {len(bom_items)} items, "
             f"confidence={confidence:.0%}, tokens={total_tokens}, "
-            f"flags={len(all_flags)}, total_time={total_elapsed:.1f}s",
+            f"flags={len(all_flags)}, time={total_elapsed:.1f}s",
             flush=True,
         )
         return result
 
     except Exception as e:
         err_str = str(e)
-        print(f"SCAN [{filename}] FATAL ERROR: {err_str}", flush=True)
+        print(f"SCAN [{filename}] FATAL: {err_str}", flush=True)
 
         if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
             return {
