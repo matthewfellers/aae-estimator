@@ -618,42 +618,46 @@ def scan_drawing(pdf_b64, filename="drawing.pdf"):
     prompt = """You are an expert electrical estimator at AAE Automation, a UL-508A certified industrial control panel shop. Analyze this electrical drawing set and extract ALL component quantities needed for a panel bid.
 
 ═══════════════════════════════════════════════════════════════════
-STEP 1 — READ THE BOM TABLE COLUMN HEADERS FIRST
+STEP 1 — READ THE BOM TABLE COLUMN HEADERS
 ═══════════════════════════════════════════════════════════════════
-Before extracting ANY data, read the column headers of the BOM table exactly as printed.
-Different customers use different column names. YOU must figure out which column is which.
+Find the BOM table in the drawing. Read its column headers LEFT TO RIGHT exactly as printed.
+Report them in the "column_mapping" field. Then map each header to a data field.
 
-Map each column header to one of these data fields:
-  → part_number:  the catalog/part/model number (could be labeled: CATALOG, CATALOG NUMBER,
-                  CAT NO, CAT #, PART NUMBER, PART NO, PART #, P/N, PN, MODEL, MODEL NUMBER,
-                  MFR PART NO, ORDER NUMBER, ORDER NO, ITEM NUMBER, or similar)
-  → manufacturer: the maker/brand (could be labeled: MFG, MANUFACTURER, MFR, VENDOR, BRAND, MAKE, or similar)
-  → description:  what the part is (could be labeled: DESC, DESCRIPTION, ITEM DESCRIPTION, REMARKS, or similar)
-  → qty:          how many (could be labeled: QTY, QUANTITY, COUNT, EA, AMT, or similar)
-  → unit:         unit of measure (could be labeled: U/M, UOM, UNIT, EA, or similar)
-  → item_num:     row/item number (could be labeled: ITEM, ITEM NO, LINE, #, NO, or similar)
-  → notes:        additional info (could be labeled: NOTES, REMARKS, COMMENTS, REF, or similar)
-
-Report your detected mapping in the "column_mapping" field of the output.
-CRITICAL: Do NOT guess the mapping. Read the actual header row printed on the drawing.
+How to identify what each column contains:
+  → The PART NUMBER column has codes like "1769-L33ER", "SCE-484812WFLP", "2907719"
+     (alphanumeric codes with dashes, slashes, or numbers — NOT plain English descriptions)
+  → The MANUFACTURER column has short company names like "ALLEN BRADLEY", "PHOENIX CONTACT",
+     "SAGINAW", "ABB", "SIEMENS" (1-3 words, always a company name)
+  → The DESCRIPTION column has the LONGEST text — full English sentences describing the part
+     like "ENCLOSURE, WALL MOUNT, CARBON STEEL, TYPE 3R/12/13, 48 X 48 X 12"
+  → The QTY column has small numbers (1, 2, 5, 32, etc.)
+  → The ITEM column has sequential row numbers (1, 2, 3, 4...)
 
 ═══════════════════════════════════════════════════════════════════
-STEP 2 — EXTRACT EACH ROW USING YOUR MAPPING
+STEP 2 — EXTRACT ROW BY ROW, COLUMN BY COLUMN
 ═══════════════════════════════════════════════════════════════════
-For EACH row, read the cell value under each mapped column. Copy text CHARACTER BY CHARACTER.
+For each row, go LEFT TO RIGHT across the table, reading each cell under its header.
+Place each value into the field that header maps to. Do NOT skip any column.
 
-ABSOLUTE RULES:
-  1. NEVER INVENT OR HALLUCINATE DATA. If you cannot clearly read a cell, write "[UNREADABLE]".
-     A wrong part number means we order the wrong parts. "[UNREADABLE]" is always better than a guess.
-  2. DO NOT MIX UP COLUMNS. The manufacturer goes in "manufacturer", NOT in "description".
-     The description goes in "description", NOT in "notes". Use your column mapping from Step 1.
-  3. COPY EXACTLY — do not paraphrase, abbreviate, re-word, or "clean up" any value.
-     If the drawing says "SCE-484812WFLP", write exactly "SCE-484812WFLP".
-     If the drawing says "SAGINAW", write "SAGINAW" — do NOT change it to "SCE".
-  4. Every single row in the BOM table MUST appear in your output. Count them.
-  5. Flag ANYTHING uncertain in review_flags (row number + what's unclear).
+SELF-CHECK after each row — catch these common mistakes:
+  ✗ WRONG: description = "ALLEN BRADLEY" ← That's a company name, not a description!
+           If your "description" is just 1-2 words and a company name, you read the MFG column.
+  ✓ RIGHT: description = "COMPACTLOGIX, POWER SUPPLY, 24VDC, 120/240VAC INPUT"
+           Descriptions are LONG — they describe what the part IS and its specifications.
+
+  ✗ WRONG: manufacturer = "ENCLOSURE, WALL MOUNT, CARBON STEEL, 48 X 48" ← That's a description!
+  ✓ RIGHT: manufacturer = "SAGINAW" ← Short company name.
+
+  ✗ WRONG: Same part number repeated 32 times with qty=1 each.
+  ✓ RIGHT: One entry with the actual qty from the QTY column (e.g., qty=32).
+           Each physical ROW in the BOM table = exactly ONE item in your output.
 
 ═══════════════════════════════════════════════════════════════════
+STEP 3 — VERIFY PART NUMBERS ARE REAL
+═══════════════════════════════════════════════════════════════════
+For each part_number in your output, it MUST appear VERBATIM in the PDF.
+If you cannot clearly read the characters, write "[UNREADABLE]".
+NEVER generate a plausible-looking part number from memory. We will order wrong parts.
 
 Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object.
 
@@ -696,12 +700,12 @@ Return ONLY valid JSON — no markdown, no explanation. Just the raw JSON object
   "bom_line_items": [
     {
       "item_num": 1,
-      "part_number": "<value from part_number column — NEVER invent>",
-      "description": "<value from description column — NEVER put manufacturer here>",
       "qty": 1,
+      "part_number": "SCE-484812WFLP",
+      "manufacturer": "SAGINAW",
+      "description": "ENCLOSURE, WALL MOUNT, CARBON STEEL, 3PT LATCH, TYPE 3R/12/13, 48 X 48 X 12",
       "unit": "ea",
-      "manufacturer": "<value from manufacturer column — NEVER put description here>",
-      "category": "Other",
+      "category": "Enclosure",
       "notes": ""
     }
   ]
@@ -715,16 +719,16 @@ Rules:
 - If no wire schedule: estimate wire_count as (DI+DO)*0.8 + (AI+AO)*1.0 + terminals*0.6
 - bom_line_items: extract EVERY SINGLE line item from any BOM table found in the drawings
   - THIS IS THE MOST IMPORTANT PART OF YOUR JOB. The BOM table is the primary deliverable.
-  - Do NOT skip or omit ANY rows. Every row in the BOM table MUST appear in bom_line_items.
+  - Do NOT skip or omit ANY rows. Each physical row in the BOM table = exactly ONE item.
   - If the BOM table has 48 rows, you MUST return exactly 48 items. Count them carefully.
-  - Use your column mapping from Step 1 to put each value in the CORRECT field.
+  - ONE ROW = ONE ITEM. If a row says QTY 32, output qty:32 — do NOT create 32 separate items.
+  - The number of items in bom_line_items MUST equal total_bom_rows_on_drawing.
   - If a BOM table has no manufacturer column, leave manufacturer as "" — do NOT guess.
-  - If a BOM table has no description column but has a part number, leave description as the
-    part number and note "no description column" in notes.
+  - If a BOM table has no description column, leave description as "" and note it in notes.
   - Use these categories: Enclosure, Power, Motor Ctrl, Control Devices, PLC/Network, Terminals, Relays, Wiring, HMI/Computer, Markers, Other
   - If no BOM table found, return empty array []
   - Set qty to numeric value (not "A/R" — use 1 for A/R items and note "A/R" in notes field)
-  - Set total_bom_rows_on_drawing in extraction_summary to how many rows you count in the BOM table
+  - Set total_bom_rows_on_drawing to how many rows you count in the BOM table
 - Flag anything uncertain or hard to read in review_flags
 - confidence: 0.0 to 1.0"""
 
@@ -735,12 +739,13 @@ Rules:
 
     for attempt, model in enumerate(models_to_try):
         try:
-            # Use streaming to avoid timeout on large responses
-            with claude_client.messages.stream(
-                model=model,
-                max_tokens=32000,
-                temperature=0,
-                messages=[{
+            # Build API call kwargs — enable extended thinking for Sonnet
+            # Extended thinking lets the model carefully reason through the table
+            # structure before generating the JSON, dramatically improving accuracy.
+            api_kwargs = {
+                "model": model,
+                "max_tokens": 40000,
+                "messages": [{
                     "role": "user",
                     "content": [
                         {
@@ -754,7 +759,19 @@ Rules:
                         {"type": "text", "text": prompt}
                     ]
                 }]
-            ) as stream:
+            }
+
+            if "sonnet" in model:
+                # Extended thinking for Sonnet — gives the model time to carefully
+                # read column headers, map them, and extract each cell accurately.
+                # Temperature cannot be set with extended thinking.
+                api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 16000}
+                print(f"SCAN: Using extended thinking with {model} (16K thinking budget)", flush=True)
+            else:
+                # Haiku fallback — no extended thinking, use temperature=0
+                api_kwargs["temperature"] = 0
+
+            with claude_client.messages.stream(**api_kwargs) as stream:
                 response = stream.get_final_message()
 
             # Check if response was truncated due to token limit
@@ -763,7 +780,15 @@ Rules:
             if stop_reason == "max_tokens":
                 print(f"SCAN WARNING: Response truncated at {tokens_used} output tokens (max_tokens hit). BOM may be incomplete.", flush=True)
 
-            raw = response.content[0].text.strip()
+            # Extract the text block (skip thinking blocks when extended thinking is used)
+            raw = ""
+            for block in response.content:
+                if block.type == "text":
+                    raw = block.text.strip()
+                    break
+            if not raw:
+                # Fallback — grab first block if no text block found
+                raw = response.content[0].text.strip()
             # Strip markdown if model wrapped it anyway
             raw = re.sub(r"^```json\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
@@ -964,11 +989,10 @@ Rules:
 
     for attempt, model in enumerate(models_to_try):
         try:
-            with claude_client.messages.stream(
-                model=model,
-                max_tokens=32000,
-                temperature=0,
-                messages=[{
+            api_kwargs = {
+                "model": model,
+                "max_tokens": 40000,
+                "messages": [{
                     "role": "user",
                     "content": [
                         {
@@ -982,7 +1006,15 @@ Rules:
                         {"type": "text", "text": prompt}
                     ]
                 }]
-            ) as stream:
+            }
+
+            if "sonnet" in model:
+                api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 16000}
+                print(f"BOM_CONVERT: Using extended thinking with {model} (16K thinking budget)", flush=True)
+            else:
+                api_kwargs["temperature"] = 0
+
+            with claude_client.messages.stream(**api_kwargs) as stream:
                 response = stream.get_final_message()
 
             stop_reason = response.stop_reason
@@ -990,7 +1022,14 @@ Rules:
             if stop_reason == "max_tokens":
                 print(f"BOM_CONVERT WARNING: Response truncated at {tokens_used} output tokens (max_tokens hit). Some panels may be incomplete.", flush=True)
 
-            raw = response.content[0].text.strip()
+            # Extract the text block (skip thinking blocks)
+            raw = ""
+            for block in response.content:
+                if block.type == "text":
+                    raw = block.text.strip()
+                    break
+            if not raw:
+                raw = response.content[0].text.strip()
             raw = re.sub(r"^```json\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
 
