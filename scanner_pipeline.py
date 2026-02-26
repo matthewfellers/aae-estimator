@@ -672,7 +672,6 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
         "5. If it matches exactly, mark it verified\n"
         "6. If ANY character is wrong, provide the CORRECT value from the PDF\n"
         "7. If you cannot find it in the PDF at all, mark it as not_found\n\n"
-    )
         "Return this JSON:\n"
         "{\n"
         '  "verifications": [\n'
