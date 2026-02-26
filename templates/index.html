@@ -1273,12 +1273,26 @@ async function startScan(file) {
     const form = new FormData();
     form.append('drawing', file);
     const res  = await apiFetch('/api/scan', { method: 'POST', body: form });
+
+    // Guard against HTML error pages (e.g. 502 timeout from Railway)
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      clearInterval(interval);
+      status.classList.remove('visible');
+      if (res.status === 502 || res.status === 504) {
+        toast('Scan timed out — the drawing is large and needs more time. Please try again; the server has been tuned for longer scans.', 'error');
+      } else {
+        toast('Scan failed: server returned an unexpected response (HTTP ' + res.status + '). Try again in a moment.', 'error');
+      }
+      return;
+    }
+
     const data = await res.json();
     clearInterval(interval);
     status.classList.remove('visible');
 
     if (data.error) {
-      if (data.error === 'rate_limit') {
+      if (data.error === 'rate_limit' || data.error === 'token_rate_limit') {
         toast('⏱ API rate limit — wait 60 sec and try again. Check console.anthropic.com for usage.', 'error');
       } else {
         toast('Scan error: ' + (data.error_message || data.error), 'error');
