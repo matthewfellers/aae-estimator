@@ -418,6 +418,15 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "All schematics, wiring diagrams, and other pages have been removed.\n"
                 "This is a high-resolution rendering of the BOM page from the drawing.\n"
                 "Read EVERY row visible in this image. The entire image is your BOM source.\n\n"
+                "=== CRITICAL: YOU ARE A CAMERA, NOT AN AI ===\n"
+                "Your ONLY job is to PHOTOGRAPH the text — copy pixels to characters.\n"
+                "DO NOT use ANY knowledge from your training data about part numbers,\n"
+                "manufacturers, or products. If a cell contains SCE-24EL2412LPPL, you\n"
+                "write SCE-24EL2412LPPL. If it contains XYZZY-123, you write XYZZY-123.\n"
+                "You have NO idea what product this is or who makes it. You are just\n"
+                "copying text from a photograph. Every character matters.\n"
+                "If you cannot read a character with 100%% certainty, write [?] for that character.\n"
+                "NEVER substitute a 'more likely' character from your training knowledge.\n\n"
             )
         else:
             page_instruction = (
@@ -1027,7 +1036,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
 
                 # v2.5: Render BOM pages to high-res PNG images
                 # This is THE FIX — bypasses all PDF font/resource issues
-                bom_images = _render_pdf_to_image(bom_pdf_b64, dpi=300)
+                bom_images = _render_pdf_to_image(bom_pdf_b64, dpi=400)
                 if bom_images:
                     print(f"SCAN [{filename}]: Rendered {len(bom_images)} BOM page(s) "
                           f"to 300 DPI PNG — Stage 2 & 5 will use IMAGES", flush=True)
