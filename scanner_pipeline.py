@@ -278,7 +278,8 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
         if first_brace >= 0 and last_brace > first_brace:
             json_str = raw[first_brace:last_brace + 1]
             if first_brace > 0:
-                print(f"  [{stage_label}] Stripped {first_brace} chars of preamble",
+                print(f"  [{stage_label}] Stripped {first_brace} chars of preamble: "
+                      f"{raw[:min(400, first_brace)]!r}",
                       flush=True)
             try:
                 result = json.loads(json_str)
@@ -453,23 +454,29 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     else:
         text_section = ""
 
+    # When using images, drop the column-order hint — Claude can read headers
+    # directly from the image. Only pass field-name mappings as a reference.
+    if using_images:
+        col_structure_section = (
+            f"FIELD MAPPING (map each column header you see to these fields):\n"
+            f"{mapping_info}\n\n"
+            "Read the HEADER ROW of the BOM table in the image to determine the actual\n"
+            "column order. Do NOT assume column positions — read them from the image.\n\n"
+        )
+    else:
+        col_structure_section = (
+            f"COLUMN STRUCTURE (already identified):\n{col_info}\n\n"
+            f"FIELD MAPPING:\n{mapping_info}\n\n"
+        )
+
     prompt = (
         "You are transcribing the BOM (Bill of Materials) table from an electrical panel drawing.\n\n"
         f"{page_instruction}"
         f"{text_section}"
-        f"SUGGESTED COLUMN STRUCTURE (from prior scan pass — verify against the image header row):\n{col_info}\n\n"
-        f"SUGGESTED FIELD MAPPING:\n{mapping_info}\n\n"
+        f"{col_structure_section}"
         f"Has manufacturer column: {has_mfg}\n"
         f"Has description column: {has_desc}\n"
         f"Expected row count: {total_rows}\n\n"
-
-        "STEP 0 — VERIFY COLUMN ORDER BEFORE EXTRACTING:\n"
-        "Look at the HEADER ROW of the BOM table in the image.\n"
-        "Read the actual column headers left to right as they appear in the image.\n"
-        "If the actual header order differs from the SUGGESTED order above, "
-        "USE THE ACTUAL ORDER FROM THE IMAGE — ignore the suggestion.\n"
-        "Common error: QTY is often the LAST column, not the second. "
-        "DESCRIPTION is often the second column. Always read the header row first.\n\n"
 
         "YOUR TASK: Read EVERY row of the BOM table. Copy each cell value EXACTLY as printed.\n\n"
 
