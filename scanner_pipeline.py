@@ -1017,8 +1017,14 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     print(f"SCAN [{filename}]: Rendered {len(bom_images)} BOM page(s) "
                           f"to 300 DPI PNG — Stage 2 & 5 will use IMAGES", flush=True)
                 else:
+                    # Image rendering failed — fall back to FULL original PDF.
+                    # The page-extracted PDF has broken font resources (CAD PDFs
+                    # embed fonts globally; extracting a single page strips them).
+                    # The full PDF has all fonts intact and Claude can read it.
                     print(f"SCAN [{filename}]: Image rendering failed, "
-                          f"falling back to extracted PDF", flush=True)
+                          f"falling back to FULL PDF (font-safe)", flush=True)
+                    bom_pdf_b64 = pdf_b64
+                    structure["_bom_extracted"] = False
         else:
             print(f"SCAN [{filename}]: No BOM pages identified, using full PDF", flush=True)
             bom_pdf_b64 = pdf_b64
