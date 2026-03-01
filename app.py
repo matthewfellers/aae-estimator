@@ -2305,7 +2305,11 @@ def bom_from_scan():
             vendor = result["vendor"]
             itm["_resolved_vendor"] = vendor  # store for vendor sheet grouping
             unit_cost = float(itm.get("aae_cost", 0) or 0)
-            qty_val   = int(itm.get("qty", 1) or 1)
+            qty_raw = itm.get("qty", 1) or 1
+            try:
+                qty_val = int(qty_raw)
+            except (ValueError, TypeError):
+                qty_val = 1
             vals = [
                 itm.get("item_num", item_counter),   # A: ITEM
                 itm.get("part_number", ""),            # B: PART NUMBER
