@@ -157,8 +157,8 @@ def _render_pdf_to_image(pdf_b64, dpi=300):
               f"{total_kb:.0f}KB image data", flush=True)
         return images_b64
 
-    except ImportError:
-        print("  [Render] PyMuPDF (fitz) not installed — cannot render PDF to image",
+    except ImportError as exc:
+        print(f"  [Render] PyMuPDF (fitz) import failed: {exc}",
               flush=True)
         return []
     except Exception as exc:
