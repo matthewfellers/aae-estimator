@@ -694,27 +694,37 @@ def _ocr_build_column_table(words, img_width):
     #
     # Special case: "NO" or "NO." after a part_number column means it is the
     # trailing word of "CATALOG NO." — do NOT start a new item_num column.
-    cols = []          # list of {"label": str, "x_ctr": int}
+    # cols entries: {"label": str, "x_left": int, "x_right": int}
+    # x_left  = left edge of the keyword word (first word of the column)
+    # x_right = right edge of the rightmost word appended to this column
+    # Using the FULL SPAN of all header words in a column gives accurate
+    # gap-based boundaries (whitespace between columns), which is more robust
+    # than midpoint-of-keyword-centers (which shifts when multi-word headers
+    # like "PART NUMBER" are anchored at the first word only).
+    cols = []
     last_field = None
     for w in header_words:
         tok   = w["text"].lower().rstrip(".#:")
         raw   = w["text"].upper()
-        x_ctr = (w["left"] + w["right"]) // 2
 
         if tok in _OCR_KW_TO_FIELD:
             field = _OCR_KW_TO_FIELD[tok]
             # "NO"/"NO." after part_number = "CATALOG NO." suffix, not new column
             if tok in ("no", "no.") and last_field == "part_number":
                 if cols:
-                    cols[-1]["label"] += " " + raw
+                    cols[-1]["label"]   += " " + raw
+                    cols[-1]["x_right"]  = max(cols[-1]["x_right"], w["right"])
                 # do NOT start a new column
             else:
-                cols.append({"label": raw, "x_ctr": x_ctr})
+                cols.append({"label": raw,
+                             "x_left":  w["left"],
+                             "x_right": w["right"]})
                 last_field = field
         else:
-            # Non-keyword: append to current column label
+            # Non-keyword: append to current column label and extend its span
             if cols:
-                cols[-1]["label"] += " " + raw
+                cols[-1]["label"]   += " " + raw
+                cols[-1]["x_right"]  = max(cols[-1]["x_right"], w["right"])
 
     if len(cols) < 3:
         # Fallback: gap-based clustering (120 px threshold)
@@ -729,22 +739,43 @@ def _ocr_build_column_table(words, img_width):
             else:
                 clusters.append([w])
         col_labels = [" ".join(w["text"].upper() for w in cl) for cl in clusters]
-        col_ctrs   = [((cl[0]["left"] + cl[-1]["right"]) // 2) for cl in clusters]
-        tbl_x_min  = clusters[0][0]["left"]  - 150
-        tbl_x_max  = clusters[-1][-1]["right"] + 150
+        # Use actual span for boundaries
+        col_spans  = [(cl[0]["left"], cl[-1]["right"]) for cl in clusters]
+        tbl_x_min  = col_spans[0][0]  - 150
+        tbl_x_max  = col_spans[-1][1] + 150
         if len(col_labels) < 3:
             print(f"  [OCR-cols] fallback also < 3 cols", flush=True)
             return ""
+        # Build gap-based boundaries
+        boundaries = []
+        for i in range(len(col_spans) - 1):
+            gap_start = col_spans[i][1]
+            gap_end   = col_spans[i + 1][0]
+            if gap_end > gap_start:
+                boundaries.append((gap_start + gap_end) // 2)
+            else:
+                # Overlapping headers — use centre midpoints
+                c_i    = (col_spans[i][0]     + col_spans[i][1])     // 2
+                c_next = (col_spans[i + 1][0] + col_spans[i + 1][1]) // 2
+                boundaries.append((c_i + c_next) // 2)
+        boundaries.append(img_width + 99999)
     else:
-        col_labels = [c["label"] for c in cols]
-        col_ctrs   = [c["x_ctr"] for c in cols]
-        tbl_x_min  = col_ctrs[0]  - 150
-        tbl_x_max  = col_ctrs[-1] + 150
-
-    # Midpoint boundaries between adjacent column centres
-    boundaries = [(col_ctrs[i] + col_ctrs[i + 1]) // 2
-                  for i in range(len(col_ctrs) - 1)]
-    boundaries.append(img_width + 99999)
+        col_labels = [c["label"]   for c in cols]
+        tbl_x_min  = cols[0]["x_left"]  - 150
+        tbl_x_max  = cols[-1]["x_right"] + 150
+        # Gap-based boundaries: midpoint of whitespace between adjacent columns
+        boundaries = []
+        for i in range(len(cols) - 1):
+            gap_start = cols[i]["x_right"]
+            gap_end   = cols[i + 1]["x_left"]
+            if gap_end > gap_start:
+                boundaries.append((gap_start + gap_end) // 2)
+            else:
+                # Headers overlap — midpoint of their full spans
+                c_i    = (cols[i]["x_left"]     + cols[i]["x_right"])     // 2
+                c_next = (cols[i + 1]["x_left"] + cols[i + 1]["x_right"]) // 2
+                boundaries.append((c_i + c_next) // 2)
+        boundaries.append(img_width + 99999)
 
     def assign_col(word_cx):
         for ci, bnd in enumerate(boundaries):
@@ -754,6 +785,8 @@ def _ocr_build_column_table(words, img_width):
 
     print(f"  [OCR-cols] {len(col_labels)} cols @ row {header_idx}: "
           f"{col_labels}", flush=True)
+    print(f"  [OCR-cols] boundaries (px): {boundaries[:-1]}  "
+          f"tbl_x=[{tbl_x_min},{tbl_x_max}]", flush=True)
 
     # ── 4. Build the structured table ────────────────────────────────────────
     table_rows = [" | ".join(col_labels)]
@@ -1196,12 +1229,11 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
             # Each '|' separator is a true column boundary — merging is impossible.
             # QTY and PART NUMBER are always in separate cells.
             text_section = (
-                "=== STRUCTURED BOM TABLE (COLUMN-PARSED — EACH CELL IS EXACT) ===\n"
-                "The following table was built by detecting column positions from the PDF.\n"
-                "Each word was placed in its column using its exact pixel bounding box.\n"
-                "Each cell between '|' separators is a single column value — EXACT.\n"
-                "QTY and PART NUMBER are in separate cells — they CANNOT be merged.\n"
-                "Use these values directly. Use the image to confirm row count and layout.\n\n"
+                "=== STRUCTURED BOM TABLE (COLUMN-PARSED) ===\n"
+                "The following table was built by detecting column positions from the drawing.\n"
+                "Each cell between '|' separators is a single column value.\n"
+                "PART NUMBER and MANUFACTURER cells are reliable — use them directly.\n"
+                "QTY cells may be misread by OCR — always verify QTY against the IMAGE.\n\n"
                 f"{raw_text}\n\n"
                 "=== END STRUCTURED TABLE ===\n\n"
             )
@@ -1283,12 +1315,25 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     if raw_text.strip():
         if text_source == "columns":
             prompt += (
-                "  STRUCTURED TABLE — use the pipe-separated table above directly:\n"
-                "  Each '|' separates columns — QTY and PART NUMBER are in separate cells.\n"
-                "  Use the QTY value from the QTY column cell exactly as shown in the table.\n"
-                "  Use the PART NUMBER value from the PART NUMBER column cell exactly as shown.\n"
-                "  Do NOT modify, combine, or re-read values from adjacent cells.\n"
-                "  Use the image to confirm row count and catch any rows the table may have missed.\n\n"
+                "  STRUCTURED TABLE — field-specific trust rules:\n\n"
+                "  PART NUMBER — use the table cell DIRECTLY (most reliable source):\n"
+                "    The PART NUMBER column cell is exact. Copy it character-for-character.\n"
+                "    Do NOT re-read part numbers from the image — the table value is authoritative.\n\n"
+                "  MANUFACTURER — use the table cell directly.\n\n"
+                "  DESCRIPTION — use the table cell as a guide; correct obvious OCR garbling from the image.\n\n"
+                "  QTY — READ FROM THE IMAGE, NOT THE TABLE:\n"
+                "    OCR misreads single-digit numbers (3→8, 1→7, 6→b, 5→S) and column boundary\n"
+                "    math can place a QTY value in the wrong cell entirely.\n"
+                "    The table QTY cell is UNRELIABLE. Always read QTY from the image.\n\n"
+                "  === QTY — IMAGE READING RULES ===\n"
+                "  1. In the image, find the HEADER ROW. The QTY column is the RIGHTMOST column.\n"
+                "  2. For EACH data row: read the number in that row's rightmost (QTY) cell.\n"
+                "  3. Read each row INDEPENDENTLY — never carry over qty from the previous row.\n"
+                "  4. Both 'NO.' (item number) and 'QTY' are narrow integer columns — do not swap them:\n"
+                "       LEFTMOST narrow column  = item_num  (counts up: 1, 2, 3 ...)\n"
+                "       RIGHTMOST narrow column = QTY       (can be any integer: 1, 6, 14, 134 ...)\n"
+                "  5. If a qty looks like an item number sequence (1, 2, 3, 4...) you have them swapped.\n\n"
+                "  Use the image to confirm row count and catch rows the table may have missed.\n\n"
             )
         elif text_source == "ocr":
             prompt += (
