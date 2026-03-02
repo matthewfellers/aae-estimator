@@ -627,9 +627,24 @@ def _render_pdf_to_image(pdf_b64, dpi=300):
 # ---------------------------------------------------------------------------
 # Column-aware BOM table reconstruction from OCR word positions
 # ---------------------------------------------------------------------------
-_OCR_BOM_HEADER_KEYWORDS = {
-    'no', 'no.', 'item', 'item#', 'description', 'desc',
-    'manufacturer', 'mfg', 'part', 'catalog', 'cat.', 'qty', 'quantity',
+_OCR_KW_TO_FIELD = {
+    "no":           "item_num",
+    "no.":          "item_num",
+    "item":         "item_num",
+    "item#":        "item_num",
+    "description":  "description",
+    "desc":         "description",
+    "manufacturer": "manufacturer",
+    "mfg":          "manufacturer",
+    "vendor":       "manufacturer",
+    "part":         "part_number",
+    "catalog":      "part_number",
+    "cat":          "part_number",
+    "cat.":         "part_number",
+    "p/n":          "part_number",
+    "pn":           "part_number",
+    "qty":          "qty",
+    "quantity":     "qty",
 }
 
 def _ocr_build_column_table(words, img_width):
@@ -637,14 +652,18 @@ def _ocr_build_column_table(words, img_width):
     locate the BOM table header row and reconstruct a pipe-separated
     column-aware table — the same format used for fitz column extraction.
 
+    Uses keyword-based column anchoring: each BOM header keyword word
+    (QTY, PART, DESCRIPTION, etc.) becomes its own column at its exact
+    x-position, regardless of pixel gap.  This prevents gap-based merging
+    of adjacent headers like PART NUMBER and QTY.
+
     Returns a non-empty string on success, "" if no BOM table detected.
     """
-    Y_ROW_TOL   = 22   # px: words within this vertical range = same row
-    MIN_KW      = 3    # BOM header must contain ≥ this many keywords
-    MERGE_GAP   = 120  # px: adjacent header words closer than this = same column
+    Y_ROW_TOL = 22   # px: words within this vertical range = same row
+    MIN_KW    = 3    # BOM header must contain ≥ this many keywords
 
     # ── 1. Group words into rows by y-position ──────────────────────────────
-    rows = []   # each entry: (avg_y, [word, ...])
+    rows = []   # each entry: [avg_y, [word, ...]]
     for w in sorted(words, key=lambda x: x["top"]):
         for row in rows:
             if abs(w["top"] - row[0]) <= Y_ROW_TOL:
@@ -655,11 +674,11 @@ def _ocr_build_column_table(words, img_width):
     rows = [(y, sorted(ws, key=lambda x: x["left"])) for y, ws in rows]
 
     # ── 2. Find the BOM header row ───────────────────────────────────────────
-    header_idx  = None
+    header_idx   = None
     header_words = None
     for i, (y, rw) in enumerate(rows):
         tokens = [w["text"].lower().rstrip(".#:") for w in rw]
-        kw_hits = sum(1 for t in tokens if t in _OCR_BOM_HEADER_KEYWORDS)
+        kw_hits = sum(1 for t in tokens if t in _OCR_KW_TO_FIELD)
         if kw_hits >= MIN_KW:
             header_idx   = i
             header_words = rw
@@ -668,29 +687,63 @@ def _ocr_build_column_table(words, img_width):
         print("  [OCR-cols] no BOM header row found", flush=True)
         return ""
 
-    # ── 3. Cluster adjacent header words into column labels ──────────────────
-    # Each cluster = one column.  Merge words that are close together
-    # (e.g. "PART" + "NUMBER") but keep columns far apart separate (e.g. QTY).
-    clusters = [[header_words[0]]]
-    for w in header_words[1:]:
-        gap = w["left"] - clusters[-1][-1]["right"]
-        if gap <= MERGE_GAP:
-            clusters[-1].append(w)
+    # ── 3. Keyword-anchored column detection ─────────────────────────────────
+    # Each keyword word starts a new column at its own x-centre.
+    # Non-keyword words (e.g. "NUMBER" in "PART NUMBER") append to the
+    # current column label without shifting the boundary.
+    #
+    # Special case: "NO" or "NO." after a part_number column means it is the
+    # trailing word of "CATALOG NO." — do NOT start a new item_num column.
+    cols = []          # list of {"label": str, "x_ctr": int}
+    last_field = None
+    for w in header_words:
+        tok   = w["text"].lower().rstrip(".#:")
+        raw   = w["text"].upper()
+        x_ctr = (w["left"] + w["right"]) // 2
+
+        if tok in _OCR_KW_TO_FIELD:
+            field = _OCR_KW_TO_FIELD[tok]
+            # "NO"/"NO." after part_number = "CATALOG NO." suffix, not new column
+            if tok in ("no", "no.") and last_field == "part_number":
+                if cols:
+                    cols[-1]["label"] += " " + raw
+                # do NOT start a new column
+            else:
+                cols.append({"label": raw, "x_ctr": x_ctr})
+                last_field = field
         else:
-            clusters.append([w])
+            # Non-keyword: append to current column label
+            if cols:
+                cols[-1]["label"] += " " + raw
 
-    if len(clusters) < 3:
-        print(f"  [OCR-cols] too few columns ({len(clusters)})", flush=True)
-        return ""
+    if len(cols) < 3:
+        # Fallback: gap-based clustering (120 px threshold)
+        print(f"  [OCR-cols] only {len(cols)} keyword cols — "
+              f"falling back to gap-based clustering", flush=True)
+        MERGE_GAP = 120
+        clusters = [[header_words[0]]]
+        for w in header_words[1:]:
+            gap = w["left"] - clusters[-1][-1]["right"]
+            if gap <= MERGE_GAP:
+                clusters[-1].append(w)
+            else:
+                clusters.append([w])
+        col_labels = [" ".join(w["text"].upper() for w in cl) for cl in clusters]
+        col_ctrs   = [((cl[0]["left"] + cl[-1]["right"]) // 2) for cl in clusters]
+        tbl_x_min  = clusters[0][0]["left"]  - 150
+        tbl_x_max  = clusters[-1][-1]["right"] + 150
+        if len(col_labels) < 3:
+            print(f"  [OCR-cols] fallback also < 3 cols", flush=True)
+            return ""
+    else:
+        col_labels = [c["label"] for c in cols]
+        col_ctrs   = [c["x_ctr"] for c in cols]
+        tbl_x_min  = col_ctrs[0]  - 150
+        tbl_x_max  = col_ctrs[-1] + 150
 
-    col_labels  = [" ".join(w["text"].upper() for w in cl) for cl in clusters]
-    col_x_start = [cl[0]["left"]                             for cl in clusters]
-    col_x_end   = [cl[-1]["right"]                           for cl in clusters]
-
-    # Midpoint boundaries between adjacent columns
-    col_ctr    = [(s + e) // 2 for s, e in zip(col_x_start, col_x_end)]
-    boundaries = [(col_ctr[i] + col_ctr[i + 1]) // 2
-                  for i in range(len(col_ctr) - 1)]
+    # Midpoint boundaries between adjacent column centres
+    boundaries = [(col_ctrs[i] + col_ctrs[i + 1]) // 2
+                  for i in range(len(col_ctrs) - 1)]
     boundaries.append(img_width + 99999)
 
     def assign_col(word_cx):
@@ -699,23 +752,20 @@ def _ocr_build_column_table(words, img_width):
                 return ci
         return len(col_labels) - 1
 
-    print(f"  [OCR-cols] header @ row {header_idx}: {col_labels}", flush=True)
+    print(f"  [OCR-cols] {len(col_labels)} cols @ row {header_idx}: "
+          f"{col_labels}", flush=True)
 
-    # ── 4. BOM table x-extent (with generous margin) ────────────────────────
-    tbl_x_min = col_x_start[0] - 150
-    tbl_x_max = col_x_end[-1]  + 150
-
-    # ── 5. Build the structured table ────────────────────────────────────────
+    # ── 4. Build the structured table ────────────────────────────────────────
     table_rows = [" | ".join(col_labels)]
     for _y, rw in rows[header_idx + 1:]:
-        # Keep only words inside the BOM table's horizontal band
-        tw = [w for w in rw if w["left"] >= tbl_x_min and w["right"] <= tbl_x_max]
+        tw = [w for w in rw
+              if w["left"] >= tbl_x_min and w["right"] <= tbl_x_max]
         if not tw:
             continue
         cells = [""] * len(col_labels)
         for w in tw:
-            cx  = (w["left"] + w["right"]) // 2
-            ci  = assign_col(cx)
+            cx = (w["left"] + w["right"]) // 2
+            ci = assign_col(cx)
             cells[ci] = (cells[ci] + " " + w["text"]).strip()
         if any(c for c in cells):
             table_rows.append(" | ".join(cells))
@@ -723,7 +773,6 @@ def _ocr_build_column_table(words, img_width):
     result = "\n".join(table_rows)
     print(f"  [OCR-cols] built {len(table_rows)-1} data rows, "
           f"{len(result)} chars", flush=True)
-    # Peek at first 5 rows for debugging
     for ri, line in enumerate(table_rows[1:6]):
         print(f"  [OCR-cols] row[{ri+1}]: {line!r}", flush=True)
     return result
