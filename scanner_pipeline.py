@@ -553,23 +553,36 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     else:
         page_instruction = ""
 
-    # OCR text extracted by pytesseract from the rendered BOM image.
-    # Useful as a structural hint but NOT authoritative — thin-stroke AutoCAD
-    # SHX fonts sometimes cause Tesseract to drop characters (e.g. "PANDUIT"
-    # may appear as "PANDU"). Claude must use the IMAGE to verify and correct.
     raw_text = structure.get("_bom_raw_text", "")
+    text_source = structure.get("_bom_text_source", "pypdf")
     if raw_text.strip():
-        text_section = (
-            "=== OCR TEXT FROM BOM IMAGE (PYTESSERACT — USE AS GUIDE, NOT GOSPEL) ===\n"
-            "The following text was extracted by pytesseract OCR from the rendered BOM image.\n"
-            "It is a helpful guide for table layout and most text, BUT it may have errors:\n"
-            "  - Thin AutoCAD SHX font strokes can cause characters to be dropped or garbled\n"
-            "  - Manufacturer names or descriptions may be truncated (e.g. PANDU vs PANDUIT)\n"
-            "USE THE IMAGE as your final authority for every cell value.\n"
-            "When the OCR text and the image disagree, TRUST THE IMAGE — correct the OCR.\n\n"
-            f"{raw_text}\n\n"
-            "=== END OCR TEXT ===\n\n"
-        )
+        if text_source == "ocr":
+            # SHX / vector-font drawing — text came from pytesseract, may have errors.
+            # Claude must use the IMAGE as final authority and correct OCR mistakes.
+            text_section = (
+                "=== OCR TEXT FROM BOM IMAGE (PYTESSERACT — USE AS GUIDE, NOT GOSPEL) ===\n"
+                "The following text was extracted by pytesseract OCR from the rendered BOM image.\n"
+                "It is a helpful structural guide BUT may have errors:\n"
+                "  - Thin AutoCAD SHX font strokes can cause characters to be dropped or garbled\n"
+                "  - Manufacturer names or descriptions may be truncated (e.g. PANDU vs PANDUIT)\n"
+                "USE THE IMAGE as your final authority for every cell value.\n"
+                "When the OCR text and the image disagree, TRUST THE IMAGE — correct the OCR.\n\n"
+                f"{raw_text}\n\n"
+                "=== END OCR TEXT ===\n\n"
+            )
+        else:
+            # Normal PDF with real text layer — pypdf extracted exact characters.
+            # This text is authoritative; image is for layout/structure only.
+            text_section = (
+                "=== RAW TEXT EXTRACTED FROM PDF (PRIMARY SOURCE — EXACT CHARACTERS) ===\n"
+                "The following text was extracted directly from the PDF file's text layer.\n"
+                "These are the EXACT characters embedded in the PDF — not OCR, not guessed.\n"
+                "USE THIS TEXT as your PRIMARY source for part numbers, descriptions, and all data.\n"
+                "Use the PDF image only to understand the TABLE STRUCTURE (rows, columns, layout).\n"
+                "When the raw text and your visual reading disagree, the RAW TEXT WINS.\n\n"
+                f"{raw_text}\n\n"
+                "=== END RAW TEXT ===\n\n"
+            )
     else:
         text_section = ""
 
@@ -612,12 +625,19 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
 
     # Add extra instructions depending on whether we have raw text
     if raw_text.strip():
-        prompt += (
-            "  The RAW TEXT above contains the exact part numbers from the PDF.\n"
-            "  Cross-reference EVERY part number against the raw text.\n"
-            "  If a part number appears in the raw text, use the EXACT string from the raw text.\n"
-            "  Do NOT modify, correct, or 'improve' part numbers from the raw text.\n\n"
-        )
+        if text_source == "ocr":
+            prompt += (
+                "  The OCR TEXT above is a structural guide but may contain truncated or garbled characters.\n"
+                "  Use the IMAGE as your final authority — if you can read a value clearly in the image,\n"
+                "  use what the image shows even if the OCR text differs.\n\n"
+            )
+        else:
+            prompt += (
+                "  The RAW TEXT above contains the exact part numbers from the PDF.\n"
+                "  Cross-reference EVERY part number against the raw text.\n"
+                "  If a part number appears in the raw text, use the EXACT string from the raw text.\n"
+                "  Do NOT modify, correct, or 'improve' part numbers from the raw text.\n\n"
+            )
     else:
         prompt += (
             "  DOUBLE-READ STRATEGY: For each part number:\n"
@@ -1141,6 +1161,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 # the extracted PDF contains ONLY BOM pages starting at page 1
                 structure["_bom_extracted"] = True
                 structure["_bom_raw_text"] = bom_raw_text
+                structure["_bom_text_source"] = "pypdf"   # may be overwritten to "ocr" below
                 print(f"SCAN [{filename}]: BOM pages extracted successfully "
                       f"(raw text: {len(bom_raw_text)} chars)", flush=True)
 
@@ -1161,6 +1182,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     ocr_text = _ocr_images(bom_images)
                     if ocr_text.strip() and pypdf_chars < 300:
                         structure["_bom_raw_text"] = ocr_text
+                        structure["_bom_text_source"] = "ocr"   # SHX drawing — OCR is primary
                         print(f"SCAN [{filename}]: pypdf had only {pypdf_chars} chars "
                               f"(SHX/vector font) — using OCR text ({len(ocr_text)} chars) "
                               f"as primary source", flush=True)
