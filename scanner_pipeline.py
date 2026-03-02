@@ -62,34 +62,16 @@ def _extract_pages(pdf_b64, page_numbers):
             if 0 <= idx < total_pages:
                 writer.add_page(reader.pages[idx])
                 pages_added += 1
-                # Extract raw text from the PDF text layer.
-                # extraction_mode="layout" (pypdf >= 3.17) preserves column
-                # positions so multi-digit numbers like "134" are not split by
-                # adjacent column text.  Falls back to plain mode on older
-                # pypdf versions.
+                # Extract raw text — plain mode only.
+                # Do NOT use extraction_mode="layout": that mode pads columns
+                # with spaces which merges adjacent text (item# "4" + part
+                # "025411-10" → "1025411-10"; qty "14" + nearby "3" → "143").
                 page_text = ""
                 try:
-                    page_text = (
-                        reader.pages[idx].extract_text(extraction_mode="layout") or ""
-                    )
+                    page_text = reader.pages[idx].extract_text() or ""
                     if page_text.strip():
-                        print(f"  [PageExtract] pypdf layout: {len(page_text)} chars "
+                        print(f"  [PageExtract] pypdf: {len(page_text)} chars "
                               f"from page {pg}", flush=True)
-                    else:
-                        page_text = reader.pages[idx].extract_text() or ""
-                        if page_text.strip():
-                            print(f"  [PageExtract] pypdf plain: {len(page_text)} chars "
-                                  f"from page {pg}", flush=True)
-                except TypeError:
-                    # Older pypdf does not accept extraction_mode kwarg
-                    try:
-                        page_text = reader.pages[idx].extract_text() or ""
-                        if page_text.strip():
-                            print(f"  [PageExtract] pypdf plain (no layout kwarg): "
-                                  f"{len(page_text)} chars from page {pg}", flush=True)
-                    except Exception as txt_err:
-                        print(f"  [PageExtract] Text extraction failed for "
-                              f"page {pg}: {txt_err}", flush=True)
                 except Exception as txt_err:
                     print(f"  [PageExtract] Text extraction failed for "
                           f"page {pg}: {txt_err}", flush=True)
@@ -664,12 +646,16 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
             )
         else:
             prompt += (
-                "  The RAW TEXT above contains the exact values from the PDF text layer.\n"
-                "  Cross-reference EVERY part number AND every quantity against the raw text.\n"
-                "  If a part number appears in the raw text, use the EXACT string from the raw text.\n"
-                "  If a quantity appears in the raw text (e.g. '125'), use that exact number — do NOT\n"
-                "  substitute a smaller number (e.g. '13') based on visual reading alone.\n"
-                "  Do NOT modify, correct, or 'improve' any value from the raw text.\n\n"
+                "  PART NUMBERS — use the RAW TEXT as your primary source:\n"
+                "  The raw text contains the exact part number characters from the PDF.\n"
+                "  Cross-reference every part number against the raw text and use the exact string.\n"
+                "  Do NOT modify, correct, or 'improve' part numbers from the raw text.\n\n"
+                "  QUANTITIES — use the IMAGE as your primary source:\n"
+                "  pypdf text extraction can scatter individual digits from multi-digit numbers\n"
+                "  (e.g. '134' may appear as '13' in the raw text with '4' displaced elsewhere).\n"
+                "  For every quantity: look at the QTY cell in the IMAGE and read the number directly.\n"
+                "  The image is the final authority for quantities — do not trust a raw-text qty\n"
+                "  if it looks truncated or smaller than expected for that part type.\n\n"
             )
     else:
         prompt += (
