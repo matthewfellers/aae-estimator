@@ -685,7 +685,7 @@ def _ocr_build_column_table(words, img_width):
             break
     if header_idx is None:
         print("  [OCR-cols] no BOM header row found", flush=True)
-        return ""
+        return "", None
 
     # ── 3. Keyword-anchored column detection ─────────────────────────────────
     # Each keyword word starts a new column at its own x-centre.
@@ -745,7 +745,7 @@ def _ocr_build_column_table(words, img_width):
         tbl_x_max  = col_spans[-1][1] + 150
         if len(col_labels) < 3:
             print(f"  [OCR-cols] fallback also < 3 cols", flush=True)
-            return ""
+            return "", None
         # Build gap-based boundaries
         boundaries = []
         for i in range(len(col_spans) - 1):
@@ -808,7 +808,27 @@ def _ocr_build_column_table(words, img_width):
           f"{len(result)} chars", flush=True)
     for ri, line in enumerate(table_rows[1:6]):
         print(f"  [OCR-cols] row[{ri+1}]: {line!r}", flush=True)
-    return result
+
+    # ── 5. Compute crop box so caller can send a tight BOM-only image to Stage 2 ──
+    # The full drawing page may be much wider than the BOM table (panel layout on
+    # the left etc.).  Sending a cropped image gives Claude 3-4× more pixels per
+    # cell and eliminates confusion from non-BOM numbers on the same page.
+    header_y_top = min(w["top"] for w in header_words)
+    last_y_bottom = header_y_top
+    for _y, rw in rows[header_idx + 1:]:
+        tw = [w for w in rw if w["left"] >= tbl_x_min and w["right"] <= tbl_x_max]
+        if tw:
+            bottom = max(w["top"] + w.get("height", 25) for w in tw)
+            last_y_bottom = max(last_y_bottom, bottom)
+    crop_box = (
+        max(0, tbl_x_min - 60),        # x0: small left margin
+        max(0, header_y_top - 100),     # y0: above header row
+        tbl_x_max + 60,                 # x1: small right margin
+        last_y_bottom + 120,            # y1: below last data row
+    )
+    print(f"  [OCR-cols] crop_box: x={crop_box[0]}-{crop_box[2]}  "
+          f"y={crop_box[1]}-{crop_box[3]}", flush=True)
+    return result, crop_box
 
 
 # ---------------------------------------------------------------------------
@@ -828,6 +848,7 @@ def _ocr_images(images_b64):
         from PIL import Image, ImageOps, ImageFilter
 
         all_text = []
+        cropped_images_b64 = []   # tight BOM-table crops, one per page (when detected)
         for i, img_b64 in enumerate(images_b64):
             img_bytes = base64.b64decode(img_b64)
             img = Image.open(io.BytesIO(img_bytes))
@@ -860,10 +881,11 @@ def _ocr_images(images_b64):
                 txt = data["text"][j].strip()
                 if conf >= 0 and txt:
                     words.append({
-                        "text":  txt,
-                        "left":  int(data["left"][j]),
-                        "top":   int(data["top"][j]),
-                        "right": int(data["left"][j]) + int(data["width"][j]),
+                        "text":   txt,
+                        "left":   int(data["left"][j]),
+                        "top":    int(data["top"][j]),
+                        "right":  int(data["left"][j]) + int(data["width"][j]),
+                        "height": int(data["height"][j]),
                     })
 
             if not words:
@@ -875,9 +897,25 @@ def _ocr_images(images_b64):
             words.sort(key=lambda w: (w["top"], w["left"]))
 
             # ── Try column-aware BOM table extraction first ──────────────────
-            col_text = _ocr_build_column_table(words, img.width)
+            col_text, crop_box = _ocr_build_column_table(words, img.width)
             if col_text.strip():
                 all_text.append(col_text)
+                # Crop the ORIGINAL rendered image to just the BOM table area.
+                # The full page may be 3-4× wider than the BOM (panel layout on
+                # the left), so cropping gives Claude ~3-4× more pixels per cell,
+                # making single-digit QTY values reliably readable.
+                if crop_box is not None:
+                    x0, y0, x1, y1 = crop_box
+                    x0 = max(0, x0);  y0 = max(0, y0)
+                    x1 = min(img.width, x1);  y1 = min(img.height, y1)
+                    cropped = img.crop((x0, y0, x1, y1))
+                    buf = io.BytesIO()
+                    cropped.save(buf, format="PNG")
+                    cropped_b64 = base64.b64encode(buf.getvalue()).decode()
+                    cropped_images_b64.append(cropped_b64)
+                    print(f"  [OCR] Page {i+1}: cropped BOM table "
+                          f"{x1-x0}×{y1-y0}px  (full page was "
+                          f"{img.width}×{img.height}px)", flush=True)
                 print(f"  [OCR] Page {i + 1}: {len(words)} words → "
                       f"column-aware table ({len(col_text)} chars)", flush=True)
                 continue  # skip the flat fallback below
@@ -921,14 +959,18 @@ def _ocr_images(images_b64):
         combined = "\n".join(all_text)
         print(f"  [OCR] Total: {len(combined)} chars across "
               f"{len(images_b64)} page(s)", flush=True)
-        return combined
+        if cropped_images_b64:
+            print(f"  [OCR] Cropped BOM images: {len(cropped_images_b64)} "
+                  f"page(s) — Stage 2 will use these for higher-resolution "
+                  f"cell reading", flush=True)
+        return combined, cropped_images_b64
 
     except ImportError as exc:
         print(f"  [OCR] pytesseract not available: {exc}", flush=True)
-        return ""
+        return "", []
     except Exception as exc:
         print(f"  [OCR] ERROR: {exc}", flush=True)
-        return ""
+        return "", []
 
 
 # System-level instruction that forces JSON-only output.
@@ -1457,10 +1499,10 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     items = result.get("bom_line_items", [])
     rows_reported = result.get("rows_extracted", len(items))
     print(f"SCAN Stage 2: Got {len(items)} items (model reported {rows_reported})", flush=True)
-    # Diagnostic: print first 10 rows so we can spot item_num/qty swaps in logs
-    for _di, _it in enumerate(items[:10]):
+    # Diagnostic: print ALL rows so we can verify item_num/qty for every item
+    for _di, _it in enumerate(items):
         print(f"  [Stage2] row[{_di+1:02d}] "
-              f"item_num={_it.get('item_num','?'):>4}  "
+              f"item_num={str(_it.get('item_num','?')):>4}  "
               f"qty={str(_it.get('qty','?')):>5}  "
               f"pn={_it.get('part_number','')[:30]}",
               flush=True)
@@ -1939,7 +1981,15 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     # text (>= 300 chars) keep it — OCR on normal PDFs scrambles
                     # table structure and garbles manufacturers/quantities.
                     pypdf_chars = len(bom_raw_text.strip())
-                    ocr_text = _ocr_images(bom_images)
+                    ocr_text, bom_images_cropped = _ocr_images(bom_images)
+                    # If OCR successfully cropped the BOM table, use the tight
+                    # crop for Stage 2 so Claude sees the table at full resolution
+                    # instead of a small corner of a large page image.
+                    if bom_images_cropped:
+                        bom_images = bom_images_cropped
+                        print(f"SCAN [{filename}]: Using cropped BOM images "
+                              f"({len(bom_images_cropped)} page(s)) for Stage 2/5",
+                              flush=True)
                     if ocr_text.strip() and pypdf_chars < 300:
                         structure["_bom_raw_text"] = ocr_text
                         # If OCR produced a column-aware pipe table (has header row
