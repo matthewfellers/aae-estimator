@@ -650,12 +650,16 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "  The raw text contains the exact part number characters from the PDF.\n"
                 "  Cross-reference every part number against the raw text and use the exact string.\n"
                 "  Do NOT modify, correct, or 'improve' part numbers from the raw text.\n\n"
-                "  QUANTITIES — use the IMAGE as your primary source:\n"
-                "  pypdf text extraction can scatter individual digits from multi-digit numbers\n"
-                "  (e.g. '134' may appear as '13' in the raw text with '4' displaced elsewhere).\n"
-                "  For every quantity: look at the QTY cell in the IMAGE and read the number directly.\n"
-                "  The image is the final authority for quantities — do not trust a raw-text qty\n"
-                "  if it looks truncated or smaller than expected for that part type.\n\n"
+                "  QUANTITIES — READ FROM THE IMAGE ONLY. IGNORE ALL RAW-TEXT QUANTITIES:\n"
+                "  pypdf corrupts qty values by merging them with adjacent column digits.\n"
+                "  Two known failure patterns in this drawing:\n"
+                "    Pattern A — digit APPENDED: qty=14 beside part=3002619\n"
+                "      → raw text shows '143' (the '3' from the part number is glued on)\n"
+                "    Pattern B — digit DROPPED: qty=134\n"
+                "      → raw text shows '13' (the '4' is displaced to another position)\n"
+                "  RULE: Treat every qty value in the raw text as UNRELIABLE.\n"
+                "  For EVERY row without exception: locate the QTY cell in the IMAGE\n"
+                "  and read the number directly from there. That is the only correct source.\n\n"
             )
     else:
         prompt += (
