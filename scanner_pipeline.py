@@ -168,7 +168,6 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
     # Tuning constants (all in PDF points; 72pt = 1 inch)
     Y_TOLERANCE      = 8   # max y0 diff for words on the same visual line
     HEADER_MERGE_GAP = 20  # header words ≤20pt apart → same column label
-    COL_BUF          = 10  # left buffer when assigning data words to columns
 
     try:
         import fitz  # PyMuPDF
@@ -269,6 +268,12 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
                     continue   # Still searching for header
 
                 # ── Assign data words to columns ────────────────────────────
+                # Use the MIDPOINT between adjacent column header x-positions as
+                # the boundary.  This is more robust than (next_header_x - buffer):
+                # a fixed buffer steals space from the current column and causes
+                # the last digit of multi-digit numbers (e.g. "8" in item "48")
+                # to fall into the next column.  Midpoint puts the cut exactly
+                # halfway between adjacent headers — no tuning required.
                 n_cols = len(col_boundaries)
                 cells  = [""] * n_cols
 
@@ -277,7 +282,8 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
                     wtext = w[4].strip()
                     assigned = n_cols - 1   # default: last column
                     for ci in range(n_cols - 1):
-                        if wx0 < col_boundaries[ci + 1] - COL_BUF:
+                        mid = (col_boundaries[ci] + col_boundaries[ci + 1]) / 2
+                        if wx0 < mid:
                             assigned = ci
                             break
                     cells[assigned] = (cells[assigned] + " " + wtext).strip()
