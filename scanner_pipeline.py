@@ -418,15 +418,14 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "All schematics, wiring diagrams, and other pages have been removed.\n"
                 "This is a high-resolution rendering of the BOM page from the drawing.\n"
                 "Read EVERY row visible in this image. The entire image is your BOM source.\n\n"
-                "=== CRITICAL: YOU ARE A CAMERA, NOT AN AI ===\n"
-                "Your ONLY job is to PHOTOGRAPH the text — copy pixels to characters.\n"
-                "DO NOT use ANY knowledge from your training data about part numbers,\n"
-                "manufacturers, or products. If a cell contains SCE-24EL2412LPPL, you\n"
-                "write SCE-24EL2412LPPL. If it contains XYZZY-123, you write XYZZY-123.\n"
-                "You have NO idea what product this is or who makes it. You are just\n"
-                "copying text from a photograph. Every character matters.\n"
-                "If you cannot read a character with 100%% certainty, write [?] for that character.\n"
-                "NEVER substitute a 'more likely' character from your training knowledge.\n\n"
+                "=== CRITICAL: READ THE IMAGE — DO NOT INVENT ===\n"
+                "Read the text exactly as it appears in the image using your best visual judgment.\n"
+                "DO NOT substitute part numbers, descriptions, or manufacturers from your\n"
+                "training data. If the image shows SCE-24EL2412LPPL, write SCE-24EL2412LPPL.\n"
+                "If you genuinely cannot read a specific character after careful inspection,\n"
+                "write [?] for ONLY that one character (e.g. SC[?]-24EL2412LPPL).\n"
+                "Do NOT refuse to extract or use [?] for whole cells — always attempt to\n"
+                "read as much as you can. Your best visual read beats your training knowledge.\n\n"
             )
         else:
             page_instruction = (
