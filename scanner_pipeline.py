@@ -625,6 +625,111 @@ def _render_pdf_to_image(pdf_b64, dpi=300):
 
 
 # ---------------------------------------------------------------------------
+# Column-aware BOM table reconstruction from OCR word positions
+# ---------------------------------------------------------------------------
+_OCR_BOM_HEADER_KEYWORDS = {
+    'no', 'no.', 'item', 'item#', 'description', 'desc',
+    'manufacturer', 'mfg', 'part', 'catalog', 'cat.', 'qty', 'quantity',
+}
+
+def _ocr_build_column_table(words, img_width):
+    """Given pytesseract word list (each word has left/top/right keys),
+    locate the BOM table header row and reconstruct a pipe-separated
+    column-aware table — the same format used for fitz column extraction.
+
+    Returns a non-empty string on success, "" if no BOM table detected.
+    """
+    Y_ROW_TOL   = 22   # px: words within this vertical range = same row
+    MIN_KW      = 3    # BOM header must contain ≥ this many keywords
+    MERGE_GAP   = 120  # px: adjacent header words closer than this = same column
+
+    # ── 1. Group words into rows by y-position ──────────────────────────────
+    rows = []   # each entry: (avg_y, [word, ...])
+    for w in sorted(words, key=lambda x: x["top"]):
+        for row in rows:
+            if abs(w["top"] - row[0]) <= Y_ROW_TOL:
+                row[1].append(w)
+                break
+        else:
+            rows.append([w["top"], [w]])
+    rows = [(y, sorted(ws, key=lambda x: x["left"])) for y, ws in rows]
+
+    # ── 2. Find the BOM header row ───────────────────────────────────────────
+    header_idx  = None
+    header_words = None
+    for i, (y, rw) in enumerate(rows):
+        tokens = [w["text"].lower().rstrip(".#:") for w in rw]
+        kw_hits = sum(1 for t in tokens if t in _OCR_BOM_HEADER_KEYWORDS)
+        if kw_hits >= MIN_KW:
+            header_idx   = i
+            header_words = rw
+            break
+    if header_idx is None:
+        print("  [OCR-cols] no BOM header row found", flush=True)
+        return ""
+
+    # ── 3. Cluster adjacent header words into column labels ──────────────────
+    # Each cluster = one column.  Merge words that are close together
+    # (e.g. "PART" + "NUMBER") but keep columns far apart separate (e.g. QTY).
+    clusters = [[header_words[0]]]
+    for w in header_words[1:]:
+        gap = w["left"] - clusters[-1][-1]["right"]
+        if gap <= MERGE_GAP:
+            clusters[-1].append(w)
+        else:
+            clusters.append([w])
+
+    if len(clusters) < 3:
+        print(f"  [OCR-cols] too few columns ({len(clusters)})", flush=True)
+        return ""
+
+    col_labels  = [" ".join(w["text"].upper() for w in cl) for cl in clusters]
+    col_x_start = [cl[0]["left"]                             for cl in clusters]
+    col_x_end   = [cl[-1]["right"]                           for cl in clusters]
+
+    # Midpoint boundaries between adjacent columns
+    col_ctr    = [(s + e) // 2 for s, e in zip(col_x_start, col_x_end)]
+    boundaries = [(col_ctr[i] + col_ctr[i + 1]) // 2
+                  for i in range(len(col_ctr) - 1)]
+    boundaries.append(img_width + 99999)
+
+    def assign_col(word_cx):
+        for ci, bnd in enumerate(boundaries):
+            if word_cx <= bnd:
+                return ci
+        return len(col_labels) - 1
+
+    print(f"  [OCR-cols] header @ row {header_idx}: {col_labels}", flush=True)
+
+    # ── 4. BOM table x-extent (with generous margin) ────────────────────────
+    tbl_x_min = col_x_start[0] - 150
+    tbl_x_max = col_x_end[-1]  + 150
+
+    # ── 5. Build the structured table ────────────────────────────────────────
+    table_rows = [" | ".join(col_labels)]
+    for _y, rw in rows[header_idx + 1:]:
+        # Keep only words inside the BOM table's horizontal band
+        tw = [w for w in rw if w["left"] >= tbl_x_min and w["right"] <= tbl_x_max]
+        if not tw:
+            continue
+        cells = [""] * len(col_labels)
+        for w in tw:
+            cx  = (w["left"] + w["right"]) // 2
+            ci  = assign_col(cx)
+            cells[ci] = (cells[ci] + " " + w["text"]).strip()
+        if any(c for c in cells):
+            table_rows.append(" | ".join(cells))
+
+    result = "\n".join(table_rows)
+    print(f"  [OCR-cols] built {len(table_rows)-1} data rows, "
+          f"{len(result)} chars", flush=True)
+    # Peek at first 5 rows for debugging
+    for ri, line in enumerate(table_rows[1:6]):
+        print(f"  [OCR-cols] row[{ri+1}]: {line!r}", flush=True)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # OCR — extract exact text from rendered BOM images using pytesseract
 # ---------------------------------------------------------------------------
 def _ocr_images(images_b64):
@@ -686,6 +791,18 @@ def _ocr_images(images_b64):
 
             # Sort by vertical position then horizontal
             words.sort(key=lambda w: (w["top"], w["left"]))
+
+            # ── Try column-aware BOM table extraction first ──────────────────
+            col_text = _ocr_build_column_table(words, img.width)
+            if col_text.strip():
+                all_text.append(col_text)
+                print(f"  [OCR] Page {i + 1}: {len(words)} words → "
+                      f"column-aware table ({len(col_text)} chars)", flush=True)
+                continue  # skip the flat fallback below
+
+            # ── Fallback: flat line reconstruction with gap-based | markers ──
+            print(f"  [OCR] Page {i + 1}: column extraction failed — "
+                  f"falling back to flat OCR", flush=True)
 
             # Group words into lines (within 25px vertically)
             lines, current_line, line_y = [], [words[0]], words[0]["top"]
@@ -988,10 +1105,13 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     if bom_extracted:
         if using_images:
             page_instruction = (
-                "THIS IMAGE SHOWS ONLY THE BOM (BILL OF MATERIALS) TABLE.\n"
-                "All schematics, wiring diagrams, and other pages have been removed.\n"
-                "This is a high-resolution rendering of the BOM page from the drawing.\n"
-                "Read EVERY row visible in this image. The entire image is your BOM source.\n\n"
+                "This image is a high-resolution rendering of the BOM page from the drawing.\n"
+                "The BILL OF MATERIALS table may occupy only PART of this image — the rest\n"
+                "may show panel layouts, schematics, wiring diagrams, or other diagrams.\n"
+                "FIND the BILL OF MATERIALS table (look for a grid with headers like\n"
+                "NO./ITEM, DESCRIPTION, MANUFACTURER, PART NUMBER, QTY).\n"
+                "Read EVERY row of that table. IGNORE everything outside the table\n"
+                "(panel component circles, wire numbers, reference labels, schematics, etc.).\n\n"
                 "=== CRITICAL: READ THE IMAGE — DO NOT INVENT ===\n"
                 "Read the text exactly as it appears in the image using your best visual judgment.\n"
                 "DO NOT substitute part numbers, descriptions, or manufacturers from your\n"
@@ -1728,7 +1848,17 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     ocr_text = _ocr_images(bom_images)
                     if ocr_text.strip() and pypdf_chars < 300:
                         structure["_bom_raw_text"] = ocr_text
-                        structure["_bom_text_source"] = "ocr"   # SHX drawing — OCR is primary
+                        # If OCR produced a column-aware pipe table (has header row
+                        # with " | " separators), treat it like fitz column extraction
+                        # so Stage 2 uses the reliable "columns" prompt path.
+                        first_line = ocr_text.split("\n")[0] if ocr_text else ""
+                        if first_line.count(" | ") >= 2:
+                            structure["_bom_text_source"] = "columns"
+                            print(f"SCAN [{filename}]: OCR produced column-aware table "
+                                  f"({len(ocr_text)} chars) — using 'columns' mode",
+                                  flush=True)
+                        else:
+                            structure["_bom_text_source"] = "ocr"
                         print(f"SCAN [{filename}]: pypdf had only {pypdf_chars} chars "
                               f"(SHX/vector font) — using OCR text ({len(ocr_text)} chars) "
                               f"as primary source", flush=True)
