@@ -133,24 +133,204 @@ def _extract_pages(pdf_b64, page_numbers):
 
 
 # ---------------------------------------------------------------------------
+# Horizontal BOM helper
+# ---------------------------------------------------------------------------
+def _try_horizontal_bom(raw_words, page_num):
+    """Detect and extract a HORIZONTAL / SIDEWAYS BOM.
+
+    Some CAD drawings lay the BOM sideways: each item is a COLUMN, and
+    each field type (ITEM#, QTY, PART, MFG) is a horizontal BAND at a
+    different y-position.  fitz extracts all item numbers as one long line
+    at y≈36, all quantities at y≈59, all parts at y≈75, etc.
+
+    Strategy:
+      1. Group words into y-bands (20pt tolerance).
+      2. Find the ITEM band: a band containing 5+ sequential positive integers.
+      3. Find the QTY band: the band just below ITEM where words are
+         mostly parseable as positive integers.
+      4. Find the PART band: next band below QTY with alphanumeric content.
+      5. For each item, find the QTY and PART word nearest in x-center.
+         This handles noise (e.g. 'DATE' from the title block) naturally —
+         noise words won't be near any item's x-center.
+      6. Collect MFG from remaining bands using the same x-proximity rule.
+      7. Output a vertical pipe-separated table (one row per item).
+
+    Returns pipe-separated table string, or "" if not a horizontal BOM.
+    """
+    Y_BAND_TOL = 20    # pt — words within 20pt vertically are the same band
+
+    # ── 1. Group into y-bands ───────────────────────────────────────────────
+    bands = []   # list of {'y': float, 'words': list}
+    for w in sorted(raw_words, key=lambda w: w[1]):
+        if not w[4].strip():
+            continue
+        placed = False
+        for band in bands:
+            if abs(w[1] - band['y']) <= Y_BAND_TOL:
+                band['words'].append(w)
+                placed = True
+                break
+        if not placed:
+            bands.append({'y': w[1], 'words': [w]})
+    bands.sort(key=lambda b: b['y'])
+
+    # ── 2. Find ITEM band ───────────────────────────────────────────────────
+    # Must contain ≥5 distinct positive integers that form a mostly-sequential
+    # set (gaps of ≤2 allowed, e.g. item 34 deleted from a 48-item BOM).
+    item_band_idx = None
+    item_xn = []   # [(x_center, item_number), …] sorted by x
+
+    for bi, band in enumerate(bands):
+        sw = sorted(band['words'], key=lambda w: w[0])
+        int_words = []
+        for w in sw:
+            try:
+                n = int(w[4].strip())
+                if n > 0:
+                    int_words.append(((w[0] + w[2]) / 2, n))
+            except ValueError:
+                pass
+        if len(int_words) < 5:
+            continue
+        nums = sorted(set(n for _, n in int_words))
+        max_n = nums[-1]
+        # Allow up to 3 gaps in the sequence (deleted items are normal)
+        gaps = sum(1 for i in range(len(nums) - 1) if nums[i + 1] - nums[i] > 1)
+        if max_n >= 5 and gaps <= 3:
+            item_band_idx = bi
+            item_xn = sorted(int_words, key=lambda iw: iw[0])
+            print(f"  [ColumnExtract] HorizBOM: item band y≈{band['y']:.1f}, "
+                  f"{len(item_xn)} items (max={max_n}, gaps={gaps})", flush=True)
+            break
+
+    if item_band_idx is None:
+        return ""   # Not a horizontal BOM
+
+    # Estimate column width for x-proximity matching
+    if len(item_xn) > 1:
+        x_span   = item_xn[-1][0] - item_xn[0][0]
+        col_half = (x_span / (len(item_xn) - 1)) * 0.55
+    else:
+        col_half = 20
+
+    def nearest_by_x(candidates, item_x):
+        """Return text of candidate word whose x-center is closest to item_x."""
+        best_text, best_dist = "", float('inf')
+        for cx, text in candidates:
+            d = abs(cx - item_x)
+            if d < best_dist:
+                best_dist, best_text = d, text
+        return best_text if best_dist <= col_half else ""
+
+    # ── 3. Find QTY band ────────────────────────────────────────────────────
+    qty_band_idx = None
+    qty_xv = []   # [(x_center, qty_string)]
+
+    for bi in range(item_band_idx + 1, len(bands)):
+        band = bands[bi]
+        sw   = sorted(band['words'], key=lambda w: w[0])
+        ints = []
+        for w in sw:
+            try:
+                n = int(w[4].strip())
+                if n > 0:
+                    ints.append(((w[0] + w[2]) / 2, str(n)))
+            except ValueError:
+                pass
+        non_empty = [w for w in sw if w[4].strip()]
+        if non_empty and len(ints) / len(non_empty) >= 0.4:
+            qty_band_idx = bi
+            qty_xv = ints
+            print(f"  [ColumnExtract] HorizBOM: qty  band y≈{band['y']:.1f}, "
+                  f"{len(ints)} values", flush=True)
+            break
+
+    if qty_band_idx is None:
+        print("  [ColumnExtract] HorizBOM: no QTY band found", flush=True)
+        return ""
+
+    # ── 4. Find PART band ───────────────────────────────────────────────────
+    part_band_idx = None
+    part_xv = []   # [(x_center, part_string)]
+
+    for bi in range(qty_band_idx + 1, len(bands)):
+        band = bands[bi]
+        sw   = sorted(band['words'], key=lambda w: w[0])
+        parts = [((w[0] + w[2]) / 2, w[4].strip())
+                 for w in sw if len(w[4].strip()) >= 3]
+        if len(parts) >= 5:
+            part_band_idx = bi
+            part_xv = parts
+            print(f"  [ColumnExtract] HorizBOM: part band y≈{band['y']:.1f}, "
+                  f"{len(parts)} values", flush=True)
+            break
+
+    if part_band_idx is None:
+        print("  [ColumnExtract] HorizBOM: no PART band found", flush=True)
+        return ""
+
+    # ── 5. Collect MFG from remaining bands (may be multi-line) ────────────
+    mfg_xv_all = []   # [(x_center, word)]
+    for bi in range(part_band_idx + 1, len(bands)):
+        band = bands[bi]
+        for w in band['words']:
+            txt = w[4].strip()
+            if txt and len(txt) >= 2:
+                mfg_xv_all.append(((w[0] + w[2]) / 2, txt))
+
+    # ── 6. Build per-item MFG (nearest-x with multi-word accumulation) ──────
+    item_mfg = {}
+    for cx, txt in mfg_xv_all:
+        best_item, best_dist = None, float('inf')
+        for item_x, item_n in item_xn:
+            d = abs(cx - item_x)
+            if d < best_dist:
+                best_dist, best_item = d, item_n
+        if best_item is not None and best_dist <= col_half:
+            item_mfg[best_item] = (item_mfg.get(best_item, "") + " " + txt).strip()
+
+    # ── 7. Reconstruct vertical BOM table ───────────────────────────────────
+    all_item_nums = sorted(n for _, n in item_xn)
+    rows = ["ITEM | QTY | CATALOG NO. | MFG"]
+    for item_n in all_item_nums:
+        item_x = next(x for x, n in item_xn if n == item_n)
+        qty    = nearest_by_x(qty_xv,  item_x)
+        part   = nearest_by_x(part_xv, item_x)
+        mfg    = item_mfg.get(item_n, "")
+        row    = f"{item_n} | {qty} | {part} | {mfg}"
+        rows.append(row)
+        # Log a few rows for verification
+        if item_n <= 3 or item_n in (26, 27, 36, 5):
+            print(f"  [ColumnExtract] HorizBOM  item {item_n:2d}: "
+                  f"qty={qty!r}  part={part!r}  mfg={mfg!r}", flush=True)
+
+    result = "\n".join(rows)
+    print(f"  [ColumnExtract] HorizBOM SUCCESS: {len(rows)-1} items, "
+          f"{len(result)} chars", flush=True)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Column-Aware BOM Extraction — THE FIX for qty/part-number digit merging
 # ---------------------------------------------------------------------------
 def _extract_bom_columns(pdf_bytes, page_numbers):
-    """Extract BOM table from PDF using fitz word bounding boxes.
+    """Extract BOM table using two strategies, best-first.
 
-    pypdf reads the PDF content stream in storage order (not visual order),
-    so adjacent column text merges: qty=14 beside part=3002619 → "143".
-    fitz's page.get_text("words") returns each word with its exact bounding
-    box in PDF points, so we can group by row (y-position) and assign to
-    columns by x-position derived from the header row.
+    Strategy 1 — find_tables() (PyMuPDF ≥ 1.23):
+      Reads the physical grid lines drawn in the PDF to find table cells.
+      Completely independent of column header x-positions.  If the BOM has
+      visible cell borders (all CAD-generated BOMs do), this gives EXACT cell
+      values with zero column-merging.  This is the slam-dunk path.
 
-    Key fix vs naive word-per-column approach: multi-word header labels like
-    "CATALOG NO." or "PART NUMBER" are clustered into ONE column header using
-    a horizontal gap threshold.  Without this, "CATALOG" and "NO." each become
-    a phantom column boundary, corrupting every data row.
+    Strategy 2 — word bounding-box fallback:
+      Groups fitz words into visual rows and assigns to columns by midpoint
+      between adjacent header x-positions.  Used when Strategy 1 finds no
+      tables (borderless tables, old fitz version, etc.).
 
-    Result: pipe-separated table where each '|' is a true column boundary.
-    Merging adjacent column values is physically impossible.
+    Both strategies produce a pipe-separated table:
+      ITEM | QTY | PART NUMBER | MANUFACTURER | DESCRIPTION
+      26   | 14  | 3002619     | PHOENIX CONTACT | TERMINAL BLOCK...
+    so QTY and PART NUMBER are in separate cells and can never merge.
 
     Args:
         pdf_bytes: Raw PDF bytes (not base64)
@@ -165,7 +345,7 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
         "number", "cat", "unit", "line",
     }
 
-    # Tuning constants (all in PDF points; 72pt = 1 inch)
+    # Strategy 2 constants (PDF points; 72pt = 1 inch)
     Y_TOLERANCE      = 8   # max y0 diff for words on the same visual line
     HEADER_MERGE_GAP = 20  # header words ≤20pt apart → same column label
 
@@ -174,155 +354,203 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
 
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
-
-        all_rows    = []
-        col_headers = None
-        col_boundaries = None  # x0 of each column (one per cluster)
+        all_rows = []
 
         for pg_num in page_numbers:
             idx = pg_num - 1
             if idx < 0 or idx >= total_pages:
                 continue
             page = doc[idx]
+            page_rows = []   # rows extracted from this page
 
-            # Get words: each entry is (x0, y0, x1, y1, word, block, line, wno)
-            raw_words = page.get_text("words")
-            if not raw_words:
-                print(f"  [ColumnExtract] Page {pg_num}: no words found by fitz",
-                      flush=True)
-                continue
-
-            # Sort top-to-bottom, left-to-right
-            raw_words = sorted(raw_words, key=lambda w: (w[1], w[0]))
-            print(f"  [ColumnExtract] Page {pg_num}: fitz found {len(raw_words)} words",
-                  flush=True)
-
-            # ── Group into visual lines ─────────────────────────────────────
-            lines = []
-            current_line = [raw_words[0]]
-            line_y = raw_words[0][1]
-            for w in raw_words[1:]:
-                if abs(w[1] - line_y) <= Y_TOLERANCE:
-                    current_line.append(w)
+            # ════════════════════════════════════════════════════════════════
+            # STRATEGY 1: find_tables() — reads actual grid lines in the PDF
+            # ════════════════════════════════════════════════════════════════
+            try:
+                tabs = page.find_tables()   # AttributeError if fitz < 1.23
+                if tabs.tables:
+                    # Pick the table with the most rows (= BOM, not title block)
+                    best = max(tabs.tables, key=lambda t: len(t.rows))
+                    print(f"  [ColumnExtract] Strat1 find_tables(): page {pg_num} → "
+                          f"{len(tabs.tables)} table(s), using best "
+                          f"({len(best.rows)} rows × {len(best.col_count) if hasattr(best, 'col_count') else '?'} cols)",
+                          flush=True)
+                    n = 0
+                    for row_data in best.extract():
+                        # Normalise: collapse newlines inside cells, strip whitespace
+                        cells = [str(c or "").replace("\n", " ").strip()
+                                 for c in row_data]
+                        row_text = " | ".join(cells)
+                        if any(c for c in cells):
+                            page_rows.append(row_text)
+                            n += 1
+                            if n <= 5:
+                                print(f"  [ColumnExtract]   S1 row {n}: {row_text!r}",
+                                      flush=True)
+                    print(f"  [ColumnExtract] Strat1 SUCCESS: {n} rows extracted",
+                          flush=True)
                 else:
-                    lines.append(sorted(current_line, key=lambda x: x[0]))
-                    current_line = [w]
-                    line_y = w[1]
-            if current_line:
-                lines.append(sorted(current_line, key=lambda x: x[0]))
+                    print(f"  [ColumnExtract] Strat1 find_tables(): page {pg_num} — "
+                          f"no tables detected", flush=True)
 
-            print(f"  [ColumnExtract] Grouped into {len(lines)} visual lines",
-                  flush=True)
+            except AttributeError:
+                # find_tables() not available (PyMuPDF < 1.23)
+                print(f"  [ColumnExtract] Strat1 skipped: PyMuPDF < 1.23 "
+                      f"(find_tables unavailable)", flush=True)
+            except Exception as e1:
+                print(f"  [ColumnExtract] Strat1 error: {e1}", flush=True)
 
-            # Log first 8 lines so we can see what fitz extracted
-            for dbg_i, dbg_line in enumerate(lines[:8]):
-                dbg_text = " ".join(w[4] for w in dbg_line)
-                print(f"  [ColumnExtract]   line[{dbg_i:02d}] y≈{dbg_line[0][1]:.1f}: "
-                      f"{dbg_text!r}", flush=True)
+            # ════════════════════════════════════════════════════════════════
+            # STRATEGY 2: Horizontal / sideways BOM
+            # Some CAD drawings store items left-to-right: all item numbers
+            # are on one y-band, all quantities on the next, all parts on
+            # the next.  _try_horizontal_bom() reconstructs vertical rows
+            # by matching across bands by x-center proximity.
+            # ════════════════════════════════════════════════════════════════
+            raw_words = None   # fetch once, share between strategies 2 & 3
+            if not page_rows:
+                raw_words = page.get_text("words")
+                if raw_words:
+                    horiz = _try_horizontal_bom(raw_words, pg_num)
+                    if horiz:
+                        page_rows = horiz.splitlines()
 
-            # ── Scan lines for header row ───────────────────────────────────
-            for line_idx, line in enumerate(lines):
-                clean_words = [w for w in line if w[4].strip()]
-                if not clean_words:
-                    continue
-                word_texts_lower = [w[4].strip().lower() for w in clean_words]
+            # ════════════════════════════════════════════════════════════════
+            # STRATEGY 3: vertical word-bbox with header detection
+            # (only runs if Strategies 1 & 2 got nothing)
+            # ════════════════════════════════════════════════════════════════
+            if not page_rows:
+                print(f"  [ColumnExtract] Strat3 word-bbox header: page {pg_num}",
+                      flush=True)
+                if raw_words is None:
+                    raw_words = page.get_text("words")
+                if not raw_words:
+                    print(f"  [ColumnExtract] Strat3: no words found on page {pg_num}",
+                          flush=True)
+                else:
+                    raw_words = sorted(raw_words, key=lambda w: (w[1], w[0]))
+                    print(f"  [ColumnExtract] Strat3: {len(raw_words)} words on page {pg_num}",
+                          flush=True)
 
-                # ── Header detection ────────────────────────────────────────
-                if col_headers is None:
-                    matches = sum(1 for t in word_texts_lower
-                                  if t in _BOM_HEADER_KEYWORDS)
-                    if matches >= 2:
-                        # Cluster adjacent words into single column labels.
-                        # "CATALOG NO." → one cluster; "ITEM" → own cluster.
-                        # Gap between consecutive header words determines split.
-                        clusters = []
-                        cluster  = [clean_words[0]]
-                        for ci in range(1, len(clean_words)):
-                            prev_w = clean_words[ci - 1]
-                            curr_w = clean_words[ci]
-                            gap = curr_w[0] - prev_w[2]   # x0_curr - x1_prev
-                            if gap <= HEADER_MERGE_GAP:
-                                cluster.append(curr_w)
-                            else:
-                                clusters.append(cluster)
-                                cluster = [curr_w]
-                        clusters.append(cluster)
+                    # Group into visual lines
+                    lines, cur_line, line_y = [], [raw_words[0]], raw_words[0][1]
+                    for w in raw_words[1:]:
+                        if abs(w[1] - line_y) <= Y_TOLERANCE:
+                            cur_line.append(w)
+                        else:
+                            lines.append(sorted(cur_line, key=lambda x: x[0]))
+                            cur_line, line_y = [w], w[1]
+                    if cur_line:
+                        lines.append(sorted(cur_line, key=lambda x: x[0]))
 
-                        col_headers    = []
-                        col_boundaries = []
-                        for clust in clusters:
-                            label = " ".join(w[4].strip() for w in clust).upper()
-                            col_headers.append(label)
-                            col_boundaries.append(clust[0][0])   # x0 of first word
+                    # Log first 8 lines (text + x positions) for diagnosis
+                    for di, dl in enumerate(lines[:8]):
+                        words_info = "  ".join(
+                            f"{w[4]!r}@{w[0]:.0f}" for w in dl)
+                        print(f"  [ColumnExtract]   S3 line[{di:02d}] "
+                              f"y≈{dl[0][1]:.1f}: {words_info}", flush=True)
 
-                        print(f"  [ColumnExtract] Header found at line {line_idx}:",
-                              flush=True)
-                        for hi, (hname, hx) in enumerate(zip(col_headers,
-                                                              col_boundaries)):
-                            print(f"  [ColumnExtract]   col[{hi}] x={hx:.1f}  {hname!r}",
-                                  flush=True)
-                        all_rows.append(" | ".join(col_headers))
-                        continue
+                    col_headers = None
+                    col_boundaries = None
 
-                if col_headers is None:
-                    continue   # Still searching for header
+                    for line_idx, line in enumerate(lines):
+                        clean = [w for w in line if w[4].strip()]
+                        if not clean:
+                            continue
+                        lower = [w[4].strip().lower() for w in clean]
 
-                # ── Assign data words to columns ────────────────────────────
-                # Use the MIDPOINT between adjacent column header x-positions as
-                # the boundary.  This is more robust than (next_header_x - buffer):
-                # a fixed buffer steals space from the current column and causes
-                # the last digit of multi-digit numbers (e.g. "8" in item "48")
-                # to fall into the next column.  Midpoint puts the cut exactly
-                # halfway between adjacent headers — no tuning required.
-                n_cols = len(col_boundaries)
-                cells  = [""] * n_cols
+                        # Header detection: ≥2 keywords on the same line
+                        if col_headers is None:
+                            matches = sum(1 for t in lower
+                                          if t in _BOM_HEADER_KEYWORDS)
+                            if matches >= 2:
+                                # Cluster adjacent words into one column label
+                                clusters, clust = [], [clean[0]]
+                                for ci in range(1, len(clean)):
+                                    gap = clean[ci][0] - clean[ci-1][2]
+                                    if gap <= HEADER_MERGE_GAP:
+                                        clust.append(clean[ci])
+                                    else:
+                                        clusters.append(clust)
+                                        clust = [clean[ci]]
+                                clusters.append(clust)
 
-                for w in clean_words:
-                    wx0   = w[0]
-                    wtext = w[4].strip()
-                    assigned = n_cols - 1   # default: last column
-                    for ci in range(n_cols - 1):
-                        mid = (col_boundaries[ci] + col_boundaries[ci + 1]) / 2
-                        if wx0 < mid:
-                            assigned = ci
-                            break
-                    cells[assigned] = (cells[assigned] + " " + wtext).strip()
+                                col_headers    = []
+                                col_boundaries = []
+                                for clust in clusters:
+                                    lbl = " ".join(
+                                        w[4].strip() for w in clust).upper()
+                                    col_headers.append(lbl)
+                                    col_boundaries.append(clust[0][0])
 
-                # ── Description continuation: only last column has content ──
-                non_empty = [i for i, c in enumerate(cells) if c.strip()]
-                if non_empty and non_empty == [n_cols - 1] and all_rows:
-                    all_rows[-1] = all_rows[-1].rstrip() + " " + cells[-1].strip()
-                    continue
+                                print(f"  [ColumnExtract] S3 header @ line {line_idx}:",
+                                      flush=True)
+                                for hi, (hn, hx) in enumerate(
+                                        zip(col_headers, col_boundaries)):
+                                    print(f"  [ColumnExtract]   S3col[{hi}] "
+                                          f"x={hx:.1f}  {hn!r}", flush=True)
+                                page_rows.append(" | ".join(col_headers))
+                                continue
 
-                # Skip blank lines
-                if any(c.strip() for c in cells):
-                    row_text = " | ".join(cells)
-                    all_rows.append(row_text)
-                    # Log first 5 data rows
-                    if len(all_rows) <= 6:
-                        print(f"  [ColumnExtract]   data row {len(all_rows)-1}: "
-                              f"{row_text!r}", flush=True)
+                        if col_headers is None:
+                            continue
+
+                        # Assign words to columns by midpoint boundary
+                        n_cols = len(col_boundaries)
+                        cells  = [""] * n_cols
+                        for w in clean:
+                            wx0   = w[0]
+                            wtext = w[4].strip()
+                            assigned = n_cols - 1
+                            for ci in range(n_cols - 1):
+                                mid = (col_boundaries[ci] +
+                                       col_boundaries[ci + 1]) / 2
+                                if wx0 < mid:
+                                    assigned = ci
+                                    break
+                            cells[assigned] = (
+                                cells[assigned] + " " + wtext).strip()
+
+                        # Description continuation
+                        ne = [i for i, c in enumerate(cells) if c.strip()]
+                        if ne and ne == [n_cols - 1] and page_rows:
+                            page_rows[-1] = (page_rows[-1].rstrip() + " "
+                                             + cells[-1].strip())
+                            continue
+
+                        if any(c.strip() for c in cells):
+                            row_text = " | ".join(cells)
+                            page_rows.append(row_text)
+                            if len(page_rows) <= 6:
+                                print(f"  [ColumnExtract]   S3 row "
+                                      f"{len(page_rows)}: {row_text!r}",
+                                      flush=True)
+
+                    if col_headers is None:
+                        print(f"  [ColumnExtract] S2: no header found on "
+                              f"page {pg_num}", flush=True)
+
+            all_rows.extend(page_rows)
 
         doc.close()
 
-        if col_headers is None:
-            print("  [ColumnExtract] No BOM header row found — falling back to pypdf",
-                  flush=True)
+        if not all_rows:
+            print("  [ColumnExtract] Both strategies found nothing — "
+                  "falling back to pypdf", flush=True)
             return ""
 
         result = "\n".join(all_rows)
-        print(f"  [ColumnExtract] SUCCESS: {len(all_rows)} rows "
-              f"({len(result)} chars total)", flush=True)
+        print(f"  [ColumnExtract] DONE: {len(all_rows)} rows "
+              f"({len(result)} chars)", flush=True)
         return result
 
     except ImportError:
-        print("  [ColumnExtract] fitz (PyMuPDF) not available — "
-              "falling back to pypdf", flush=True)
+        print("  [ColumnExtract] fitz (PyMuPDF) not available", flush=True)
         return ""
     except Exception as exc:
         import traceback as _tb
         print(f"  [ColumnExtract] ERROR: {exc}", flush=True)
-        print(f"  [ColumnExtract] {_tb.format_exc()}", flush=True)
+        print(_tb.format_exc(), flush=True)
         return ""
 
 
