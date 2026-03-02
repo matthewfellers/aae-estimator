@@ -40,7 +40,7 @@ def _extract_pages(pdf_b64, page_numbers):
     """
     if not page_numbers:
         print("  [PageExtract] No page numbers specified, using full PDF", flush=True)
-        return pdf_b64, ""
+        return pdf_b64, "", "pypdf"
 
     try:
         from pypdf import PdfReader, PdfWriter
@@ -56,34 +56,48 @@ def _extract_pages(pdf_b64, page_numbers):
         writer = PdfWriter()
         pages_added = 0
         raw_text_parts = []
+        text_source = "pypdf"  # may be upgraded to "columns" below
+
+        # Try column-aware extraction first (fitz word bounding boxes).
+        # This produces a pipe-separated table where qty and part number
+        # are always in separate cells — column merging is impossible.
+        col_text = _extract_bom_columns(pdf_bytes, page_numbers)
+        if col_text.strip():
+            raw_text_parts.append(col_text)
+            text_source = "columns"
+            print(f"  [PageExtract] column-aware: {len(col_text)} chars "
+                  f"for pages {page_numbers}", flush=True)
 
         for pg in page_numbers:
             idx = pg - 1  # Convert 1-based to 0-based index
             if 0 <= idx < total_pages:
                 writer.add_page(reader.pages[idx])
                 pages_added += 1
-                # Extract raw text — plain mode only.
-                # Do NOT use extraction_mode="layout": that mode pads columns
-                # with spaces which merges adjacent text (item# "4" + part
-                # "025411-10" → "1025411-10"; qty "14" + nearby "3" → "143").
-                page_text = ""
-                try:
-                    page_text = reader.pages[idx].extract_text() or ""
+                if not col_text.strip():
+                    # Column-aware failed — fall back to pypdf plain mode.
+                    # Do NOT use extraction_mode="layout": that mode pads
+                    # columns with spaces and merges adjacent text
+                    # (item# "4" + part "025411-10" → "1025411-10";
+                    #  qty "14" + nearby "3" → "143").
+                    page_text = ""
+                    try:
+                        page_text = reader.pages[idx].extract_text() or ""
+                        if page_text.strip():
+                            print(f"  [PageExtract] pypdf plain fallback: "
+                                  f"{len(page_text)} chars from page {pg}",
+                                  flush=True)
+                    except Exception as txt_err:
+                        print(f"  [PageExtract] Text extraction failed for "
+                              f"page {pg}: {txt_err}", flush=True)
                     if page_text.strip():
-                        print(f"  [PageExtract] pypdf: {len(page_text)} chars "
-                              f"from page {pg}", flush=True)
-                except Exception as txt_err:
-                    print(f"  [PageExtract] Text extraction failed for "
-                          f"page {pg}: {txt_err}", flush=True)
-                if page_text.strip():
-                    raw_text_parts.append(page_text)
+                        raw_text_parts.append(page_text)
             else:
                 print(f"  [PageExtract] WARNING: Page {pg} out of range "
                       f"(PDF has {total_pages} pages)", flush=True)
 
         if pages_added == 0:
             print("  [PageExtract] No valid pages extracted, using full PDF", flush=True)
-            return pdf_b64, ""
+            return pdf_b64, "", "pypdf"
 
         raw_text = "\n".join(raw_text_parts)
 
@@ -108,14 +122,161 @@ def _extract_pages(pdf_b64, page_numbers):
             print("  [PageExtract] WARNING: No text layer found in PDF — "
                   "relying on vision only", flush=True)
 
-        return extracted_b64, raw_text
+        return extracted_b64, raw_text, text_source
 
     except ImportError:
         print("  [PageExtract] pypdf not installed, using full PDF", flush=True)
-        return pdf_b64, ""
+        return pdf_b64, "", "pypdf"
     except Exception as exc:
         print(f"  [PageExtract] ERROR: {exc}, using full PDF as fallback", flush=True)
-        return pdf_b64, ""
+        return pdf_b64, "", "pypdf"
+
+
+# ---------------------------------------------------------------------------
+# Column-Aware BOM Extraction — THE FIX for qty/part-number digit merging
+# ---------------------------------------------------------------------------
+def _extract_bom_columns(pdf_bytes, page_numbers):
+    """Extract BOM table from PDF using fitz word bounding boxes.
+
+    pypdf reads the PDF content stream in storage order (not visual order),
+    so adjacent column text merges: qty=14 beside part=3002619 → "143".
+    fitz's page.get_text("words") returns each word with its exact pixel
+    bounding box, so we can group by row (y-position) and assign to columns
+    by x-position derived from the header row.
+
+    Result: pipe-separated table where each '|' is a true column boundary.
+    Merging adjacent column values is physically impossible.
+
+    Args:
+        pdf_bytes: Raw PDF bytes (not base64)
+        page_numbers: List of 1-based page numbers
+
+    Returns:
+        Pipe-separated table string on success, "" on failure/not found.
+    """
+    _BOM_HEADER_KEYWORDS = {
+        "item", "qty", "quantity", "part", "catalog", "no.", "no",
+        "mfg", "manufacturer", "description", "desc", "ref", "tag",
+        "number", "cat", "unit",
+    }
+
+    try:
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        total_pages = len(doc)
+
+        all_rows = []
+        col_headers = None
+        col_boundaries = None  # x0 position of each header word
+
+        for pg_num in page_numbers:
+            idx = pg_num - 1
+            if idx < 0 or idx >= total_pages:
+                continue
+            page = doc[idx]
+
+            # Get words: each entry is (x0, y0, x1, y1, word, block, line, wno)
+            words = page.get_text("words")
+            if not words:
+                print(f"  [ColumnExtract] Page {pg_num}: no words found", flush=True)
+                continue
+
+            # Sort top-to-bottom, left-to-right
+            words = sorted(words, key=lambda w: (w[1], w[0]))
+
+            # Group into visual lines using y-tolerance of 6px.
+            # Normal CAD PDFs have clean, consistent vertical positioning.
+            lines = []
+            current_line = [words[0]]
+            line_y = words[0][1]
+            for w in words[1:]:
+                if abs(w[1] - line_y) <= 6:
+                    current_line.append(w)
+                else:
+                    lines.append(sorted(current_line, key=lambda x: x[0]))
+                    current_line = [w]
+                    line_y = w[1]
+            if current_line:
+                lines.append(sorted(current_line, key=lambda x: x[0]))
+
+            print(f"  [ColumnExtract] Page {pg_num}: {len(words)} words → "
+                  f"{len(lines)} visual lines", flush=True)
+
+            for line_idx, line in enumerate(lines):
+                clean_words = [w for w in line if w[4].strip()]
+                if not clean_words:
+                    continue
+                word_texts_lower = [w[4].strip().lower() for w in clean_words]
+
+                # Detect header row: ≥2 words match BOM header keywords
+                if col_headers is None:
+                    matches = sum(1 for t in word_texts_lower
+                                  if t in _BOM_HEADER_KEYWORDS)
+                    if matches >= 2:
+                        col_headers = []
+                        col_boundaries = []
+                        for w in clean_words:
+                            col_headers.append(w[4].strip().upper())
+                            col_boundaries.append(w[0])  # x0 of header word
+
+                        print(f"  [ColumnExtract] Header at line {line_idx}: "
+                              f"{col_headers}", flush=True)
+                        all_rows.append(" | ".join(col_headers))
+                        continue
+
+                if col_headers is None:
+                    continue  # Still searching for header
+
+                # Assign words to columns by x-position.
+                # Column i spans from col_boundaries[i] to col_boundaries[i+1].
+                # Last column spans to infinity.
+                # 5px left buffer: word belongs to column i if wx0 >= col_boundaries[i] - 5
+                n_cols = len(col_boundaries)
+                cells = [""] * n_cols
+
+                for w in clean_words:
+                    wx0 = w[0]
+                    wtext = w[4].strip()
+                    assigned = n_cols - 1  # default: last column
+                    for ci in range(n_cols - 1):
+                        if wx0 < col_boundaries[ci + 1] - 5:
+                            assigned = ci
+                            break
+                    cells[assigned] = (cells[assigned] + " " + wtext).strip()
+
+                # Description continuation lines: content only in the last column.
+                # Append to previous row's last cell rather than adding a new row.
+                non_empty_cols = [i for i, c in enumerate(cells) if c.strip()]
+                if non_empty_cols and non_empty_cols == [n_cols - 1] and all_rows:
+                    all_rows[-1] = all_rows[-1].rstrip() + " " + cells[-1].strip()
+                    continue
+
+                # Skip entirely blank lines
+                if any(c.strip() for c in cells):
+                    all_rows.append(" | ".join(cells))
+
+        doc.close()
+
+        if col_headers is None:
+            print("  [ColumnExtract] No BOM header row found — falling back to pypdf",
+                  flush=True)
+            return ""
+
+        result = "\n".join(all_rows)
+        print(f"  [ColumnExtract] Success: {len(all_rows)} rows "
+              f"({len(result)} chars)", flush=True)
+        print(f"  [ColumnExtract] Preview: {result[:400]!r}", flush=True)
+        return result
+
+    except ImportError:
+        print("  [ColumnExtract] fitz (PyMuPDF) not available — "
+              "falling back to pypdf", flush=True)
+        return ""
+    except Exception as exc:
+        print(f"  [ColumnExtract] ERROR: {exc} — falling back to pypdf",
+              flush=True)
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -564,7 +725,21 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     raw_text = structure.get("_bom_raw_text", "")
     text_source = structure.get("_bom_text_source", "pypdf")
     if raw_text.strip():
-        if text_source == "ocr":
+        if text_source == "columns":
+            # Best case: fitz word bounding boxes → pipe-separated table.
+            # Each '|' separator is a true column boundary — merging is impossible.
+            # QTY and PART NUMBER are always in separate cells.
+            text_section = (
+                "=== STRUCTURED BOM TABLE (COLUMN-PARSED — EACH CELL IS EXACT) ===\n"
+                "The following table was built by detecting column positions from the PDF.\n"
+                "Each word was placed in its column using its exact pixel bounding box.\n"
+                "Each cell between '|' separators is a single column value — EXACT.\n"
+                "QTY and PART NUMBER are in separate cells — they CANNOT be merged.\n"
+                "Use these values directly. Use the image to confirm row count and layout.\n\n"
+                f"{raw_text}\n\n"
+                "=== END STRUCTURED TABLE ===\n\n"
+            )
+        elif text_source == "ocr":
             # SHX / vector-font drawing — text came from pytesseract, may have errors.
             # Claude must use the IMAGE as final authority and correct OCR mistakes.
             text_section = (
@@ -638,7 +813,16 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
 
     # Add extra instructions depending on whether we have raw text
     if raw_text.strip():
-        if text_source == "ocr":
+        if text_source == "columns":
+            prompt += (
+                "  STRUCTURED TABLE — use the pipe-separated table above directly:\n"
+                "  Each '|' separates columns — QTY and PART NUMBER are in separate cells.\n"
+                "  Use the QTY value from the QTY column cell exactly as shown in the table.\n"
+                "  Use the PART NUMBER value from the PART NUMBER column cell exactly as shown.\n"
+                "  Do NOT modify, combine, or re-read values from adjacent cells.\n"
+                "  Use the image to confirm row count and catch any rows the table may have missed.\n\n"
+            )
+        elif text_source == "ocr":
             prompt += (
                 "  The OCR TEXT above is a structural guide but may contain truncated or garbled characters.\n"
                 "  Use the IMAGE as your final authority — if you can read a value clearly in the image,\n"
@@ -1176,7 +1360,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         bom_raw_text = ""
         bom_images = None  # v2.5: rendered PNG images for Stages 2 & 5
         if bom_pages:
-            bom_pdf_b64, bom_raw_text = _extract_pages(pdf_b64, bom_pages)
+            bom_pdf_b64, bom_raw_text, page_text_source = _extract_pages(pdf_b64, bom_pages)
             # Check if extraction actually produced a different (smaller) PDF
             bom_extracted = (bom_pdf_b64 != pdf_b64)
             if bom_extracted:
@@ -1184,7 +1368,9 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 # the extracted PDF contains ONLY BOM pages starting at page 1
                 structure["_bom_extracted"] = True
                 structure["_bom_raw_text"] = bom_raw_text
-                structure["_bom_text_source"] = "pypdf"   # may be overwritten to "ocr" below
+                # "columns" = fitz word-bbox table (best), "pypdf" = plain extract_text()
+                # May be overwritten to "ocr" below for SHX/vector-font drawings
+                structure["_bom_text_source"] = page_text_source
                 print(f"SCAN [{filename}]: BOM pages extracted successfully "
                       f"(raw text: {len(bom_raw_text)} chars)", flush=True)
 
