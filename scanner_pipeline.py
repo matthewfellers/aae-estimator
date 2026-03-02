@@ -140,9 +140,14 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
 
     pypdf reads the PDF content stream in storage order (not visual order),
     so adjacent column text merges: qty=14 beside part=3002619 → "143".
-    fitz's page.get_text("words") returns each word with its exact pixel
-    bounding box, so we can group by row (y-position) and assign to columns
-    by x-position derived from the header row.
+    fitz's page.get_text("words") returns each word with its exact bounding
+    box in PDF points, so we can group by row (y-position) and assign to
+    columns by x-position derived from the header row.
+
+    Key fix vs naive word-per-column approach: multi-word header labels like
+    "CATALOG NO." or "PART NUMBER" are clustered into ONE column header using
+    a horizontal gap threshold.  Without this, "CATALOG" and "NO." each become
+    a phantom column boundary, corrupting every data row.
 
     Result: pipe-separated table where each '|' is a true column boundary.
     Merging adjacent column values is physically impossible.
@@ -157,8 +162,13 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
     _BOM_HEADER_KEYWORDS = {
         "item", "qty", "quantity", "part", "catalog", "no.", "no",
         "mfg", "manufacturer", "description", "desc", "ref", "tag",
-        "number", "cat", "unit",
+        "number", "cat", "unit", "line",
     }
+
+    # Tuning constants (all in PDF points; 72pt = 1 inch)
+    Y_TOLERANCE      = 8   # max y0 diff for words on the same visual line
+    HEADER_MERGE_GAP = 20  # header words ≤20pt apart → same column label
+    COL_BUF          = 10  # left buffer when assigning data words to columns
 
     try:
         import fitz  # PyMuPDF
@@ -166,9 +176,9 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
 
-        all_rows = []
+        all_rows    = []
         col_headers = None
-        col_boundaries = None  # x0 position of each header word
+        col_boundaries = None  # x0 of each column (one per cluster)
 
         for pg_num in page_numbers:
             idx = pg_num - 1
@@ -177,21 +187,23 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
             page = doc[idx]
 
             # Get words: each entry is (x0, y0, x1, y1, word, block, line, wno)
-            words = page.get_text("words")
-            if not words:
-                print(f"  [ColumnExtract] Page {pg_num}: no words found", flush=True)
+            raw_words = page.get_text("words")
+            if not raw_words:
+                print(f"  [ColumnExtract] Page {pg_num}: no words found by fitz",
+                      flush=True)
                 continue
 
             # Sort top-to-bottom, left-to-right
-            words = sorted(words, key=lambda w: (w[1], w[0]))
+            raw_words = sorted(raw_words, key=lambda w: (w[1], w[0]))
+            print(f"  [ColumnExtract] Page {pg_num}: fitz found {len(raw_words)} words",
+                  flush=True)
 
-            # Group into visual lines using y-tolerance of 6px.
-            # Normal CAD PDFs have clean, consistent vertical positioning.
+            # ── Group into visual lines ─────────────────────────────────────
             lines = []
-            current_line = [words[0]]
-            line_y = words[0][1]
-            for w in words[1:]:
-                if abs(w[1] - line_y) <= 6:
+            current_line = [raw_words[0]]
+            line_y = raw_words[0][1]
+            for w in raw_words[1:]:
+                if abs(w[1] - line_y) <= Y_TOLERANCE:
                     current_line.append(w)
                 else:
                     lines.append(sorted(current_line, key=lambda x: x[0]))
@@ -200,61 +212,90 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
             if current_line:
                 lines.append(sorted(current_line, key=lambda x: x[0]))
 
-            print(f"  [ColumnExtract] Page {pg_num}: {len(words)} words → "
-                  f"{len(lines)} visual lines", flush=True)
+            print(f"  [ColumnExtract] Grouped into {len(lines)} visual lines",
+                  flush=True)
 
+            # Log first 8 lines so we can see what fitz extracted
+            for dbg_i, dbg_line in enumerate(lines[:8]):
+                dbg_text = " ".join(w[4] for w in dbg_line)
+                print(f"  [ColumnExtract]   line[{dbg_i:02d}] y≈{dbg_line[0][1]:.1f}: "
+                      f"{dbg_text!r}", flush=True)
+
+            # ── Scan lines for header row ───────────────────────────────────
             for line_idx, line in enumerate(lines):
                 clean_words = [w for w in line if w[4].strip()]
                 if not clean_words:
                     continue
                 word_texts_lower = [w[4].strip().lower() for w in clean_words]
 
-                # Detect header row: ≥2 words match BOM header keywords
+                # ── Header detection ────────────────────────────────────────
                 if col_headers is None:
                     matches = sum(1 for t in word_texts_lower
                                   if t in _BOM_HEADER_KEYWORDS)
                     if matches >= 2:
-                        col_headers = []
-                        col_boundaries = []
-                        for w in clean_words:
-                            col_headers.append(w[4].strip().upper())
-                            col_boundaries.append(w[0])  # x0 of header word
+                        # Cluster adjacent words into single column labels.
+                        # "CATALOG NO." → one cluster; "ITEM" → own cluster.
+                        # Gap between consecutive header words determines split.
+                        clusters = []
+                        cluster  = [clean_words[0]]
+                        for ci in range(1, len(clean_words)):
+                            prev_w = clean_words[ci - 1]
+                            curr_w = clean_words[ci]
+                            gap = curr_w[0] - prev_w[2]   # x0_curr - x1_prev
+                            if gap <= HEADER_MERGE_GAP:
+                                cluster.append(curr_w)
+                            else:
+                                clusters.append(cluster)
+                                cluster = [curr_w]
+                        clusters.append(cluster)
 
-                        print(f"  [ColumnExtract] Header at line {line_idx}: "
-                              f"{col_headers}", flush=True)
+                        col_headers    = []
+                        col_boundaries = []
+                        for clust in clusters:
+                            label = " ".join(w[4].strip() for w in clust).upper()
+                            col_headers.append(label)
+                            col_boundaries.append(clust[0][0])   # x0 of first word
+
+                        print(f"  [ColumnExtract] Header found at line {line_idx}:",
+                              flush=True)
+                        for hi, (hname, hx) in enumerate(zip(col_headers,
+                                                              col_boundaries)):
+                            print(f"  [ColumnExtract]   col[{hi}] x={hx:.1f}  {hname!r}",
+                                  flush=True)
                         all_rows.append(" | ".join(col_headers))
                         continue
 
                 if col_headers is None:
-                    continue  # Still searching for header
+                    continue   # Still searching for header
 
-                # Assign words to columns by x-position.
-                # Column i spans from col_boundaries[i] to col_boundaries[i+1].
-                # Last column spans to infinity.
-                # 5px left buffer: word belongs to column i if wx0 >= col_boundaries[i] - 5
+                # ── Assign data words to columns ────────────────────────────
                 n_cols = len(col_boundaries)
-                cells = [""] * n_cols
+                cells  = [""] * n_cols
 
                 for w in clean_words:
-                    wx0 = w[0]
+                    wx0   = w[0]
                     wtext = w[4].strip()
-                    assigned = n_cols - 1  # default: last column
+                    assigned = n_cols - 1   # default: last column
                     for ci in range(n_cols - 1):
-                        if wx0 < col_boundaries[ci + 1] - 5:
+                        if wx0 < col_boundaries[ci + 1] - COL_BUF:
                             assigned = ci
                             break
                     cells[assigned] = (cells[assigned] + " " + wtext).strip()
 
-                # Description continuation lines: content only in the last column.
-                # Append to previous row's last cell rather than adding a new row.
-                non_empty_cols = [i for i, c in enumerate(cells) if c.strip()]
-                if non_empty_cols and non_empty_cols == [n_cols - 1] and all_rows:
+                # ── Description continuation: only last column has content ──
+                non_empty = [i for i, c in enumerate(cells) if c.strip()]
+                if non_empty and non_empty == [n_cols - 1] and all_rows:
                     all_rows[-1] = all_rows[-1].rstrip() + " " + cells[-1].strip()
                     continue
 
-                # Skip entirely blank lines
+                # Skip blank lines
                 if any(c.strip() for c in cells):
-                    all_rows.append(" | ".join(cells))
+                    row_text = " | ".join(cells)
+                    all_rows.append(row_text)
+                    # Log first 5 data rows
+                    if len(all_rows) <= 6:
+                        print(f"  [ColumnExtract]   data row {len(all_rows)-1}: "
+                              f"{row_text!r}", flush=True)
 
         doc.close()
 
@@ -264,9 +305,8 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
             return ""
 
         result = "\n".join(all_rows)
-        print(f"  [ColumnExtract] Success: {len(all_rows)} rows "
-              f"({len(result)} chars)", flush=True)
-        print(f"  [ColumnExtract] Preview: {result[:400]!r}", flush=True)
+        print(f"  [ColumnExtract] SUCCESS: {len(all_rows)} rows "
+              f"({len(result)} chars total)", flush=True)
         return result
 
     except ImportError:
@@ -274,8 +314,9 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
               "falling back to pypdf", flush=True)
         return ""
     except Exception as exc:
-        print(f"  [ColumnExtract] ERROR: {exc} — falling back to pypdf",
-              flush=True)
+        import traceback as _tb
+        print(f"  [ColumnExtract] ERROR: {exc}", flush=True)
+        print(f"  [ColumnExtract] {_tb.format_exc()}", flush=True)
         return ""
 
 
