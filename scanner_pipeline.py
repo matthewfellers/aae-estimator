@@ -381,6 +381,14 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
                           f"{len(tabs.tables)} table(s), using best "
                           f"({len(best.rows)} rows × {best.col_count if hasattr(best, 'col_count') else '?'} cols)",
                           flush=True)
+                    # Title-block tables are tiny (≤ ~8 rows). If the largest
+                    # table found is below this threshold the BOM wasn't detected
+                    # by grid lines — fall through to Strategies 2 & 3.
+                    if len(best.rows) < 9:
+                        print(f"  [ColumnExtract] Strat1: only {len(best.rows)} rows "
+                              f"— likely title block, not BOM; skipping to Strat2/3",
+                              flush=True)
+                        raise ValueError(f"table too small ({len(best.rows)} rows)")
                     n = 0
                     for row_data in best.extract():
                         # Normalise: collapse newlines inside cells, strip whitespace
@@ -1072,7 +1080,9 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         f"{col_structure_section}"
         f"Has manufacturer column: {has_mfg}\n"
         f"Has description column: {has_desc}\n"
-        f"Expected row count: {total_rows}\n\n"
+        f"Expected row count: {total_rows} numbered items — but also extract any "
+        f"un-numbered sub-item or accessory rows (they appear without an item number "
+        f"directly below their parent item). The total may exceed {total_rows}.\n\n"
 
         "YOUR TASK: Read EVERY row of the BOM table. Copy each cell value EXACTLY as printed.\n\n"
 
@@ -1175,8 +1185,11 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         "  ],\n"
         f'  "rows_extracted": 0\n'
         "}\n\n"
-        f"Set rows_extracted to the actual count of items you return. It MUST equal {total_rows}.\n"
-        "If it does not match, you missed rows — go back and find them."
+        f"Set rows_extracted to the actual count of items you return.\n"
+        f"The BOM has {total_rows} numbered rows. You may return MORE than {total_rows} if there are\n"
+        "un-numbered sub-item or accessory rows — include every physical row in the table.\n"
+        "For sub-items, use item_num:0 (or leave it blank). Do NOT skip them.\n"
+        "If rows_extracted < " + str(total_rows) + ", you missed numbered rows — go back and find them."
     )
 
     think_budget = max(32000, total_rows * 600)
