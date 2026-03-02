@@ -166,6 +166,48 @@ def _render_pdf_to_image(pdf_b64, dpi=300):
         return []
 
 
+# ---------------------------------------------------------------------------
+# OCR — extract exact text from rendered BOM images using pytesseract
+# ---------------------------------------------------------------------------
+def _ocr_images(images_b64):
+    """Run pytesseract OCR on rendered BOM page images.
+
+    Returns raw text string with the exact characters read from each page.
+    This text is then passed to Stage 2 as the PRIMARY source so Claude
+    structures already-correct text into JSON instead of doing OCR itself,
+    eliminating character-level hallucination on CAD-generated drawings.
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+
+        all_text = []
+        for i, img_b64 in enumerate(images_b64):
+            img_bytes = base64.b64decode(img_b64)
+            img = Image.open(io.BytesIO(img_bytes))
+
+            # PSM 6 = assume uniform block of text (best for tables)
+            # OEM 3 = default OCR engine (LSTM)
+            text = pytesseract.image_to_string(
+                img, config="--psm 6 --oem 3"
+            )
+            all_text.append(text)
+            print(f"  [OCR] Page {i + 1}: extracted {len(text)} chars "
+                  f"(first 200: {text[:200]!r})", flush=True)
+
+        combined = "\n".join(all_text)
+        print(f"  [OCR] Total: {len(combined)} chars across "
+              f"{len(images_b64)} page(s)", flush=True)
+        return combined
+
+    except ImportError as exc:
+        print(f"  [OCR] pytesseract not available: {exc}", flush=True)
+        return ""
+    except Exception as exc:
+        print(f"  [OCR] ERROR: {exc}", flush=True)
+        return ""
+
+
 # System-level instruction that forces JSON-only output.
 _SYSTEM_JSON = (
     "You are a JSON-only API endpoint. Your ENTIRE response must be a single "
@@ -1038,7 +1080,20 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 bom_images = _render_pdf_to_image(bom_pdf_b64, dpi=400)
                 if bom_images:
                     print(f"SCAN [{filename}]: Rendered {len(bom_images)} BOM page(s) "
-                          f"to 300 DPI PNG — Stage 2 & 5 will use IMAGES", flush=True)
+                          f"to 400 DPI PNG — Stage 2 & 5 will use IMAGES", flush=True)
+
+                    # v2.6: OCR the rendered images to get character-accurate text.
+                    # pytesseract reads the exact characters from the image —
+                    # no hallucination possible. Stage 2 then uses this as its
+                    # PRIMARY source and only uses the image for table structure.
+                    ocr_text = _ocr_images(bom_images)
+                    if ocr_text.strip():
+                        structure["_bom_raw_text"] = ocr_text
+                        print(f"SCAN [{filename}]: OCR produced {len(ocr_text)} chars "
+                              f"— Stage 2 will use OCR text as primary source", flush=True)
+                    else:
+                        print(f"SCAN [{filename}]: OCR returned no text "
+                              f"— Stage 2 will rely on image only", flush=True)
                 else:
                     # Image rendering failed — fall back to FULL original PDF.
                     # The page-extracted PDF has broken font resources (CAD PDFs
