@@ -205,12 +205,15 @@ def _ocr_images(images_b64):
                 output_type=pytesseract.Output.DICT,
             )
 
-            # Build word list filtering noise (conf > 10, non-empty)
+            # Build word list: keep anything tesseract detected (conf >= 0),
+            # only discard conf=-1 (whitespace/empty blocks tesseract skipped).
+            # Threshold was conf>10 but that was dropping word-final characters
+            # like the "IT" in "PANDUIT" when SHX thin strokes scored low.
             words = []
             for j in range(len(data["text"])):
                 conf = int(data["conf"][j])
                 txt = data["text"][j].strip()
-                if conf > 10 and txt:
+                if conf >= 0 and txt:
                     words.append({
                         "text":  txt,
                         "left":  int(data["left"][j]),
@@ -550,19 +553,22 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     else:
         page_instruction = ""
 
-    # If we have raw text extracted from the PDF text layer, include it
-    # as the PRIMARY data source — this is the exact character data
+    # OCR text extracted by pytesseract from the rendered BOM image.
+    # Useful as a structural hint but NOT authoritative — thin-stroke AutoCAD
+    # SHX fonts sometimes cause Tesseract to drop characters (e.g. "PANDUIT"
+    # may appear as "PANDU"). Claude must use the IMAGE to verify and correct.
     raw_text = structure.get("_bom_raw_text", "")
     if raw_text.strip():
         text_section = (
-            "=== RAW TEXT EXTRACTED FROM PDF (PRIMARY SOURCE — EXACT CHARACTERS) ===\n"
-            "The following text was extracted directly from the PDF file's text layer.\n"
-            "These are the EXACT characters embedded in the PDF — not OCR, not guessed.\n"
-            "USE THIS TEXT as your PRIMARY source for part numbers, descriptions, and all data.\n"
-            "Use the PDF image only to understand the TABLE STRUCTURE (rows, columns, layout).\n"
-            "When the raw text and your visual reading disagree, the RAW TEXT WINS.\n\n"
+            "=== OCR TEXT FROM BOM IMAGE (PYTESSERACT — USE AS GUIDE, NOT GOSPEL) ===\n"
+            "The following text was extracted by pytesseract OCR from the rendered BOM image.\n"
+            "It is a helpful guide for table layout and most text, BUT it may have errors:\n"
+            "  - Thin AutoCAD SHX font strokes can cause characters to be dropped or garbled\n"
+            "  - Manufacturer names or descriptions may be truncated (e.g. PANDU vs PANDUIT)\n"
+            "USE THE IMAGE as your final authority for every cell value.\n"
+            "When the OCR text and the image disagree, TRUST THE IMAGE — correct the OCR.\n\n"
             f"{raw_text}\n\n"
-            "=== END RAW TEXT ===\n\n"
+            "=== END OCR TEXT ===\n\n"
         )
     else:
         text_section = ""
@@ -1146,14 +1152,22 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                           f"to 400 DPI PNG — Stage 2 & 5 will use IMAGES", flush=True)
 
                     # v2.6: OCR the rendered images to get character-accurate text.
-                    # pytesseract reads the exact characters from the image —
-                    # no hallucination possible. Stage 2 then uses this as its
-                    # PRIMARY source and only uses the image for table structure.
+                    # ONLY use OCR when pypdf extracted very little text — that
+                    # indicates an AutoCAD SHX / vector-font drawing with no real
+                    # text layer (e.g. ABB XIO-00).  If pypdf already got good
+                    # text (>= 300 chars) keep it — OCR on normal PDFs scrambles
+                    # table structure and garbles manufacturers/quantities.
+                    pypdf_chars = len(bom_raw_text.strip())
                     ocr_text = _ocr_images(bom_images)
-                    if ocr_text.strip():
+                    if ocr_text.strip() and pypdf_chars < 300:
                         structure["_bom_raw_text"] = ocr_text
-                        print(f"SCAN [{filename}]: OCR produced {len(ocr_text)} chars "
-                              f"— Stage 2 will use OCR text as primary source", flush=True)
+                        print(f"SCAN [{filename}]: pypdf had only {pypdf_chars} chars "
+                              f"(SHX/vector font) — using OCR text ({len(ocr_text)} chars) "
+                              f"as primary source", flush=True)
+                    elif ocr_text.strip():
+                        print(f"SCAN [{filename}]: pypdf text is good ({pypdf_chars} chars) "
+                              f"— keeping it as primary, OCR ({len(ocr_text)} chars) ignored",
+                              flush=True)
                     else:
                         print(f"SCAN [{filename}]: OCR returned no text "
                               f"— Stage 2 will rely on image only", flush=True)
