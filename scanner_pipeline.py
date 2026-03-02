@@ -900,7 +900,7 @@ def _stage1_detect_structure(claude_client, pdf_b64):
         '  "bom_tables_found": 1,\n'
         '  "drawing_types_found": ["BOM"],\n'
         '  "pages_with_bom": [3],\n'
-        '  "column_headers_left_to_right": ["ITEM", "QTY", "CATALOG NO.", "MFG", "DESCRIPTION"],\n'
+        '  "column_headers_left_to_right": ["ITEM", "DESCRIPTION", "MFG", "CATALOG NO.", "QTY"],\n'
         '  "column_mapping": {\n'
         '    "item_num": "ITEM",\n'
         '    "qty": "QTY",\n'
@@ -946,6 +946,14 @@ def _stage1_detect_structure(claude_client, pdf_b64):
     print(f"SCAN Stage 1: Found {result.get('bom_tables_found', 0)} BOM table(s), "
           f"{result.get('total_bom_rows', '?')} rows, "
           f"headers={result.get('column_headers_left_to_right', [])}", flush=True)
+    # Log column_mapping so we can verify correct field↔label assignments
+    col_map = result.get("column_mapping", {})
+    print(f"  [Stage1] column_mapping: "
+          f"item_num→'{col_map.get('item_num','')}' "
+          f"qty→'{col_map.get('qty','')}' "
+          f"part_number→'{col_map.get('part_number','')}' "
+          f"manufacturer→'{col_map.get('manufacturer','')}' "
+          f"description→'{col_map.get('description','')}'", flush=True)
     return result
 
 
@@ -1134,6 +1142,16 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "     Do NOT carry forward the parent item's number into the sub-item row.\n"
                 "  4. After a sub-item row, the NEXT numbered item resumes the sequence.\n"
                 "     Stay synchronized with the actual row you are reading in the image.\n\n"
+                "  === ANTI-SWAP CHECK (LEFTMOST vs RIGHTMOST NARROW COLUMN) ===\n"
+                "  A BOM has TWO narrow integer columns that look similar:\n"
+                "    - LEFTMOST narrow column  = Item Number  (1, 2, 3 ... sequential)\n"
+                "    - RIGHTMOST narrow column = QTY          (can repeat: 1,1,1,6,6,1,...)\n"
+                "  These are EASY TO SWAP. After reading every row, ask:\n"
+                "    'Is my item_num value from the LEFT edge of the table?'  (YES = correct)\n"
+                "    'Is my qty value from the RIGHT edge of the table?'      (YES = correct)\n"
+                "  If you accidentally wrote the left-column number as qty and the right as item_num,\n"
+                "  your output will look like: item_num=6, qty=21 for what should be item_num=21, qty=6.\n"
+                "  Always verify: item_num counts sequentially row by row; qty can be any positive integer.\n\n"
             )
         else:
             prompt += (
@@ -1225,6 +1243,13 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     items = result.get("bom_line_items", [])
     rows_reported = result.get("rows_extracted", len(items))
     print(f"SCAN Stage 2: Got {len(items)} items (model reported {rows_reported})", flush=True)
+    # Diagnostic: print first 10 rows so we can spot item_num/qty swaps in logs
+    for _di, _it in enumerate(items[:10]):
+        print(f"  [Stage2] row[{_di+1:02d}] "
+              f"item_num={_it.get('item_num','?'):>4}  "
+              f"qty={str(_it.get('qty','?')):>5}  "
+              f"pn={_it.get('part_number','')[:30]}",
+              flush=True)
 
     return result
 
