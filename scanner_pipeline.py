@@ -803,6 +803,30 @@ def _ocr_build_column_table(words, img_width):
         if any(c for c in cells):
             table_rows.append(" | ".join(cells))
 
+    # ── 4b. Blank QTY column from the structured table ────────────────────────
+    # OCR single-digit recognition is imperfect: a "3" can be read as "1", and
+    # vertical table border lines are sometimes read as "1".  If the column
+    # table has a wrong QTY value, Stage 2 may anchor to it despite the
+    # "read QTY from image" instruction.  Blanking the QTY cells entirely
+    # forces Stage 2 to derive every QTY purely from the image — which is
+    # correct because the cropped image now has ~3-4× more pixels per cell.
+    qty_col_idx = next(
+        (i for i, lbl in enumerate(col_labels)
+         if lbl.upper().strip() in ("QTY", "QUANTITY")),
+        None,
+    )
+    if qty_col_idx is not None:
+        blanked = []
+        for row_str in table_rows[1:]:
+            cells = row_str.split(" | ")
+            while len(cells) <= qty_col_idx:
+                cells.append("")
+            cells[qty_col_idx] = ""   # wipe OCR-sourced QTY value
+            blanked.append(" | ".join(cells))
+        table_rows = [table_rows[0]] + blanked
+        print(f"  [OCR-cols] QTY col ({qty_col_idx}) blanked — "
+              f"Stage 2 reads qty from image only", flush=True)
+
     result = "\n".join(table_rows)
     print(f"  [OCR-cols] built {len(table_rows)-1} data rows, "
           f"{len(result)} chars", flush=True)
