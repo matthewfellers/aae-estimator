@@ -1118,6 +1118,22 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "  The OCR TEXT above is a structural guide but may contain truncated or garbled characters.\n"
                 "  Use the IMAGE as your final authority — if you can read a value clearly in the image,\n"
                 "  use what the image shows even if the OCR text differs.\n\n"
+                "  === QTY COLUMN — CRITICAL READING RULES ===\n"
+                "  1. Look at the HEADER ROW in the image. Identify every column heading.\n"
+                "     The QTY (or QUANTITY) column is typically the RIGHTMOST column.\n"
+                "  2. For EACH row: find that row's cell in the QTY column and read the number.\n"
+                "     Read it INDEPENDENTLY — do not carry over the previous row's quantity.\n"
+                "  3. The OCR may merge 'PART NUMBER' and 'QTY' into one header — IGNORE that.\n"
+                "     Trust the IMAGE column layout, not the OCR header text.\n"
+                "  4. Common SHX font OCR mistakes in QTY: '1' read as 'l', '6' as 'b', '0' as 'O'.\n"
+                "     When in doubt, zoom mentally into that specific cell and re-read.\n\n"
+                "  === ITEM NUMBER (NO.) COLUMN — CRITICAL READING RULES ===\n"
+                "  1. The NO. or ITEM column is typically the LEFTMOST column.\n"
+                "  2. Numbered rows: read the item number exactly (1, 2, 3 ...).\n"
+                "  3. Sub-item / accessory rows have a BLANK NO. cell — output item_num=0.\n"
+                "     Do NOT carry forward the parent item's number into the sub-item row.\n"
+                "  4. After a sub-item row, the NEXT numbered item resumes the sequence.\n"
+                "     Stay synchronized with the actual row you are reading in the image.\n\n"
             )
         else:
             prompt += (
@@ -1164,7 +1180,9 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         '  If there is no description column, leave description as "".\n'
         "  SELF-CHECK each row:\n"
         "  - Is description a long spec string? (Good) Or 1-2 words like a company name? (Wrong — you swapped columns)\n"
-        "  - Is manufacturer a short company name? (Good) Or a long spec string? (Wrong — you swapped columns)\n\n"
+        "  - Is manufacturer a short company name? (Good) Or a long spec string? (Wrong — you swapped columns)\n"
+        "  - Is qty a small integer (1-500)? (Good) Or a long alphanumeric string? (Wrong — you put a part number in qty)\n"
+        "  - Is item_num a single integer matching the NO. column? (Good) Or 0 for a sub-item row? (Good)\n\n"
 
         "RULE 5 — COMPLETENESS:\n"
         "  Do NOT skip ANY rows. Every physical row in the table = one item in your output.\n"
