@@ -56,22 +56,63 @@ def _extract_pages(pdf_b64, page_numbers):
         writer = PdfWriter()
         pages_added = 0
         raw_text_parts = []
+
+        # Prefer fitz (PyMuPDF) for text extraction: its sort=True mode returns
+        # text in spatial top→bottom / left→right order, which correctly
+        # reconstructs BOM table rows.  pypdf reads the PDF content stream in
+        # storage order — digits in a number like "134" can end up scattered
+        # because the PDF stored them near neighbouring column text.
+        fitz_doc = None
+        try:
+            import fitz as _fitz
+            fitz_doc = _fitz.open(stream=pdf_bytes, filetype="pdf")
+            print("  [PageExtract] Using fitz for text extraction (spatial sort)",
+                  flush=True)
+        except ImportError:
+            print("  [PageExtract] fitz not available — falling back to pypdf text",
+                  flush=True)
+        except Exception as _fe:
+            print(f"  [PageExtract] fitz open failed ({_fe}) — falling back to pypdf",
+                  flush=True)
+
         for pg in page_numbers:
             idx = pg - 1  # Convert 1-based to 0-based index
             if 0 <= idx < total_pages:
                 writer.add_page(reader.pages[idx])
                 pages_added += 1
-                # Extract raw text from the PDF text layer
-                try:
-                    page_text = reader.pages[idx].extract_text() or ""
-                    if page_text.strip():
-                        raw_text_parts.append(page_text)
-                except Exception as txt_err:
-                    print(f"  [PageExtract] Text extraction failed for page {pg}: {txt_err}",
-                          flush=True)
+                # Try fitz first (correct reading order), fall back to pypdf
+                page_text = ""
+                if fitz_doc is not None:
+                    try:
+                        fitz_page = fitz_doc[idx]
+                        # sort=True: spatially sorted — critical for table columns
+                        page_text = fitz_page.get_text("text", sort=True) or ""
+                        if page_text.strip():
+                            print(f"  [PageExtract] fitz: {len(page_text)} chars "
+                                  f"from page {pg}", flush=True)
+                    except Exception as _fpe:
+                        print(f"  [PageExtract] fitz page {pg} error: {_fpe}",
+                              flush=True)
+                if not page_text.strip():
+                    try:
+                        page_text = reader.pages[idx].extract_text() or ""
+                        if page_text.strip():
+                            print(f"  [PageExtract] pypdf fallback: "
+                                  f"{len(page_text)} chars from page {pg}", flush=True)
+                    except Exception as txt_err:
+                        print(f"  [PageExtract] Text extraction failed for "
+                              f"page {pg}: {txt_err}", flush=True)
+                if page_text.strip():
+                    raw_text_parts.append(page_text)
             else:
                 print(f"  [PageExtract] WARNING: Page {pg} out of range "
                       f"(PDF has {total_pages} pages)", flush=True)
+
+        if fitz_doc is not None:
+            try:
+                fitz_doc.close()
+            except Exception:
+                pass
 
         if pages_added == 0:
             print("  [PageExtract] No valid pages extracted, using full PDF", flush=True)
@@ -614,9 +655,14 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
 
         "=== CRITICAL RULES ===\n\n"
 
-        "RULE 1 — ONE ROW = ONE ITEM:\n"
-        "If the QTY column says 32, output qty:32 as ONE item.\n"
-        "Do NOT create 32 separate items. That is wrong.\n\n"
+        "RULE 1 — ONE ROW = ONE ITEM, READ QTY EXACTLY AS PRINTED:\n"
+        "If the QTY column says 125, output qty:125 as ONE item.\n"
+        "Do NOT create multiple items from one row. That is wrong.\n"
+        "Quantities ARE frequently large numbers — 50, 100, 125, 200, 500+ are all NORMAL.\n"
+        "Items like terminal blocks, cable ties, wire duct, DIN rail, markers are routinely 100+.\n"
+        "A 3-digit quantity like 125 is NOT unusual — do NOT round down or truncate it to 13 or 12.\n"
+        "If a description spans multiple lines in the table, ALL lines belong to ONE item with ONE qty.\n"
+        "SELF-CHECK every qty: if the number seems unusually small for the part type, re-read the cell.\n\n"
 
         "RULE 2 — PART NUMBERS ARE SACRED:\n"
         "These part numbers will be used to ORDER real parts. A wrong character = wrong part delivered.\n"
@@ -633,10 +679,12 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
             )
         else:
             prompt += (
-                "  The RAW TEXT above contains the exact part numbers from the PDF.\n"
-                "  Cross-reference EVERY part number against the raw text.\n"
+                "  The RAW TEXT above contains the exact values from the PDF text layer.\n"
+                "  Cross-reference EVERY part number AND every quantity against the raw text.\n"
                 "  If a part number appears in the raw text, use the EXACT string from the raw text.\n"
-                "  Do NOT modify, correct, or 'improve' part numbers from the raw text.\n\n"
+                "  If a quantity appears in the raw text (e.g. '125'), use that exact number — do NOT\n"
+                "  substitute a smaller number (e.g. '13') based on visual reading alone.\n"
+                "  Do NOT modify, correct, or 'improve' any value from the raw text.\n\n"
             )
     else:
         prompt += (
