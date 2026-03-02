@@ -172,28 +172,91 @@ def _render_pdf_to_image(pdf_b64, dpi=300):
 def _ocr_images(images_b64):
     """Run pytesseract OCR on rendered BOM page images.
 
-    Returns raw text string with the exact characters read from each page.
-    This text is then passed to Stage 2 as the PRIMARY source so Claude
-    structures already-correct text into JSON instead of doing OCR itself,
-    eliminating character-level hallucination on CAD-generated drawings.
+    Preprocesses the image for thin-stroke AutoCAD SHX fonts (grayscale,
+    auto-contrast, stroke dilation) then uses word-position bounding boxes
+    to reconstruct table columns accurately instead of reading across rows.
+    The resulting text is the PRIMARY source for Stage 2 so Claude structures
+    already-correct characters into JSON rather than doing OCR itself.
     """
     try:
         import pytesseract
-        from PIL import Image
+        from PIL import Image, ImageOps, ImageFilter
 
         all_text = []
         for i, img_b64 in enumerate(images_b64):
             img_bytes = base64.b64decode(img_b64)
             img = Image.open(io.BytesIO(img_bytes))
 
-            # PSM 6 = assume uniform block of text (best for tables)
-            # OEM 3 = default OCR engine (LSTM)
-            text = pytesseract.image_to_string(
-                img, config="--psm 6 --oem 3"
+            # --- Preprocess for thin single-stroke CAD fonts ---
+            # 1. Grayscale
+            img_gray = img.convert("L")
+            # 2. Auto-contrast: normalise brightness range
+            img_enhanced = ImageOps.autocontrast(img_gray, cutoff=2)
+            # 3. Dilate strokes: MaxFilter thickens 1-2px lines so
+            #    Tesseract can distinguish characters reliably
+            img_dilated = img_enhanced.filter(ImageFilter.MaxFilter(3))
+            # 4. Sharpen to restore edge definition after dilation
+            img_sharp = img_dilated.filter(ImageFilter.SHARPEN)
+
+            # --- Word-position OCR (PSM 11 = sparse, no layout assumptions) ---
+            data = pytesseract.image_to_data(
+                img_sharp,
+                config="--psm 11 --oem 3",
+                output_type=pytesseract.Output.DICT,
             )
+
+            # Build word list filtering noise (conf > 10, non-empty)
+            words = []
+            for j in range(len(data["text"])):
+                conf = int(data["conf"][j])
+                txt = data["text"][j].strip()
+                if conf > 10 and txt:
+                    words.append({
+                        "text":  txt,
+                        "left":  int(data["left"][j]),
+                        "top":   int(data["top"][j]),
+                        "right": int(data["left"][j]) + int(data["width"][j]),
+                    })
+
+            if not words:
+                print(f"  [OCR] Page {i + 1}: no words detected", flush=True)
+                all_text.append("")
+                continue
+
+            # Sort by vertical position then horizontal
+            words.sort(key=lambda w: (w["top"], w["left"]))
+
+            # Group words into lines (within 25px vertically)
+            lines, current_line, line_y = [], [words[0]], words[0]["top"]
+            for w in words[1:]:
+                if abs(w["top"] - line_y) <= 25:
+                    current_line.append(w)
+                else:
+                    lines.append(sorted(current_line, key=lambda x: x["left"]))
+                    current_line = [w]
+                    line_y = w["top"]
+            if current_line:
+                lines.append(sorted(current_line, key=lambda x: x["left"]))
+
+            # Reconstruct text preserving column gaps with " | " markers
+            text_lines = []
+            for line in lines:
+                parts, prev_right = [], 0
+                for w in line:
+                    gap = w["left"] - prev_right
+                    if parts and gap > 80:
+                        parts.append(" | ")
+                    elif parts and gap > 15:
+                        parts.append(" ")
+                    parts.append(w["text"])
+                    prev_right = w["right"]
+                text_lines.append("".join(parts))
+
+            text = "\n".join(text_lines)
             all_text.append(text)
-            print(f"  [OCR] Page {i + 1}: extracted {len(text)} chars "
-                  f"(first 200: {text[:200]!r})", flush=True)
+            print(f"  [OCR] Page {i + 1}: {len(words)} words, "
+                  f"{len(lines)} lines, {len(text)} chars", flush=True)
+            print(f"  [OCR] First 400: {text[:400]!r}", flush=True)
 
         combined = "\n".join(all_text)
         print(f"  [OCR] Total: {len(combined)} chars across "
