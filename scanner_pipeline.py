@@ -57,62 +57,47 @@ def _extract_pages(pdf_b64, page_numbers):
         pages_added = 0
         raw_text_parts = []
 
-        # Prefer fitz (PyMuPDF) for text extraction: its sort=True mode returns
-        # text in spatial top→bottom / left→right order, which correctly
-        # reconstructs BOM table rows.  pypdf reads the PDF content stream in
-        # storage order — digits in a number like "134" can end up scattered
-        # because the PDF stored them near neighbouring column text.
-        fitz_doc = None
-        try:
-            import fitz as _fitz
-            fitz_doc = _fitz.open(stream=pdf_bytes, filetype="pdf")
-            print("  [PageExtract] Using fitz for text extraction (spatial sort)",
-                  flush=True)
-        except ImportError:
-            print("  [PageExtract] fitz not available — falling back to pypdf text",
-                  flush=True)
-        except Exception as _fe:
-            print(f"  [PageExtract] fitz open failed ({_fe}) — falling back to pypdf",
-                  flush=True)
-
         for pg in page_numbers:
             idx = pg - 1  # Convert 1-based to 0-based index
             if 0 <= idx < total_pages:
                 writer.add_page(reader.pages[idx])
                 pages_added += 1
-                # Try fitz first (correct reading order), fall back to pypdf
+                # Extract raw text from the PDF text layer.
+                # extraction_mode="layout" (pypdf >= 3.17) preserves column
+                # positions so multi-digit numbers like "134" are not split by
+                # adjacent column text.  Falls back to plain mode on older
+                # pypdf versions.
                 page_text = ""
-                if fitz_doc is not None:
-                    try:
-                        fitz_page = fitz_doc[idx]
-                        # sort=True: spatially sorted — critical for table columns
-                        page_text = fitz_page.get_text("text", sort=True) or ""
+                try:
+                    page_text = (
+                        reader.pages[idx].extract_text(extraction_mode="layout") or ""
+                    )
+                    if page_text.strip():
+                        print(f"  [PageExtract] pypdf layout: {len(page_text)} chars "
+                              f"from page {pg}", flush=True)
+                    else:
+                        page_text = reader.pages[idx].extract_text() or ""
                         if page_text.strip():
-                            print(f"  [PageExtract] fitz: {len(page_text)} chars "
+                            print(f"  [PageExtract] pypdf plain: {len(page_text)} chars "
                                   f"from page {pg}", flush=True)
-                    except Exception as _fpe:
-                        print(f"  [PageExtract] fitz page {pg} error: {_fpe}",
-                              flush=True)
-                if not page_text.strip():
+                except TypeError:
+                    # Older pypdf does not accept extraction_mode kwarg
                     try:
                         page_text = reader.pages[idx].extract_text() or ""
                         if page_text.strip():
-                            print(f"  [PageExtract] pypdf fallback: "
+                            print(f"  [PageExtract] pypdf plain (no layout kwarg): "
                                   f"{len(page_text)} chars from page {pg}", flush=True)
                     except Exception as txt_err:
                         print(f"  [PageExtract] Text extraction failed for "
                               f"page {pg}: {txt_err}", flush=True)
+                except Exception as txt_err:
+                    print(f"  [PageExtract] Text extraction failed for "
+                          f"page {pg}: {txt_err}", flush=True)
                 if page_text.strip():
                     raw_text_parts.append(page_text)
             else:
                 print(f"  [PageExtract] WARNING: Page {pg} out of range "
                       f"(PDF has {total_pages} pages)", flush=True)
-
-        if fitz_doc is not None:
-            try:
-                fitz_doc.close()
-            except Exception:
-                pass
 
         if pages_added == 0:
             print("  [PageExtract] No valid pages extracted, using full PDF", flush=True)
