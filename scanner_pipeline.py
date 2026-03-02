@@ -157,7 +157,10 @@ def _try_horizontal_bom(raw_words, page_num):
 
     Returns pipe-separated table string, or "" if not a horizontal BOM.
     """
-    Y_BAND_TOL = 20    # pt — words within 20pt vertically are the same band
+    # Qty band (y≈59) and part band (y≈75) are only ~16pt apart in this drawing.
+    # Tolerance must be well below 16pt so they stay in separate bands.
+    # Within a single CAD text row, y variation is typically <2pt, so 6pt is safe.
+    Y_BAND_TOL = 6     # pt — words within 6pt vertically are the same band
 
     # ── 1. Group into y-bands ───────────────────────────────────────────────
     bands = []   # list of {'y': float, 'words': list}
@@ -238,11 +241,14 @@ def _try_horizontal_bom(raw_words, page_num):
             except ValueError:
                 pass
         non_empty = [w for w in sw if w[4].strip()]
-        if non_empty and len(ints) / len(non_empty) >= 0.4:
+        # QTY band must be ≥75% integers. Pure-quantity rows are 100%.
+        # Part-number bands are ~50% integers (many alphanumeric catalog nos.)
+        # so the 75% threshold cleanly separates qty from part bands.
+        if non_empty and len(ints) / len(non_empty) >= 0.75:
             qty_band_idx = bi
             qty_xv = ints
             print(f"  [ColumnExtract] HorizBOM: qty  band y≈{band['y']:.1f}, "
-                  f"{len(ints)} values", flush=True)
+                  f"{len(ints)}/{len(non_empty)} integer values", flush=True)
             break
 
     if qty_band_idx is None:
@@ -373,7 +379,7 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
                     best = max(tabs.tables, key=lambda t: len(t.rows))
                     print(f"  [ColumnExtract] Strat1 find_tables(): page {pg_num} → "
                           f"{len(tabs.tables)} table(s), using best "
-                          f"({len(best.rows)} rows × {len(best.col_count) if hasattr(best, 'col_count') else '?'} cols)",
+                          f"({len(best.rows)} rows × {best.col_count if hasattr(best, 'col_count') else '?'} cols)",
                           flush=True)
                     n = 0
                     for row_data in best.extract():
