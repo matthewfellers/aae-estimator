@@ -184,7 +184,9 @@ def get_vendor_map():
         "turck": "A-Tech", "red lion": "A-Tech",
         "square d": "Graybar", "schneider electric": "Graybar",
         "cisco": "TD Synnex",
-        "saginaw control engineering": "Saginaw", "sce": "Saginaw",
+        "saginaw control engineering": "Saginaw", "saginaw": "Saginaw", "sce": "Saginaw",
+        "automation direct": "Automation Direct",
+        "factorymation": "Factorymation",
     }
     if not supabase:
         return vendor_map
@@ -412,6 +414,18 @@ _DEFAULT_PREFIX_RULES_RAW = [
     {"prefix": "WDU",       "pattern": "^WDU",                                   "manufacturer": "Weidmuller",                        "vendor": "AWC",     "note": "Terminal blocks",     "priority": 40},
     {"prefix": "WTR",       "pattern": "^WTR",                                   "manufacturer": "Weidmuller",                        "vendor": "AWC",     "note": "Relay modules",       "priority": 40},
     {"prefix": "PRO ",      "pattern": "^PRO\\s",                                "manufacturer": "Weidmuller",                        "vendor": "AWC",     "note": "Power supplies",      "priority": 40},
+
+    # ── Panduit (additional color codes: LG=light gray, BK=black, IW=ivory) ──
+    {"prefix": "F#X#LG",    "pattern": "^F\\d+(\\.\\d+)?X\\d+(LG|BK|IW)",       "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct (gray/blk)", "priority": 50},
+    {"prefix": "H#X#LG",    "pattern": "^H\\d+(\\.\\d+)?X\\d+(LG|BK|IW)",       "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct hinged",    "priority": 50},
+    {"prefix": "G#X#LG",    "pattern": "^G\\d+(\\.\\d+)?X\\d+(LG|BK|IW)",       "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct wide",      "priority": 50},
+    {"prefix": "C#LG",      "pattern": "^C\\d+(\\.\\d+)?(LG|BK|IW)",            "manufacturer": "Panduit",                           "vendor": "Rexel",   "note": "Wire duct covers",    "priority": 50},
+
+    # ── Automation Direct / Factorymation ─────────────────────────────────────
+    {"prefix": "PD22-",     "pattern": "^PD22-",                                 "manufacturer": "Automation Direct",                 "vendor": "Factorymation", "note": "22mm pilot devices","priority": 50},
+    {"prefix": "PB-",       "pattern": "^PB-",                                   "manufacturer": "Automation Direct",                 "vendor": "Factorymation", "note": "Push buttons",     "priority": 40},
+    {"prefix": "ZB2-",      "pattern": "^ZB2-",                                  "manufacturer": "Automation Direct",                 "vendor": "Factorymation", "note": "22mm components",  "priority": 40},
+    {"prefix": "ZB4-",      "pattern": "^ZB4-",                                  "manufacturer": "Automation Direct",                 "vendor": "Factorymation", "note": "30mm components",  "priority": 40},
 ]
 
 def _compile_default_prefix_rules():
@@ -573,6 +587,15 @@ _MFR_ALIASES = {
     "panduit corp": "panduit",
     # Rittal
     "rittal corporation": "rittal",
+    # Panduit truncation (OCR sometimes cuts to 5 chars)
+    "pandu": "panduit",
+    "pandui": "panduit",
+    # Saginaw truncation
+    "sagin": "saginaw",
+    "sagina": "saginaw",
+    # Factorymation / Automation Direct
+    "automationdirect / factorymation": "factorymation",
+    "automation direct / factorymation": "factorymation",
 }
 
 
