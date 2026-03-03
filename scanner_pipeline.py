@@ -2045,7 +2045,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     # notes).  Example: 85-row BOM with 457 chars = 5 chars/row
                     # → the BOM is image-only, OCR is needed.
                     pypdf_chars = len(bom_raw_text.strip())
-                    expected_min_chars = max(300, total_rows * 20)
+                    expected_min_chars = max(300, row_count * 20)
                     if pypdf_chars < expected_min_chars:
                         # SHX / vector-font drawing (e.g. ABB XIO-00): run OCR to
                         # get character-accurate text AND crop the image tightly to
@@ -2084,7 +2084,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         # image is what triggers Railway's SIGKILL.
                         print(f"SCAN [{filename}]: pypdf text sufficient "
                               f"({pypdf_chars} chars >= {expected_min_chars} min for "
-                              f"{total_rows} rows) — skipping OCR to conserve memory",
+                              f"{row_count} rows) — skipping OCR to conserve memory",
                               flush=True)
                 else:
                     # Image rendering failed — fall back to FULL original PDF.
