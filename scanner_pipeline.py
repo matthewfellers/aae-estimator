@@ -730,24 +730,46 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
 
 
 # ---------------------------------------------------------------------------
-# High-DPI BOM crop rendering — v2.7 FIX for character accuracy
+# High-DPI BOM crop rendering — v2.8 FIX for character accuracy
 # ---------------------------------------------------------------------------
+# Claude's vision API downscales images larger than ~1568px on the long side.
+# A 3200x6600 image becomes ~764x1568 internally = ~11px/char = unreadable.
+# Solution: render at 400 DPI, thicken thin SHX strokes, then TILE into
+# sections of ~1500px height so Claude processes each tile at ~1568x1100.
+# This gives ~23px/char = 2× improvement over single-image approach.
+# 400 DPI is optimal: fewer tiles (6 vs 10 at 600 DPI), same effective
+# resolution, and proportionally thicker strokes after enhancement.
+CLAUDE_MAX_DIM = 1568  # Claude's internal scaling threshold
+
+def _enhance_for_vision(img):
+    """Thicken thin SHX vector-font strokes so Claude's vision can read them.
+
+    SHX fonts are single-stroke (~1-2px at 600 DPI).  MinFilter expands dark
+    pixels, making strokes ~4px — thick enough to survive Claude's downscaling.
+    """
+    from PIL import ImageFilter, ImageOps
+    img = img.convert("L")
+    img = ImageOps.autocontrast(img, cutoff=1)
+    # Threshold to clean binary
+    img = img.point(lambda x: 0 if x < 180 else 255)
+    # MinFilter(3) expands dark strokes by ~1px in each direction
+    img = img.filter(ImageFilter.MinFilter(3))
+    return img.convert("RGB")
+
+
 def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
-                                  render_dpi=600):
-    """Re-render BOM crops at high DPI by deducing crop coordinates.
+                                  render_dpi=400):
+    """Re-render BOM crops at high DPI, enhance strokes, and tile for Claude.
 
-    Compares the dimensions of full-page images vs OCR-cropped images to figure
-    out where the BOM table is on each page, then re-renders that area from the
-    PDF at render_dpi (600) for maximum character clarity.
-
-    Args:
-        pdf_b64: base64 BOM-only PDF
-        full_page_images: list of base64 PNG full-page renders (from _render_pdf_to_image)
-        cropped_images: list of base64 PNG cropped BOM images (from _ocr_images)
-        render_dpi: target DPI (default 600)
+    1. Deduce crop coordinates by comparing full-page vs OCR-cropped sizes.
+    2. Render the BOM area from the PDF at render_dpi (600).
+    3. Apply stroke thickening for thin SHX fonts.
+    4. Tile vertically into sections ≤ CLAUDE_MAX_DIM pixels tall so Claude
+       processes each at high effective resolution (~40-50px per character).
 
     Returns:
-        list of base64 PNG high-res crops, or empty list on failure.
+        list of base64 PNG tiles (may be more than len(pages) due to tiling),
+        or empty list on failure.
     """
     try:
         import fitz
@@ -771,23 +793,15 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
             cr_w, cr_h = cr_img.size
             del fp_img, cr_img
 
-            # The crop is from the OCR-upscaled image (6000px wide).
-            # The full page render is at the capped DPI (e.g. 4488px wide).
-            # The crop box was computed in the upscaled coordinate space.
-            # Since we need fractional coordinates, use the crop size relative
-            # to the upscale: the BOM is in the right portion of the page.
-            # Heuristic: BOM is right-aligned, crop width = cr_w, upscale width ≈ 6000
             UPSCALE_W = 6000
             upscale_h = int(fp_h * (UPSCALE_W / fp_w))
 
-            # The BOM table is typically right-aligned on panel drawings.
-            # The crop starts at approximately (UPSCALE_W - cr_w) from the left.
+            # BOM is right-aligned on panel drawings
             frac_x0 = max(0, (UPSCALE_W - cr_w - 60)) / UPSCALE_W
-            frac_y0 = 0  # BOM typically starts near top
-            frac_x1 = 1.0  # extends to right edge
+            frac_y0 = 0
+            frac_x1 = 1.0
             frac_y1 = min(1.0, (cr_h + 120) / upscale_h)
 
-            # Convert to PDF point coordinates
             pw = page.rect.width
             ph = page.rect.height
             clip = fitz.Rect(
@@ -798,14 +812,46 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
             zoom = render_dpi / 72
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
-            png_bytes = pix.tobytes("png")
-            hires.append(base64.b64encode(png_bytes).decode("ascii"))
 
-            print(f"  [HiRes] Page {pg_idx+1}: BOM crop {pix.width}x{pix.height} "
-                  f"@ {render_dpi}DPI ({len(png_bytes)/1024:.0f}KB) "
+            # Convert to PIL for enhancement and tiling
+            pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            pix_w, pix_h = pil_img.size
+            del pix
+
+            # Thicken thin SHX strokes for Claude's vision
+            pil_img = _enhance_for_vision(pil_img)
+
+            # Tile vertically so Claude sees each section at high resolution.
+            # At 400 DPI, a ~2140x4400 crop → 3 tiles of ~2140x1500 each.
+            # Claude scales each tile to ~1568x1100 = ~23px/char (vs 11px without tiles).
+            # Use overlap of ~50px so table rows at tile boundaries aren't split.
+            tile_h = 1500
+            overlap = 50
+            tiles = []
+            y = 0
+            while y < pix_h:
+                y_end = min(y + tile_h, pix_h)
+                tile = pil_img.crop((0, y, pix_w, y_end))
+                buf = io.BytesIO()
+                tile.save(buf, format="PNG", optimize=True)
+                tiles.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+                tile_kb = len(buf.getvalue()) / 1024
+                print(f"  [HiRes] Page {pg_idx+1} tile {len(tiles)}: "
+                      f"{pix_w}x{y_end-y} @ {render_dpi}DPI ({tile_kb:.0f}KB) "
+                      f"[y={y}-{y_end}]", flush=True)
+                del tile, buf
+                if y_end >= pix_h:
+                    break
+                y = y_end - overlap  # overlap so rows aren't cut
+
+            hires.extend(tiles)
+            del pil_img
+            import gc; gc.collect()
+
+            print(f"  [HiRes] Page {pg_idx+1}: {len(tiles)} tile(s) from "
+                  f"{pix_w}x{pix_h} crop "
                   f"[clip: x={frac_x0:.2f}-{frac_x1:.2f} y={frac_y0:.2f}-{frac_y1:.2f}]",
                   flush=True)
-            del pix, png_bytes  # free memory between pages
 
         doc.close()
         return hires
@@ -815,64 +861,6 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
         return []
 
 
-def _render_bom_crops_hires(pdf_b64, crop_boxes, render_dpi=600):
-    """Re-render ONLY the BOM table areas at high DPI from the source PDF.
-
-    After OCR identifies the BOM crop box on the low-DPI render, this function
-    goes back to the PDF and renders just that rectangle at render_dpi (default 600).
-    This gives 2-3× bigger characters than the capped 264 DPI full-page render,
-    with minimal memory cost because the area is small (~30% of the page).
-
-    Args:
-        pdf_b64: base64-encoded PDF (BOM-only pages)
-        crop_boxes: list of (page_index, (x0, y0, x1, y1), render_width, render_height)
-                    where the box is in the coordinates of the rendered image at render_dpi
-        render_dpi: DPI to render at (default 600 — gives ~50px/char for SHX fonts)
-
-    Returns:
-        list of base64-encoded PNG images, one per page with a valid crop box.
-        Empty list if rendering fails.
-    """
-    try:
-        import fitz
-        pdf_bytes = base64.b64decode(pdf_b64)
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        hires_images = []
-
-        for pg_idx, (frac_x0, frac_y0, frac_x1, frac_y1) in crop_boxes:
-            if pg_idx >= len(doc):
-                continue
-            page = doc[pg_idx]
-
-            # Convert fractional coordinates to PDF points
-            pw = page.rect.width
-            ph = page.rect.height
-            clip = fitz.Rect(
-                frac_x0 * pw, frac_y0 * ph,
-                frac_x1 * pw, frac_y1 * ph,
-            )
-            # Add margin
-            margin = 20  # points (~0.28 inch)
-            clip.x0 = max(0, clip.x0 - margin)
-            clip.y0 = max(0, clip.y0 - margin)
-            clip.x1 = min(pw, clip.x1 + margin)
-            clip.y1 = min(ph, clip.y1 + margin)
-
-            zoom = render_dpi / 72
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
-            png_bytes = pix.tobytes("png")
-            hires_images.append(base64.b64encode(png_bytes).decode("ascii"))
-
-            print(f"  [HiRes] Page {pg_idx+1}: BOM crop {pix.width}x{pix.height} "
-                  f"@ {render_dpi}DPI ({len(png_bytes)/1024:.0f}KB)", flush=True)
-
-        doc.close()
-        return hires_images
-
-    except Exception as exc:
-        print(f"  [HiRes] ERROR: {exc}", flush=True)
-        return []
 
 
 # ---------------------------------------------------------------------------
@@ -1622,13 +1610,16 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     if bom_extracted:
         if using_images:
             page_instruction = (
-                "This image is a high-resolution rendering of the BOM page from the drawing.\n"
-                "The BILL OF MATERIALS table may occupy only PART of this image — the rest\n"
-                "may show panel layouts, schematics, wiring diagrams, or other diagrams.\n"
+                "The BOM table is provided as HIGH-RESOLUTION image tile(s).\n"
+                "Each tall BOM page has been split into multiple overlapping vertical tiles\n"
+                "so you can read each character clearly. The tiles are in order from top to\n"
+                "bottom. Some rows may appear in two adjacent tiles (overlap zone) — only\n"
+                "extract each row ONCE.\n"
+                "The BILL OF MATERIALS table may occupy only PART of the image — the rest\n"
+                "may show panel layouts, schematics, or other diagrams.\n"
                 "FIND the BILL OF MATERIALS table (look for a grid with headers like\n"
                 "NO./ITEM, DESCRIPTION, MANUFACTURER, PART NUMBER, QTY).\n"
-                "Read EVERY row of that table. IGNORE everything outside the table\n"
-                "(panel component circles, wire numbers, reference labels, schematics, etc.).\n\n"
+                "Read EVERY row of that table. IGNORE everything outside the table.\n\n"
                 "=== CRITICAL: READ THE IMAGE — DO NOT INVENT, DO NOT REFUSE ===\n"
                 "RULE 1 — Never skip rows: Return a JSON entry for EVERY numbered row in\n"
                 "the BOM table. Returning 0 items when a table is visible is always wrong.\n"
@@ -2124,9 +2115,12 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
     if bom_extracted:
         if using_images:
             page_note = (
-                "This high-resolution IMAGE shows ONLY the BOM table from the drawing — "
-                "all other pages have been removed. Verify each part number against "
-                "what you see in this image, character by character.\n\n"
+                "The BOM table is provided as high-resolution image tile(s). Each BOM page\n"
+                "has been split into overlapping vertical tiles for maximum character clarity.\n"
+                "The tiles are in order from top to bottom.\n"
+                "Verify each part number against what you see in these images, character by\n"
+                "character. Pay close attention to similar-looking SHX font characters:\n"
+                "D↔O, 3↔5, C↔O, 0↔O, 6↔8, B↔8, 1↔I.\n\n"
             )
         else:
             page_note = (
@@ -2519,11 +2513,12 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         # get character-accurate text AND crop the image tightly to
                         # the BOM table so Claude sees it at full resolution.
                         ocr_text, bom_images_cropped = _ocr_images(bom_images)
-                        # v2.7: Re-render the BOM crop areas at HIGH DPI (600) directly
-                        # from the PDF for maximum character clarity. The OCR crop at
-                        # 264 DPI gives ~27px/char; 600 DPI gives ~50px/char — enough
-                        # to reliably distinguish D/O, 3/5, etc. in SHX fonts.
-                        # Memory is fine because we're only rendering the small BOM area.
+                        # v2.8: Re-render BOM crop at 400 DPI, enhance strokes,
+                        # and TILE into small sections. Claude's vision downscales
+                        # large images, so one 3200x6600 image → only 11px/char.
+                        # Tiling into ~1500px sections → 23px/char (2× improvement).
+                        # Stroke enhancement thickens thin SHX lines for better D/O,
+                        # 3/5, C/O distinction.
                         if bom_images_cropped:
                             try:
                                 hires = _render_bom_crops_hires_auto(
@@ -2531,8 +2526,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                 )
                                 if hires:
                                     bom_images = hires
-                                    print(f"SCAN [{filename}]: Using HIGH-RES BOM crops "
-                                          f"({len(hires)} page(s), 600 DPI) for Stage 2/5",
+                                    print(f"SCAN [{filename}]: Using TILED BOM crops "
+                                          f"({len(hires)} tiles, enhanced) for Stage 2/5",
                                           flush=True)
                                 else:
                                     bom_images = bom_images_cropped
