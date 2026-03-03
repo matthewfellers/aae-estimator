@@ -894,6 +894,19 @@ def _ocr_images(images_b64):
             img = Image.open(io.BytesIO(img_bytes))
 
             # --- Preprocess for thin single-stroke CAD fonts ---
+            # 0. Upscale if image is smaller than the OCR minimum.
+            #    Tesseract accuracy degrades sharply below ~300 DPI equivalent;
+            #    character pairs like 0/C, 0/D, H/M, 5/6, S/8 become ambiguous.
+            #    Target 6000px wide → ~353 DPI for 17×11" drawings — enough to
+            #    keep all character pairs visually distinct.
+            MIN_OCR_WIDTH = 6000
+            if img.width < MIN_OCR_WIDTH:
+                scale = MIN_OCR_WIDTH / img.width
+                new_w = int(img.width  * scale)
+                new_h = int(img.height * scale)
+                img = img.resize((new_w, new_h), Image.LANCZOS)
+                print(f"  [OCR] Page {i+1}: upscaled {img.width}×{img.height}px "
+                      f"for better character accuracy", flush=True)
             # 1. Grayscale
             img_gray = img.convert("L")
             # 2. Auto-contrast: normalise brightness range
@@ -1794,7 +1807,19 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
     prompt += (
         "\n"
         "2. Compare character by character — read left to right, then right to left\n"
-        "3. Check for commonly confused characters: O vs 0, l vs 1, B vs 8, S vs 5\n"
+        "3. Check for ALL of these commonly confused character pairs (OCR errors are common\n"
+        "   when the source was a plotted CAD drawing without a real PDF text layer):\n"
+        "     0 (zero) vs O (letter O)     — e.g. G1500000 mis-OCR'd as G15C0000\n"
+        "     0 (zero) vs C                — e.g. WM6016010 mis-OCR'd as WM601C010\n"
+        "     0 (zero) vs D                — e.g. 5160LC mis-OCR'd as 616DLC\n"
+        "     H vs M                       — e.g. WMSHB mis-OCR'd as WMSMB\n"
+        "     5 vs 6  (and vice versa)     — e.g. 5160LC mis-OCR'd as 616DLC\n"
+        "     S vs 5  (and vice versa)     — e.g. HS7A485 mis-OCR'd as H87A485\n"
+        "     G vs C  (and vice versa)     — e.g. GY1 mis-OCR'd as CT1\n"
+        "     l (lower L) vs 1 vs I\n"
+        "     B vs 8\n"
+        "   Be ESPECIALLY suspicious if the extracted value looks like a plausible part number\n"
+        "   but one character seems out of place for that manufacturer's numbering scheme.\n"
         "4. Count the characters — does the extracted version have the same count as the PDF?\n"
         "5. If it matches exactly, mark it verified\n"
         "6. If ANY character is wrong, provide the CORRECT value from the PDF\n"
