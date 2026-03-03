@@ -2292,7 +2292,7 @@ def bom_from_scan():
     # ── Consolidate identical part numbers — sum quantities, preserve draw order ──
     from collections import OrderedDict as _OD
     _seen_pn = _OD()
-    for _itm in sorted(line_items, key=lambda x: (x.get("item_num") or 9999)):
+    for _itm in line_items:  # preserve scanner's document order (page 1→2→3, top→bottom)
         _pn_key = (_itm.get("part_number") or "").strip().upper()
         if _pn_key and _pn_key != "[UNREADABLE]":
             if _pn_key in _seen_pn:
