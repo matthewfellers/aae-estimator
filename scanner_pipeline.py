@@ -1289,14 +1289,15 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "Read EVERY row of that table. IGNORE everything outside the table\n"
                 "(panel component circles, wire numbers, reference labels, schematics, etc.).\n\n"
                 "=== CRITICAL: READ THE IMAGE — DO NOT INVENT, DO NOT REFUSE ===\n"
-                "ABSOLUTE RULE: You MUST return a row for EVERY numbered item visible in the\n"
-                "BOM table. Returning 0 items when a BOM table is present is ALWAYS wrong.\n"
-                "If text is small or unclear, zoom in mentally and give your best read.\n"
-                "DO NOT substitute part numbers from your training data — read what is shown.\n"
-                "If you genuinely cannot make out one character, write [?] for THAT character\n"
-                "only (e.g. SC[?]-24EL2412LPPL). Use [?] sparingly — attempt every cell.\n"
-                "Partial data is vastly better than no data. A row with a blank part number\n"
-                "is better than a missing row. Your best visual guess beats silence.\n\n"
+                "RULE 1 — Never skip rows: Return a JSON entry for EVERY numbered row in\n"
+                "the BOM table. Returning 0 items when a table is visible is always wrong.\n"
+                "RULE 2 — Never use [?] for a whole field: [?] is only for ONE unreadable\n"
+                "character inside a value (e.g. 'HWI[?]-2CE1T24'). If you can read most of\n"
+                "a part number, write what you can read. An imperfect read is better than [?].\n"
+                "RULE 3 — Never substitute: do not replace what you see with a similar part\n"
+                "number from your training data. Read character-by-character what is shown.\n"
+                "RULE 4 — Partial data is fine: a row with a blank or partial part number is\n"
+                "far better than a missing row. Give your best visual read for every cell.\n\n"
             )
         else:
             page_instruction = (
@@ -2035,10 +2036,17 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     # ONLY use OCR when pypdf extracted very little text — that
                     # indicates an AutoCAD SHX / vector-font drawing with no real
                     # text layer (e.g. ABB XIO-00).  If pypdf already got good
-                    # text (>= 300 chars) keep it — OCR on normal PDFs scrambles
-                    # table structure and garbles manufacturers/quantities.
+                    # text keep it — OCR on normal PDFs scrambles table structure.
+                    #
+                    # Threshold is row-count-aware: a real text-layer BOM should
+                    # have at least ~20 chars per row (part number + description
+                    # fragment).  If chars_per_row < 20, the BOM text wasn't
+                    # extracted even though some page text exists (title block /
+                    # notes).  Example: 85-row BOM with 457 chars = 5 chars/row
+                    # → the BOM is image-only, OCR is needed.
                     pypdf_chars = len(bom_raw_text.strip())
-                    if pypdf_chars < 300:
+                    expected_min_chars = max(300, total_rows * 20)
+                    if pypdf_chars < expected_min_chars:
                         # SHX / vector-font drawing (e.g. ABB XIO-00): run OCR to
                         # get character-accurate text AND crop the image tightly to
                         # the BOM table so Claude sees it at full resolution.
@@ -2074,8 +2082,10 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         # Good pypdf text — skip OCR entirely to avoid OOM on large
                         # drawings.  pytesseract + 5 preprocessing passes on a 200 MB
                         # image is what triggers Railway's SIGKILL.
-                        print(f"SCAN [{filename}]: pypdf text is good ({pypdf_chars} chars) "
-                              f"— skipping OCR to conserve memory", flush=True)
+                        print(f"SCAN [{filename}]: pypdf text sufficient "
+                              f"({pypdf_chars} chars >= {expected_min_chars} min for "
+                              f"{total_rows} rows) — skipping OCR to conserve memory",
+                              flush=True)
                 else:
                     # Image rendering failed — fall back to FULL original PDF.
                     # The page-extracted PDF has broken font resources (CAD PDFs
