@@ -2289,15 +2289,29 @@ def bom_from_scan():
     # ── Load routing rules (deterministic 4-tier engine) ─────────────────────
     routing_rules = load_routing_rules()
 
-    # Group items by category
-    from collections import defaultdict
-    grouped = defaultdict(list)
-    cat_order = ["Enclosure","Power","Motor Ctrl","Control Devices","PLC/Network",
-                 "Terminals","Relays","HMI/Computer","Wiring","Markers","Other"]
-    for item in line_items:
-        cat = item.get("category","Other")
-        if cat not in cat_order: cat = "Other"
-        grouped[cat].append(item)
+    # ── Consolidate identical part numbers — sum quantities, preserve draw order ──
+    from collections import OrderedDict as _OD
+    _seen_pn = _OD()
+    for _itm in sorted(line_items, key=lambda x: (x.get("item_num") or 9999)):
+        _pn_key = (_itm.get("part_number") or "").strip().upper()
+        if _pn_key and _pn_key != "[UNREADABLE]":
+            if _pn_key in _seen_pn:
+                # Duplicate part number — sum quantities, keep first row's other fields
+                try:
+                    _seen_pn[_pn_key]["qty"] = (
+                        int(_seen_pn[_pn_key].get("qty", 1) or 1)
+                        + int(_itm.get("qty", 1) or 1)
+                    )
+                except (ValueError, TypeError):
+                    pass  # keep existing qty if int conversion fails
+            else:
+                _seen_pn[_pn_key] = dict(_itm)
+        else:
+            # Blank or unreadable part number — can't safely consolidate, keep as-is
+            _unique_key = f"__nopn_{_itm.get('item_num', id(_itm))}"
+            _seen_pn[_unique_key] = dict(_itm)
+    line_items_out = list(_seen_pn.values())
+    # ── End consolidation ──────────────────────────────────────────────────────
 
     row = 7; item_counter = 0
     even_fill = PatternFill("solid", fgColor="FDF8F8")
@@ -2306,63 +2320,50 @@ def bom_from_scan():
     bdr       = Border(bottom=thin, left=thin, right=thin, top=thin)
     TEAL      = "00897A"
 
-    cats_with_items = [c for c in cat_order if grouped[c]]
-    for cat in cats_with_items:
-        items = grouped[cat]
-        # Section header spanning 9 cols
-        ws.merge_cells(f"A{row}:J{row}")
-        hc = ws.cell(row=row, column=1, value=f"  {cat.upper()}")
-        hc.font = Font(name="Arial", bold=True, color=WHITE, size=9)
-        hc.fill = PatternFill("solid", fgColor=RED)
-        hc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-        ws.row_dimensions[row].height = 16
+    # Write items in chronological BOM order (no category section headers)
+    for itm in line_items_out:
+        item_counter += 1
+        fill = even_fill if item_counter % 2 == 0 else odd_fill
+        ws.row_dimensions[row].height = 15
+        mfr    = itm.get("manufacturer", "")
+        pn     = itm.get("part_number", "")
+        result = resolve_vendor(pn, mfr, routing_rules)
+        vendor = result["vendor"]
+        itm["_resolved_vendor"] = vendor  # store for vendor sheet grouping
+        unit_cost = float(itm.get("aae_cost", 0) or 0)
+        qty_raw = itm.get("qty", 1) or 1
+        try:
+            qty_val = int(qty_raw)
+        except (ValueError, TypeError):
+            qty_val = 1
+        vals = [
+            item_counter,                          # A: sequential ITEM #
+            itm.get("part_number", ""),            # B: PART NUMBER
+            itm.get("description", ""),            # C: DESCRIPTION
+            qty_val,                               # D: QTY (consolidated)
+            itm.get("unit", "ea"),                 # E: U/M
+            mfr,                                   # F: MANUFACTURER
+            vendor,                                # G: VENDOR
+            unit_cost,                             # H: UNIT COST
+            unit_cost * qty_val,                   # I: TOTAL COST
+            itm.get("notes", "")                   # J: NOTES
+        ]
+        for ci, val in enumerate(vals, 1):
+            c = ws.cell(row=row, column=ci, value=val)
+            c.fill = fill; c.border = bdr
+            c.font = Font(name="Arial", size=9, color=DARK)
+            if ci in (1, 4):
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif ci == 7:  # Vendor — teal, centered
+                c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif ci in (8, 9):  # Unit Cost / Total Cost
+                c.alignment = Alignment(horizontal="right", vertical="center")
+                c.number_format = '"$"#,##0.00'
+                c.font = Font(name="Arial", size=9, color="AAAAAA", italic=True)
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
         row += 1
-
-        for itm in items:
-            item_counter += 1
-            fill = even_fill if item_counter % 2 == 0 else odd_fill
-            ws.row_dimensions[row].height = 15
-            mfr    = itm.get("manufacturer", "")
-            pn     = itm.get("part_number", "")
-            result = resolve_vendor(pn, mfr, routing_rules)
-            vendor = result["vendor"]
-            itm["_resolved_vendor"] = vendor  # store for vendor sheet grouping
-            unit_cost = float(itm.get("aae_cost", 0) or 0)
-            qty_raw = itm.get("qty", 1) or 1
-            try:
-                qty_val = int(qty_raw)
-            except (ValueError, TypeError):
-                qty_val = 1
-            vals = [
-                itm.get("item_num", item_counter),   # A: ITEM
-                itm.get("part_number", ""),            # B: PART NUMBER
-                itm.get("description", ""),            # C: DESCRIPTION
-                qty_val,                               # D: QTY
-                itm.get("unit", "ea"),                 # E: U/M
-                mfr,                                   # F: MANUFACTURER
-                vendor,                                # G: VENDOR
-                unit_cost,                             # H: UNIT COST
-                unit_cost * qty_val,                   # I: TOTAL COST
-                itm.get("notes", "")                   # J: NOTES
-            ]
-            for ci, val in enumerate(vals, 1):
-                c = ws.cell(row=row, column=ci, value=val)
-                c.fill = fill; c.border = bdr
-                c.font = Font(name="Arial", size=9, color=DARK)
-                if ci in (1, 4):
-                    c.alignment = Alignment(horizontal="center", vertical="center")
-                elif ci == 7:  # Vendor — teal, centered
-                    c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
-                    c.alignment = Alignment(horizontal="center", vertical="center")
-                elif ci in (8, 9):  # Unit Cost / Total Cost
-                    c.alignment = Alignment(horizontal="right", vertical="center")
-                    c.number_format = '"$"#,##0.00'
-                    c.font = Font(name="Arial", size=9, color="AAAAAA", italic=True)
-                else:
-                    c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
-            row += 1
-
-        row += 1  # spacer
 
     # Total row (spans A:G, value in H)
     ws.merge_cells(f"A{row}:H{row}")
@@ -2405,7 +2406,7 @@ def bom_from_scan():
     import zipfile
     from collections import defaultdict as _vdd2
     scan_vendor_groups = _vdd2(list)
-    for _itm in line_items:
+    for _itm in line_items_out:
         _v = _itm.get("_resolved_vendor", "") or "Unassigned"
         _norm = dict(_itm); _norm["vendor"] = _v
         scan_vendor_groups[_v].append(_norm)
