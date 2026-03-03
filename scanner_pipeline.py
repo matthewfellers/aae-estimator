@@ -1025,6 +1025,7 @@ def _ocr_images(images_b64):
     already-correct characters into JSON rather than doing OCR itself.
     """
     try:
+        import gc
         import pytesseract
         from PIL import Image, ImageOps, ImageFilter
 
@@ -1038,10 +1039,11 @@ def _ocr_images(images_b64):
             # 0. Upscale if image is smaller than the OCR minimum.
             #    Tesseract accuracy degrades sharply below ~300 DPI equivalent;
             #    character pairs like 0/C, 0/D, H/M, 5/6, S/8 become ambiguous.
-            #    v2.7: Bumped from 6000→8000 for SHX fonts — at 6000px (~353 DPI)
-            #    similar pairs like 3/5 and D/O were still being confused.
-            #    8000px → ~470 DPI for 17×11" drawings, enough to resolve all pairs.
-            MIN_OCR_WIDTH = 8000
+            #    Target 6000px wide → ~353 DPI for 17×11" drawings — enough to
+            #    keep all character pairs visually distinct.
+            #    NOTE: 8000px was tried but causes OOM on Railway with multi-page
+            #    BOMs (each page = ~124MB raw + 5 preprocessing copies = ~620MB).
+            MIN_OCR_WIDTH = 6000
             if img.width < MIN_OCR_WIDTH:
                 scale = MIN_OCR_WIDTH / img.width
                 new_w = int(img.width  * scale)
@@ -1049,15 +1051,22 @@ def _ocr_images(images_b64):
                 img = img.resize((new_w, new_h), Image.LANCZOS)
                 print(f"  [OCR] Page {i+1}: upscaled {img.width}×{img.height}px "
                       f"for better character accuracy", flush=True)
+            # Save dimensions before preprocessing (img is referenced later
+            # for crop_box and column width)
+            img_width = img.width
+            img_height = img.height
             # 1. Grayscale
             img_gray = img.convert("L")
             # 2. Auto-contrast: normalise brightness range
             img_enhanced = ImageOps.autocontrast(img_gray, cutoff=2)
+            del img_gray
             # 3. Dilate strokes: MaxFilter thickens 1-2px lines so
             #    Tesseract can distinguish characters reliably
             img_dilated = img_enhanced.filter(ImageFilter.MaxFilter(3))
+            del img_enhanced
             # 4. Sharpen to restore edge definition after dilation
             img_sharp = img_dilated.filter(ImageFilter.SHARPEN)
+            del img_dilated
 
             # --- Word-position OCR (PSM 11 = sparse, no layout assumptions) ---
             data = pytesseract.image_to_data(
@@ -1092,27 +1101,32 @@ def _ocr_images(images_b64):
             words.sort(key=lambda w: (w["top"], w["left"]))
 
             # ── Try column-aware BOM table extraction first ──────────────────
-            col_text, crop_box = _ocr_build_column_table(words, img.width)
+            col_text, crop_box = _ocr_build_column_table(words, img_width)
             if col_text.strip():
                 all_text.append(col_text)
-                # Crop the ORIGINAL rendered image to just the BOM table area.
+                # Crop the rendered image to just the BOM table area.
                 # The full page may be 3-4× wider than the BOM (panel layout on
                 # the left), so cropping gives Claude ~3-4× more pixels per cell,
                 # making single-digit QTY values reliably readable.
+                # Use img (original) for cropping — it has the right pixel coords.
                 if crop_box is not None:
                     x0, y0, x1, y1 = crop_box
                     x0 = max(0, x0);  y0 = max(0, y0)
-                    x1 = min(img.width, x1);  y1 = min(img.height, y1)
+                    x1 = min(img_width, x1);  y1 = min(img_height, y1)
                     cropped = img.crop((x0, y0, x1, y1))
                     buf = io.BytesIO()
                     cropped.save(buf, format="PNG")
                     cropped_b64 = base64.b64encode(buf.getvalue()).decode()
                     cropped_images_b64.append(cropped_b64)
+                    del cropped
                     print(f"  [OCR] Page {i+1}: cropped BOM table "
                           f"{x1-x0}×{y1-y0}px  (full page was "
-                          f"{img.width}×{img.height}px)", flush=True)
+                          f"{img_width}×{img_height}px)", flush=True)
                 print(f"  [OCR] Page {i + 1}: {len(words)} words → "
                       f"column-aware table ({len(col_text)} chars)", flush=True)
+                # Free memory before next page
+                del img, img_sharp, data, words
+                gc.collect()
                 continue  # skip the flat fallback below
 
             # ── Fallback: flat line reconstruction with gap-based | markers ──
@@ -1150,6 +1164,10 @@ def _ocr_images(images_b64):
             print(f"  [OCR] Page {i + 1}: {len(words)} words, "
                   f"{len(lines)} lines, {len(text)} chars", flush=True)
             print(f"  [OCR] First 400: {text[:400]!r}", flush=True)
+
+            # Free memory between pages — multi-page BOMs can OOM on Railway
+            del img, img_sharp, data, words
+            gc.collect()
 
         combined = "\n".join(all_text)
         print(f"  [OCR] Total: {len(combined)} chars across "
