@@ -1072,9 +1072,21 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
     }
 
     if "sonnet" in model and thinking_budget > 0:
-        if max_tokens <= thinking_budget:
-            max_tokens = thinking_budget + max(8000, max_tokens)
-            api_kwargs["max_tokens"] = max_tokens
+        # Anthropic requires api max_tokens = thinking_budget + output_tokens.
+        # claude-sonnet-4 hard cap is 64 000 total — enforce it here so callers
+        # don't need to know the limit.
+        API_HARD_CAP = 64000
+        output_tokens = max_tokens  # caller's max_tokens = desired output portion
+        if thinking_budget + output_tokens > API_HARD_CAP:
+            # Shrink thinking first — output JSON is mandatory, thinking is best-effort
+            thinking_budget = max(1024, API_HARD_CAP - output_tokens)
+            if output_tokens > API_HARD_CAP - 1024:
+                # Even output alone nearly exceeds cap (very large drawing)
+                output_tokens = API_HARD_CAP - 1024
+                thinking_budget = 1024
+            print(f"  [API] Token budget capped to {API_HARD_CAP}: "
+                  f"thinking={thinking_budget}, output={output_tokens}", flush=True)
+        api_kwargs["max_tokens"] = thinking_budget + output_tokens
         api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
     elif "haiku" in model:
         api_kwargs["temperature"] = 0
