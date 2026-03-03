@@ -21,6 +21,147 @@ import json, re, time, base64, io
 from collections import Counter
 
 # ---------------------------------------------------------------------------
+# Programmatic BOM page detection — backup for Stage 1 misses
+# ---------------------------------------------------------------------------
+def _detect_bom_pages_programmatic(pdf_b64):
+    """Scan every page of the PDF for BOM-like tables.
+
+    Returns a list of 1-based page numbers that likely contain BOM tables.
+    Uses three strategies (each page tries all until one succeeds):
+      1. find_tables(): pages with a table having >= MIN_BOM_ROWS rows
+      2. Word-scan: pages containing BOM header keywords in the text layer
+      3. OCR-scan (for SHX/vector-font drawings with no text layer):
+         renders each page at low DPI, runs pytesseract, looks for keywords
+    """
+    MIN_BOM_ROWS = 8  # tables with fewer rows are title blocks, not BOMs
+    BOM_KEYWORDS = [
+        "BILL OF MATERIALS", "B.O.M.", "PARTS LIST",
+        "MATERIAL LIST", "BOM CONT", "CONT FROM",
+        "CONT ON SHT",
+    ]
+
+    try:
+        import fitz
+        pdf_bytes = base64.b64decode(pdf_b64)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        bom_pages = []
+        needs_ocr_scan = []  # pages where text-layer strategies failed
+
+        for pg_idx in range(len(doc)):
+            page = doc[pg_idx]
+            pg_num = pg_idx + 1  # 1-based
+            found = False
+
+            # --- Strategy 1: find_tables() ---
+            try:
+                tabs = page.find_tables()
+                if tabs.tables:
+                    best = max(tabs.tables, key=lambda t: len(t.rows))
+                    if len(best.rows) >= MIN_BOM_ROWS:
+                        bom_pages.append(pg_num)
+                        print(f"  [BOM-detect] Page {pg_num}: table with "
+                              f"{len(best.rows)} rows (find_tables)", flush=True)
+                        found = True
+            except (AttributeError, Exception):
+                pass
+
+            # --- Strategy 2: keyword scan on text-layer words ---
+            if not found:
+                try:
+                    words = page.get_text("words")
+                    if words:
+                        full_text = " ".join(w[4] for w in words).upper()
+                        for kw in BOM_KEYWORDS:
+                            if kw in full_text:
+                                bom_pages.append(pg_num)
+                                print(f"  [BOM-detect] Page {pg_num}: keyword "
+                                      f"'{kw}' found (word-scan)", flush=True)
+                                found = True
+                                break
+                except Exception:
+                    pass
+
+            if not found:
+                needs_ocr_scan.append(pg_idx)
+
+        # --- Strategy 3: OCR scan for SHX/vector-font drawings ---
+        # Only runs if Strategies 1 & 2 found nothing on some pages.
+        # Renders at low DPI (100) for speed — we only need to read titles.
+        if needs_ocr_scan and not bom_pages:
+            try:
+                import pytesseract
+                from PIL import Image
+                print(f"  [BOM-detect] Text-layer strategies found nothing — "
+                      f"OCR scanning {len(needs_ocr_scan)} pages", flush=True)
+
+                # Exact keywords for clean OCR at higher DPI
+                BOM_KW_EXACT = list(BOM_KEYWORDS)
+                # Fuzzy fragments for noisy SHX font OCR at lower DPI —
+                # "BILL OF MATERIALS" often OCRs as "BLL OF WATERALS" etc.
+                BOM_KW_FUZZY = [
+                    "BILL OF", "OF MATERIALS", "PARTS LIST",
+                    "MATERIAL LIST", "CONT FROM", "CONT ON",
+                    "BLL OF", "WATERALS", "MATER",
+                ]
+
+                for pg_idx in needs_ocr_scan:
+                    page = doc[pg_idx]
+                    pg_num = pg_idx + 1
+
+                    # Render at 150 DPI — reasonable balance of speed vs accuracy
+                    # for reading BOM title text in SHX font drawings.
+                    # 100 DPI was too low (missed "BILL OF MATERIALS" entirely).
+                    zoom = 150 / 72
+                    mat = fitz.Matrix(zoom, zoom)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+
+                    # Quick OCR — PSM 11 (sparse text), no preprocessing
+                    try:
+                        ocr_text = pytesseract.image_to_string(
+                            img, config="--psm 11 --oem 3"
+                        ).upper()
+                    except Exception:
+                        continue
+
+                    # Try exact keywords first
+                    found_kw = False
+                    for kw in BOM_KW_EXACT:
+                        if kw in ocr_text:
+                            bom_pages.append(pg_num)
+                            print(f"  [BOM-detect] Page {pg_num}: keyword "
+                                  f"'{kw}' found (OCR-scan)", flush=True)
+                            found_kw = True
+                            break
+
+                    # Fuzzy fallback: SHX font at 150 DPI may still garble
+                    # "BILL OF MATERIALS" → "BLL OF WATERALS" etc.
+                    if not found_kw:
+                        fuzzy_hits = sum(1 for kw in BOM_KW_FUZZY
+                                         if kw in ocr_text)
+                        if fuzzy_hits >= 2:
+                            bom_pages.append(pg_num)
+                            print(f"  [BOM-detect] Page {pg_num}: {fuzzy_hits} "
+                                  f"fuzzy BOM keywords (OCR-scan)", flush=True)
+
+            except ImportError:
+                print("  [BOM-detect] pytesseract not available for OCR scan",
+                      flush=True)
+            except Exception as ocr_err:
+                print(f"  [BOM-detect] OCR scan error: {ocr_err}", flush=True)
+
+        doc.close()
+        return sorted(set(bom_pages))
+
+    except ImportError:
+        print("  [BOM-detect] fitz not available, skipping", flush=True)
+        return []
+    except Exception as exc:
+        print(f"  [BOM-detect] ERROR: {exc}", flush=True)
+        return []
+
+
+# ---------------------------------------------------------------------------
 # PDF Page Extraction — THE FIX for multi-page drawings
 # ---------------------------------------------------------------------------
 def _extract_pages(pdf_b64, page_numbers):
@@ -897,9 +1038,10 @@ def _ocr_images(images_b64):
             # 0. Upscale if image is smaller than the OCR minimum.
             #    Tesseract accuracy degrades sharply below ~300 DPI equivalent;
             #    character pairs like 0/C, 0/D, H/M, 5/6, S/8 become ambiguous.
-            #    Target 6000px wide → ~353 DPI for 17×11" drawings — enough to
-            #    keep all character pairs visually distinct.
-            MIN_OCR_WIDTH = 6000
+            #    v2.7: Bumped from 6000→8000 for SHX fonts — at 6000px (~353 DPI)
+            #    similar pairs like 3/5 and D/O were still being confused.
+            #    8000px → ~470 DPI for 17×11" drawings, enough to resolve all pairs.
+            MIN_OCR_WIDTH = 8000
             if img.width < MIN_OCR_WIDTH:
                 scale = MIN_OCR_WIDTH / img.width
                 new_w = int(img.width  * scale)
@@ -1359,6 +1501,18 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "  - Manufacturer names or descriptions may be truncated (e.g. PANDU vs PANDUIT)\n"
                 "USE THE IMAGE as your final authority for every cell value.\n"
                 "When the OCR text and the image disagree, TRUST THE IMAGE — correct the OCR.\n\n"
+                "=== SHX FONT CHARACTER CONFUSION WARNING ===\n"
+                "This drawing uses thin single-stroke AutoCAD SHX fonts. OCR frequently confuses:\n"
+                "  - 3 ↔ 5  (very common — look carefully at the top curve direction)\n"
+                "  - D ↔ O ↔ 0  (D has a flat left side; O and 0 are fully round)\n"
+                "  - B ↔ 8  (B has flat left side; 8 is fully curved)\n"
+                "  - S ↔ 5  (S is fully curved; 5 has a flat top-left corner)\n"
+                "  - 6 ↔ G  (6 is closed; G has an opening on the right)\n"
+                "  - 1 ↔ I ↔ l  (look at serifs and context)\n"
+                "  - M ↔ W  (look carefully at which direction the middle strokes point)\n"
+                "  - C ↔ G  (G has a horizontal bar; C does not)\n"
+                "For EVERY part number, examine each character in the IMAGE carefully.\n"
+                "Do NOT assume the OCR text is correct — verify against what you SEE.\n\n"
                 f"{raw_text}\n\n"
                 "=== END OCR TEXT ===\n\n"
             )
@@ -1451,6 +1605,11 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "  The OCR TEXT above is a structural guide but may contain truncated or garbled characters.\n"
                 "  Use the IMAGE as your final authority — if you can read a value clearly in the image,\n"
                 "  use what the image shows even if the OCR text differs.\n\n"
+                "  === PART NUMBERS — READ FROM THE IMAGE, VERIFY AGAINST OCR ===\n"
+                "  OCR on SHX fonts commonly confuses: 3↔5, D↔O↔0, B↔8, S↔5, 6↔G, C↔G, 1↔I↔l\n"
+                "  For EVERY part number: read each character from the IMAGE first, then compare to OCR.\n"
+                "  If they agree, good. If they disagree, trust what you see in the IMAGE.\n"
+                "  Pay special attention to the first few characters — OCR errors there change the entire PN.\n\n"
                 "  === QTY COLUMN — CRITICAL READING RULES ===\n"
                 "  1. Look at the HEADER ROW in the image. Identify every column heading.\n"
                 "     The QTY (or QUANTITY) column is typically the RIGHTMOST column.\n"
@@ -1799,6 +1958,19 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
         f"{page_note}"
         f"{raw_text_section}"
         "Your job: verify each part number CHARACTER BY CHARACTER against the PDF.\n\n"
+        "=== SHX FONT CHARACTER CONFUSION — PAY EXTRA ATTENTION ===\n"
+        "AutoCAD drawings use thin single-stroke SHX fonts where characters look very similar.\n"
+        "The following pairs are COMMONLY confused by OCR and by visual reading:\n"
+        "  3 ↔ 5  (top curve direction differs — scrutinize carefully)\n"
+        "  D ↔ O ↔ 0  (D has a flat left vertical stroke; O/0 are fully round)\n"
+        "  B ↔ 8  (B has a flat left side; 8 is fully curved on both sides)\n"
+        "  S ↔ 5  (S is fully curved; 5 has a flat top-left corner)\n"
+        "  6 ↔ G  (6 is closed at top; G has an opening on the right)\n"
+        "  1 ↔ I ↔ l  (check serifs/context)\n"
+        "  C ↔ G  (G has a horizontal bar; C does not)\n"
+        "For EACH part number, zoom in mentally on every character and ask:\n"
+        "  'Could this character be one of the commonly confused alternatives?'\n"
+        "If there is ANY doubt, look at the character shape more carefully.\n\n"
         "EXTRACTED PART NUMBERS:\n"
         f"{pn_list}\n\n"
         "MANDATORY FIXES — apply without re-examining the image:\n"
@@ -1813,12 +1985,13 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
         "\n"
         "2. Compare CHARACTER BY CHARACTER — read left to right, then right to left\n"
         "3. COUNT the characters — a missing or extra character is a common OCR error\n"
-        "4. Only correct if you can CLEARLY see the extracted value differs from the drawing.\n"
+        "4. Pay SPECIAL ATTENTION to the confused character pairs listed above (3/5, D/O, B/8, etc.)\n"
+        "5. Only correct if you can CLEARLY see the extracted value differs from the drawing.\n"
         "   Do NOT 'fix' characters based on what you think the part number should be —\n"
         "   read EXACTLY what is printed and report that.\n"
-        "5. If it matches exactly, mark it verified\n"
-        "6. If ANY character is wrong, provide the CORRECT value from the PDF\n"
-        "7. If you cannot find it in the PDF at all, mark it as not_found\n\n"
+        "6. If it matches exactly, mark it verified\n"
+        "7. If ANY character is wrong, provide the CORRECT value from the PDF\n"
+        "8. If you cannot find it in the PDF at all, mark it as not_found\n\n"
         "Return this JSON:\n"
         "{\n"
         '  "verifications": [\n'
@@ -2059,11 +2232,39 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 "_output_tokens": total_tokens,
             }
 
+        # == PROGRAMMATIC BOM PAGE DETECTION (v2.7) ============================
+        # Stage 1 (Claude) may miss continuation BOM pages. Run a fast
+        # programmatic scan with fitz to catch any pages Claude missed.
+        bom_pages = structure.get("pages_with_bom", [])
+        orig_bom_pages = list(bom_pages)  # save original for comparison
+        try:
+            prog_pages = _detect_bom_pages_programmatic(pdf_b64)
+            if prog_pages:
+                merged = sorted(set(bom_pages) | set(prog_pages))
+                if merged != sorted(bom_pages):
+                    print(f"SCAN [{filename}]: Programmatic BOM detection found "
+                          f"additional pages: Stage1={bom_pages} + "
+                          f"programmatic={prog_pages} → merged={merged}", flush=True)
+                    bom_pages = merged
+                    structure["pages_with_bom"] = merged
+                    # Update row count estimate if we gained pages
+                    if len(merged) > len(orig_bom_pages):
+                        # Rough estimate: ~40 rows per BOM page
+                        new_estimate = max(row_count, len(merged) * 40)
+                        if new_estimate > row_count:
+                            print(f"SCAN [{filename}]: Adjusting row estimate "
+                                  f"{row_count} → {new_estimate} for "
+                                  f"{len(merged)} BOM pages", flush=True)
+                            structure["total_bom_rows"] = new_estimate
+                            row_count = new_estimate
+        except Exception as _prog_err:
+            print(f"SCAN [{filename}]: Programmatic BOM detection failed: "
+                  f"{_prog_err}", flush=True)
+
         # == EXTRACT BOM PAGES (THE KEY FIX) ==================================
         # Instead of sending the full 35-page drawing to Stage 2 & 5, extract
         # ONLY the BOM page(s) into a small PDF. This eliminates the noise from
         # schematics, wiring diagrams, etc. that was causing hallucination.
-        bom_pages = structure.get("pages_with_bom", [])
         bom_extracted = False
         bom_raw_text = ""
         bom_images = None  # v2.5: rendered PNG images for Stages 2 & 5
@@ -2118,20 +2319,21 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                   flush=True)
                         if ocr_text.strip():
                             structure["_bom_raw_text"] = ocr_text
-                            # If OCR produced a column-aware pipe table (has header row
-                            # with " | " separators), treat it like fitz column extraction
-                            # so Stage 2 uses the reliable "columns" prompt path.
+                            # v2.7: ALWAYS use "ocr" mode for OCR-sourced text, even
+                            # if it produced a column-aware pipe table.  "columns" mode
+                            # tells Claude to trust part numbers verbatim, but OCR on
+                            # SHX/vector fonts misreads similar characters (3→5, D→O,
+                            # 0→O, B→8).  "ocr" mode tells Claude to use the IMAGE
+                            # as authority and only use OCR text as a structural guide.
+                            structure["_bom_text_source"] = "ocr"
                             first_line = ocr_text.split("\n")[0] if ocr_text else ""
                             if first_line.count(" | ") >= 2:
-                                structure["_bom_text_source"] = "columns"
                                 print(f"SCAN [{filename}]: OCR produced column-aware table "
-                                      f"({len(ocr_text)} chars) — using 'columns' mode",
-                                      flush=True)
-                            else:
-                                structure["_bom_text_source"] = "ocr"
+                                      f"({len(ocr_text)} chars) — using 'ocr' mode (image "
+                                      f"is authority for part numbers)", flush=True)
                             print(f"SCAN [{filename}]: pypdf had only {pypdf_chars} chars "
                                   f"(SHX/vector font) — using OCR text ({len(ocr_text)} chars) "
-                                  f"as primary source", flush=True)
+                                  f"as structural guide", flush=True)
                         else:
                             print(f"SCAN [{filename}]: OCR returned no text "
                                   f"— Stage 2 will rely on image only", flush=True)
