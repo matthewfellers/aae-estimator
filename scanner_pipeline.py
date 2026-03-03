@@ -1801,28 +1801,21 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
         "Your job: verify each part number CHARACTER BY CHARACTER against the PDF.\n\n"
         "EXTRACTED PART NUMBERS:\n"
         f"{pn_list}\n\n"
+        "MANDATORY FIXES — apply without re-examining the image:\n"
+        "  double dash → single dash  — e.g. AB--CD → AB-CD\n"
+        "  extra spaces inside a PN  — remove them\n\n"
         "For EACH part number above:\n"
         "1. Find it in the actual BOM table in the PDF"
     )
     if bom_raw_text.strip():
-        prompt += " AND in the raw text above"
+        prompt += " AND cross-check against the raw text above"
     prompt += (
         "\n"
-        "2. Compare character by character — read left to right, then right to left\n"
-        "3. Check for ALL of these commonly confused character pairs (OCR errors are common\n"
-        "   when the source was a plotted CAD drawing without a real PDF text layer):\n"
-        "     0 (zero) vs O (letter O)     — e.g. G1500000 mis-OCR'd as G15C0000\n"
-        "     0 (zero) vs C                — e.g. WM6016010 mis-OCR'd as WM601C010\n"
-        "     0 (zero) vs D                — e.g. 5160LC mis-OCR'd as 616DLC\n"
-        "     H vs M                       — e.g. WMSHB mis-OCR'd as WMSMB\n"
-        "     5 vs 6  (and vice versa)     — e.g. 5160LC mis-OCR'd as 616DLC\n"
-        "     S vs 5  (and vice versa)     — e.g. HS7A485 mis-OCR'd as H87A485\n"
-        "     G vs C  (and vice versa)     — e.g. GY1 mis-OCR'd as CT1\n"
-        "     l (lower L) vs 1 vs I\n"
-        "     B vs 8\n"
-        "   Be ESPECIALLY suspicious if the extracted value looks like a plausible part number\n"
-        "   but one character seems out of place for that manufacturer's numbering scheme.\n"
-        "4. Count the characters — does the extracted version have the same count as the PDF?\n"
+        "2. Compare CHARACTER BY CHARACTER — read left to right, then right to left\n"
+        "3. COUNT the characters — a missing or extra character is a common OCR error\n"
+        "4. Only correct if you can CLEARLY see the extracted value differs from the drawing.\n"
+        "   Do NOT 'fix' characters based on what you think the part number should be —\n"
+        "   read EXACTLY what is printed and report that.\n"
         "5. If it matches exactly, mark it verified\n"
         "6. If ANY character is wrong, provide the CORRECT value from the PDF\n"
         "7. If you cannot find it in the PDF at all, mark it as not_found\n\n"
@@ -2015,7 +2008,16 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 row_count2 = structure2.get("total_bom_rows", 0)
                 if row_count2 > 0:
                     print(f"SCAN: Stage 1 retry succeeded — {row_count2} rows found", flush=True)
+                    # Merge pages_with_bom: take union of original + retry so we never
+                    # lose a BOM page that one call identified but the other missed.
+                    orig_pages = structure.get("pages_with_bom", [])
+                    retry_pages = structure2.get("pages_with_bom", [])
+                    merged_pages = sorted(set(orig_pages) | set(retry_pages))
                     structure = structure2
+                    if merged_pages:
+                        structure["pages_with_bom"] = merged_pages
+                        print(f"SCAN: pages_with_bom merged: orig={orig_pages} "
+                              f"retry={retry_pages} → {merged_pages}", flush=True)
                     row_count = row_count2
                     bom_count = structure2.get("bom_tables_found", bom_count)
                 else:
