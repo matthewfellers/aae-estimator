@@ -23,15 +23,18 @@ from collections import Counter
 # ---------------------------------------------------------------------------
 # Programmatic BOM page detection — backup for Stage 1 misses
 # ---------------------------------------------------------------------------
-def _detect_bom_pages_programmatic(pdf_b64):
-    """Scan every page of the PDF for BOM-like tables.
+def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
+    """Scan the PDF for BOM-like tables.
+
+    If hint_pages is provided (from Stage 1), only scans nearby pages (±3)
+    to find continuation pages efficiently. If no hints, scans all pages.
 
     Returns a list of 1-based page numbers that likely contain BOM tables.
     Uses three strategies (each page tries all until one succeeds):
       1. find_tables(): pages with a table having >= MIN_BOM_ROWS rows
       2. Word-scan: pages containing BOM header keywords in the text layer
       3. OCR-scan (for SHX/vector-font drawings with no text layer):
-         renders each page at low DPI, runs pytesseract, looks for keywords
+         renders pages at 150 DPI, runs pytesseract, looks for keywords
     """
     MIN_BOM_ROWS = 8  # tables with fewer rows are title blocks, not BOMs
     BOM_KEYWORDS = [
@@ -44,12 +47,31 @@ def _detect_bom_pages_programmatic(pdf_b64):
         import fitz
         pdf_bytes = base64.b64decode(pdf_b64)
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        total_pages = len(doc)
         bom_pages = []
         needs_ocr_scan = []  # pages where text-layer strategies failed
 
-        for pg_idx in range(len(doc)):
+        # Determine which pages to scan.  If Stage 1 found BOM pages,
+        # only check nearby pages (±3) for continuations — scanning all
+        # 15+ pages with OCR adds ~30s and can cause timeouts.
+        if hint_pages:
+            scan_set = set()
+            for hp in hint_pages:
+                for offset in range(-3, 4):  # hp-3 … hp+3
+                    pg = hp + offset
+                    if 1 <= pg <= total_pages:
+                        scan_set.add(pg)
+            # Always include hint pages themselves
+            scan_set.update(hint_pages)
+            pages_to_scan = sorted(scan_set)
+            print(f"  [BOM-detect] Scanning {len(pages_to_scan)} pages near "
+                  f"Stage 1 hints {hint_pages}", flush=True)
+        else:
+            pages_to_scan = list(range(1, total_pages + 1))
+
+        for pg_num in pages_to_scan:
+            pg_idx = pg_num - 1
             page = doc[pg_idx]
-            pg_num = pg_idx + 1  # 1-based
             found = False
 
             # --- Strategy 1: find_tables() ---
@@ -85,8 +107,7 @@ def _detect_bom_pages_programmatic(pdf_b64):
                 needs_ocr_scan.append(pg_idx)
 
         # --- Strategy 3: OCR scan for SHX/vector-font drawings ---
-        # Only runs if Strategies 1 & 2 found nothing on some pages.
-        # Renders at low DPI (100) for speed — we only need to read titles.
+        # Only runs if Strategies 1 & 2 found nothing on the scanned pages.
         if needs_ocr_scan and not bom_pages:
             try:
                 import pytesseract
@@ -96,7 +117,7 @@ def _detect_bom_pages_programmatic(pdf_b64):
 
                 # Exact keywords for clean OCR at higher DPI
                 BOM_KW_EXACT = list(BOM_KEYWORDS)
-                # Fuzzy fragments for noisy SHX font OCR at lower DPI —
+                # Fuzzy fragments for noisy SHX font OCR —
                 # "BILL OF MATERIALS" often OCRs as "BLL OF WATERALS" etc.
                 BOM_KW_FUZZY = [
                     "BILL OF", "OF MATERIALS", "PARTS LIST",
@@ -108,9 +129,7 @@ def _detect_bom_pages_programmatic(pdf_b64):
                     page = doc[pg_idx]
                     pg_num = pg_idx + 1
 
-                    # Render at 150 DPI — reasonable balance of speed vs accuracy
-                    # for reading BOM title text in SHX font drawings.
-                    # 100 DPI was too low (missed "BILL OF MATERIALS" entirely).
+                    # Render at 150 DPI — balance of speed vs accuracy
                     zoom = 150 / 72
                     mat = fitz.Matrix(zoom, zoom)
                     pix = page.get_pixmap(matrix=mat, alpha=False)
@@ -123,6 +142,8 @@ def _detect_bom_pages_programmatic(pdf_b64):
                         ).upper()
                     except Exception:
                         continue
+                    finally:
+                        del img, pix  # free memory immediately
 
                     # Try exact keywords first
                     found_kw = False
@@ -134,8 +155,7 @@ def _detect_bom_pages_programmatic(pdf_b64):
                             found_kw = True
                             break
 
-                    # Fuzzy fallback: SHX font at 150 DPI may still garble
-                    # "BILL OF MATERIALS" → "BLL OF WATERALS" etc.
+                    # Fuzzy fallback for garbled SHX font OCR
                     if not found_kw:
                         fuzzy_hits = sum(1 for kw in BOM_KW_FUZZY
                                          if kw in ocr_text)
@@ -2256,7 +2276,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         bom_pages = structure.get("pages_with_bom", [])
         orig_bom_pages = list(bom_pages)  # save original for comparison
         try:
-            prog_pages = _detect_bom_pages_programmatic(pdf_b64)
+            prog_pages = _detect_bom_pages_programmatic(pdf_b64,
+                                                         hint_pages=bom_pages)
             if prog_pages:
                 merged = sorted(set(bom_pages) | set(prog_pages))
                 if merged != sorted(bom_pages):
@@ -2458,10 +2479,17 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         print(f"SCAN Stage 5 done in {time.time()-t5:.1f}s", flush=True)
 
         # == STAGE 3 ========================================================
+        # v2.7: Use BOM-only PDF (not full drawing) — cuts input from 5MB to
+        # ~1.6MB, saving 30-60s on the API call and preventing worker timeouts.
+        # Stage 3 is classification work based on the BOM data (already extracted
+        # as text in the prompt); the PDF is just for terminal/wire schedules
+        # which are on the BOM pages too.
+        stage3_pdf = bom_pdf_b64 if bom_extracted else pdf_b64
         t3 = time.time()
-        print(f"SCAN [{filename}]: Starting Stage 3 -- quantities", flush=True)
+        print(f"SCAN [{filename}]: Starting Stage 3 -- quantities "
+              f"(using {'BOM PDF' if bom_extracted else 'full PDF'})", flush=True)
         try:
-            qty_result = _stage3_derive_quantities(claude_client, pdf_b64, bom_items)
+            qty_result = _stage3_derive_quantities(claude_client, stage3_pdf, bom_items)
         except Exception as e3:
             err_str = str(e3)
             if "429" in err_str or "rate_limit" in err_str.lower():
