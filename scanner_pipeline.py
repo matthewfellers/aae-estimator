@@ -730,6 +730,152 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
 
 
 # ---------------------------------------------------------------------------
+# High-DPI BOM crop rendering — v2.7 FIX for character accuracy
+# ---------------------------------------------------------------------------
+def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
+                                  render_dpi=600):
+    """Re-render BOM crops at high DPI by deducing crop coordinates.
+
+    Compares the dimensions of full-page images vs OCR-cropped images to figure
+    out where the BOM table is on each page, then re-renders that area from the
+    PDF at render_dpi (600) for maximum character clarity.
+
+    Args:
+        pdf_b64: base64 BOM-only PDF
+        full_page_images: list of base64 PNG full-page renders (from _render_pdf_to_image)
+        cropped_images: list of base64 PNG cropped BOM images (from _ocr_images)
+        render_dpi: target DPI (default 600)
+
+    Returns:
+        list of base64 PNG high-res crops, or empty list on failure.
+    """
+    try:
+        import fitz
+        from PIL import Image
+
+        pdf_bytes = base64.b64decode(pdf_b64)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        hires = []
+
+        for pg_idx in range(min(len(doc), len(full_page_images), len(cropped_images))):
+            page = doc[pg_idx]
+
+            # Get dimensions of the full-page render
+            fp_bytes = base64.b64decode(full_page_images[pg_idx])
+            fp_img = Image.open(io.BytesIO(fp_bytes))
+            fp_w, fp_h = fp_img.size
+
+            # Get dimensions of the OCR crop
+            cr_bytes = base64.b64decode(cropped_images[pg_idx])
+            cr_img = Image.open(io.BytesIO(cr_bytes))
+            cr_w, cr_h = cr_img.size
+            del fp_img, cr_img
+
+            # The crop is from the OCR-upscaled image (6000px wide).
+            # The full page render is at the capped DPI (e.g. 4488px wide).
+            # The crop box was computed in the upscaled coordinate space.
+            # Since we need fractional coordinates, use the crop size relative
+            # to the upscale: the BOM is in the right portion of the page.
+            # Heuristic: BOM is right-aligned, crop width = cr_w, upscale width ≈ 6000
+            UPSCALE_W = 6000
+            upscale_h = int(fp_h * (UPSCALE_W / fp_w))
+
+            # The BOM table is typically right-aligned on panel drawings.
+            # The crop starts at approximately (UPSCALE_W - cr_w) from the left.
+            frac_x0 = max(0, (UPSCALE_W - cr_w - 60)) / UPSCALE_W
+            frac_y0 = 0  # BOM typically starts near top
+            frac_x1 = 1.0  # extends to right edge
+            frac_y1 = min(1.0, (cr_h + 120) / upscale_h)
+
+            # Convert to PDF point coordinates
+            pw = page.rect.width
+            ph = page.rect.height
+            clip = fitz.Rect(
+                frac_x0 * pw, frac_y0 * ph,
+                frac_x1 * pw, frac_y1 * ph,
+            )
+
+            zoom = render_dpi / 72
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
+            png_bytes = pix.tobytes("png")
+            hires.append(base64.b64encode(png_bytes).decode("ascii"))
+
+            print(f"  [HiRes] Page {pg_idx+1}: BOM crop {pix.width}x{pix.height} "
+                  f"@ {render_dpi}DPI ({len(png_bytes)/1024:.0f}KB) "
+                  f"[clip: x={frac_x0:.2f}-{frac_x1:.2f} y={frac_y0:.2f}-{frac_y1:.2f}]",
+                  flush=True)
+            del pix, png_bytes  # free memory between pages
+
+        doc.close()
+        return hires
+
+    except Exception as exc:
+        print(f"  [HiRes] ERROR: {exc}", flush=True)
+        return []
+
+
+def _render_bom_crops_hires(pdf_b64, crop_boxes, render_dpi=600):
+    """Re-render ONLY the BOM table areas at high DPI from the source PDF.
+
+    After OCR identifies the BOM crop box on the low-DPI render, this function
+    goes back to the PDF and renders just that rectangle at render_dpi (default 600).
+    This gives 2-3× bigger characters than the capped 264 DPI full-page render,
+    with minimal memory cost because the area is small (~30% of the page).
+
+    Args:
+        pdf_b64: base64-encoded PDF (BOM-only pages)
+        crop_boxes: list of (page_index, (x0, y0, x1, y1), render_width, render_height)
+                    where the box is in the coordinates of the rendered image at render_dpi
+        render_dpi: DPI to render at (default 600 — gives ~50px/char for SHX fonts)
+
+    Returns:
+        list of base64-encoded PNG images, one per page with a valid crop box.
+        Empty list if rendering fails.
+    """
+    try:
+        import fitz
+        pdf_bytes = base64.b64decode(pdf_b64)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        hires_images = []
+
+        for pg_idx, (frac_x0, frac_y0, frac_x1, frac_y1) in crop_boxes:
+            if pg_idx >= len(doc):
+                continue
+            page = doc[pg_idx]
+
+            # Convert fractional coordinates to PDF points
+            pw = page.rect.width
+            ph = page.rect.height
+            clip = fitz.Rect(
+                frac_x0 * pw, frac_y0 * ph,
+                frac_x1 * pw, frac_y1 * ph,
+            )
+            # Add margin
+            margin = 20  # points (~0.28 inch)
+            clip.x0 = max(0, clip.x0 - margin)
+            clip.y0 = max(0, clip.y0 - margin)
+            clip.x1 = min(pw, clip.x1 + margin)
+            clip.y1 = min(ph, clip.y1 + margin)
+
+            zoom = render_dpi / 72
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
+            png_bytes = pix.tobytes("png")
+            hires_images.append(base64.b64encode(png_bytes).decode("ascii"))
+
+            print(f"  [HiRes] Page {pg_idx+1}: BOM crop {pix.width}x{pix.height} "
+                  f"@ {render_dpi}DPI ({len(png_bytes)/1024:.0f}KB)", flush=True)
+
+        doc.close()
+        return hires_images
+
+    except Exception as exc:
+        print(f"  [HiRes] ERROR: {exc}", flush=True)
+        return []
+
+
+# ---------------------------------------------------------------------------
 # PDF-to-Image Rendering — THE v2.5 FIX for hallucinated part numbers
 # ---------------------------------------------------------------------------
 def _render_pdf_to_image(pdf_b64, dpi=300):
@@ -1530,27 +1676,31 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
             )
         elif text_source == "ocr":
             # SHX / vector-font drawing — text came from pytesseract.
-            # v2.7: OCR is MORE RELIABLE than Claude vision for part numbers
-            # on SHX fonts.  Testing showed OCR gets PNs like CON-SNT-IR18219K
-            # correct while Claude vision transposes/drops characters.
-            # But OCR is LESS reliable for QTY (single digits get confused).
-            # Strategy: trust OCR for PART NUMBERS, trust IMAGE for QTY.
+            # v2.8: Combined approach — OCR provides STRUCTURE (format, length,
+            # hyphens, column alignment), high-res image provides CHARACTER
+            # verification. OCR is reliable for multi-char sequences but can
+            # confuse similar SHX glyphs (D↔O, 3↔5, 0↔O). The 600 DPI image
+            # has ~50px per character which helps distinguish these.
             text_section = (
                 "=== OCR TEXT FROM BOM IMAGE (PYTESSERACT) ===\n"
                 "The following text was extracted by pytesseract OCR from the rendered BOM image.\n"
-                "It provides the PART NUMBER and DESCRIPTION values character-by-character.\n\n"
-                "TRUST LEVELS BY FIELD:\n"
-                "  PART NUMBER — USE THE OCR TEXT as your PRIMARY source.\n"
-                "    OCR reads each character individually and is more accurate than visual\n"
-                "    reading for alphanumeric part numbers in thin SHX fonts.\n"
-                "    Copy the part number from the OCR text EXACTLY unless it is clearly\n"
-                "    garbled (e.g. missing characters, random symbols like @#$).\n"
-                "    Do NOT 'correct' OCR part numbers based on your visual reading —\n"
-                "    your vision is more likely to transpose or substitute characters.\n\n"
-                "  DESCRIPTION / MANUFACTURER — Use OCR text as guide, verify against image.\n"
-                "    OCR may truncate names (e.g. 'PANDU' instead of 'PANDUIT',\n"
-                "    'EN-BRADLEY' instead of 'ALLEN-BRADLEY'). Use the image to fill in\n"
-                "    truncated manufacturer names.\n\n"
+                "It provides character-by-character data for each BOM row.\n\n"
+                "HOW TO USE OCR + IMAGE TOGETHER:\n"
+                "  This is a thin-stroke SHX vector font drawing. Both OCR and visual reading\n"
+                "  can make errors on similar-looking characters. Use BOTH sources together:\n\n"
+                "  PART NUMBER:\n"
+                "    1. Start with the OCR text — it gives you the correct NUMBER of characters,\n"
+                "       hyphens, slashes, and overall structure of each part number.\n"
+                "    2. Do NOT transpose, rearrange, or drop characters from the OCR reading.\n"
+                "       If OCR says IR18219K, do NOT change it to IR1821K9.\n"
+                "    3. Verify EACH character against the HIGH-RES IMAGE. SHX fonts confuse:\n"
+                "       D↔O (both are oval), 3↔5 (both have curves), 0↔O, 6↔8, B↔8, 1↔I\n"
+                "       When the image clearly shows a different character, USE THE IMAGE.\n"
+                "       Example: OCR says 'OTC2AP' but image clearly shows 'DTC2AP' → use DTC2AP.\n"
+                "    4. For trailing characters (end of part number), look especially carefully —\n"
+                "       OCR often drops the last character if it's near a column border.\n"
+                "       Example: OCR says 'BOOS-K' but image shows 'BOOS-K9' → use BOOS-K9.\n\n"
+                "  DESCRIPTION / MANUFACTURER — Use OCR as guide, fill in truncations from image.\n\n"
                 "  QTY — READ FROM THE IMAGE ONLY. IGNORE OCR QTY VALUES.\n"
                 "    OCR misreads single-digit numbers and column boundaries.\n"
                 "    Always read QTY by looking at the rightmost column in the image.\n\n"
@@ -1644,13 +1794,18 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
             )
         elif text_source == "ocr":
             prompt += (
-                "  === PART NUMBERS — COPY FROM THE OCR TEXT ===\n"
-                "  The OCR text above extracted each part number character-by-character.\n"
-                "  For SHX font drawings, OCR is MORE ACCURATE than visual reading for part numbers.\n"
-                "  COPY the part number from the OCR text EXACTLY as written.\n"
-                "  Only override an OCR part number if it is clearly garbled (random symbols, obviously\n"
-                "  incomplete like a single character, etc.) — otherwise TRUST THE OCR.\n"
-                "  Do NOT 'fix' or 'correct' OCR part numbers based on what you think you see in the image.\n\n"
+                "  === PART NUMBERS — USE OCR STRUCTURE + IMAGE VERIFICATION ===\n"
+                "  The OCR text provides the STRUCTURE of each part number (number of characters,\n"
+                "  hyphens, slashes, format). Start with the OCR reading.\n"
+                "  Then VERIFY each character against the high-res image, especially for SHX\n"
+                "  font characters that OCR commonly confuses:\n"
+                "    D↔O (oval shapes), 3↔5 (curved tops), 0↔O, 6↔8, B↔8, 1↔I\n"
+                "  If the image CLEARLY shows a different character than OCR, use the image.\n"
+                "  Example: OCR='OTC2AP' but image shows 'DTC2AP' → use DTC2AP.\n"
+                "  NEVER transpose or rearrange character ORDER from OCR (e.g. do NOT change\n"
+                "  IR18219K to IR1821K9 — keep OCR's character sequence).\n"
+                "  Check the LAST character carefully — OCR often drops trailing characters\n"
+                "  near column borders. If the image shows an extra character, include it.\n\n"
                 "  === MANUFACTURER — Fill in truncated names from the image ===\n"
                 "  OCR often truncates manufacturer names (e.g. 'EN-BRADLEY' → 'ALLEN-BRADLEY',\n"
                 "  'PHOENIX CONTAC' → 'PHOENIX CONTACT'). Use the image to complete these.\n\n"
@@ -1990,14 +2145,16 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
     raw_text_section = ""
     if bom_raw_text.strip():
         raw_text_section = (
-            "=== OCR / RAW TEXT FROM PDF (PRIMARY REFERENCE) ===\n"
+            "=== OCR / RAW TEXT FROM PDF (REFERENCE) ===\n"
             "The following text was extracted from the BOM (either from the PDF text layer\n"
             "or via pytesseract OCR on the rendered image).\n"
-            "For PART NUMBERS, this text is MORE RELIABLE than visual reading because\n"
-            "it was extracted character-by-character. When verifying part numbers,\n"
-            "cross-check the extracted PN against THIS text first.\n"
-            "If the extracted PN matches the text here, mark it VERIFIED — do not\n"
-            "second-guess it with your visual reading which may transpose characters.\n\n"
+            "Use this text for STRUCTURE: number of characters, hyphens, format of each PN.\n"
+            "Then verify EACH CHARACTER against the high-res image, especially for SHX\n"
+            "font characters that OCR commonly confuses:\n"
+            "  D↔O (both oval), 3↔5 (curved tops), 0↔O, 6↔8, B↔8, 1↔I\n"
+            "If the image CLEARLY shows a different character than OCR, use the image.\n"
+            "NEVER rearrange or transpose character ORDER — keep OCR's sequence.\n"
+            "Check trailing characters carefully — OCR often drops the last 1-2 chars.\n\n"
             f"{bom_raw_text}\n\n"
             "=== END RAW TEXT ===\n\n"
         )
@@ -2006,16 +2163,19 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
         "I extracted these part numbers from the BOM table in this drawing PDF.\n"
         f"{page_note}"
         f"{raw_text_section}"
-        "Your job: verify each part number against the RAW TEXT above and the PDF image.\n\n"
+        "Your job: verify each part number against the OCR text AND the high-res image.\n\n"
         "=== VERIFICATION STRATEGY ===\n"
-        "1. FIRST: Check if the extracted part number matches the RAW TEXT / OCR text above.\n"
-        "   If it matches the OCR text, mark it VERIFIED — the OCR character-by-character\n"
-        "   extraction is more reliable than visual reading for SHX font part numbers.\n"
-        "2. ONLY if the extracted PN does NOT appear in the OCR text, use the image to verify.\n"
-        "3. Be careful about character transposition — do NOT rearrange characters based on\n"
-        "   what you think the PN 'should' be. Read EXACTLY what is printed.\n"
-        "4. Common OCR issues to fix: em-dashes (—) should be hyphens (-),\n"
-        "   double-dashes (--) should be single dashes (-), extra spaces removed.\n\n"
+        "1. Start with the OCR text — it gives you the correct character COUNT, hyphens,\n"
+        "   slashes, and overall structure of each part number.\n"
+        "2. Verify EACH character against the HIGH-RES IMAGE, especially for:\n"
+        "   D↔O (oval shapes), 3↔5 (curved tops), 0↔O, 6↔8, B↔8, 1↔I\n"
+        "   If the image CLEARLY shows a different character than OCR, correct it.\n"
+        "3. NEVER transpose or rearrange character ORDER. If OCR says IR18219K,\n"
+        "   do NOT change it to IR1821K9 — keep the OCR sequence.\n"
+        "4. Check TRAILING characters — OCR drops chars near column borders.\n"
+        "   If the image shows an extra trailing char, ADD it.\n"
+        "5. Common OCR formatting issues to fix: em-dashes (—) → hyphens (-),\n"
+        "   double-dashes (--) → single dashes (-), extra spaces removed.\n\n"
         "EXTRACTED PART NUMBERS:\n"
         f"{pn_list}\n\n"
         "MANDATORY FIXES — apply without re-examining the image:\n"
@@ -2028,17 +2188,18 @@ def _stage5_verify_part_numbers(claude_client, pdf_b64, bom_items,
         prompt += " AND cross-check against the raw text above"
     prompt += (
         "\n"
-        "2. If the extracted PN matches a part number in the OCR/raw text above, mark VERIFIED.\n"
-        "   Do NOT override it with your visual reading — OCR is character-accurate.\n"
-        "3. Only correct if the PN clearly does NOT appear in the OCR text AND you can see\n"
-        "   a different value in the image. Common corrections:\n"
+        "2. Cross-check EACH character of the extracted PN against the high-res image:\n"
+        "   - Use OCR for the overall structure (length, hyphens, format)\n"
+        "   - Use the IMAGE to verify ambiguous characters: D↔O, 3↔5, 0↔O, 6↔8, B↔8\n"
+        "   - Check the LAST 1-2 characters — OCR drops trailing chars near column borders\n"
+        "3. NEVER transpose or rearrange character ORDER from the extracted PN.\n"
+        "   If it says IR18219K, do NOT change it to IR1821K9.\n"
+        "4. Common formatting fixes (apply without re-examining):\n"
         "   - em-dash (—) → hyphen (-)\n"
         "   - double-dash (--) → single dash (-)\n"
         "   - extra spaces removed\n"
-        "4. Do NOT rearrange, transpose, or 'fix' characters based on what you think\n"
-        "   the part number should be. If the OCR says IR18219K, do not change it to IR1821K9.\n"
-        "5. If it matches exactly, mark it verified\n"
-        "6. If ANY character is genuinely wrong, provide the CORRECT value\n"
+        "5. If it matches the image, mark it verified\n"
+        "6. If ANY character is genuinely wrong per the image, provide the CORRECT value\n"
         "7. If you cannot find it in the PDF at all, mark it as not_found\n\n"
         "Return this JSON:\n"
         "{\n"
@@ -2358,14 +2519,33 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         # get character-accurate text AND crop the image tightly to
                         # the BOM table so Claude sees it at full resolution.
                         ocr_text, bom_images_cropped = _ocr_images(bom_images)
-                        # If OCR successfully cropped the BOM table, use the tight
-                        # crop for Stage 2 so Claude sees the table at full resolution
-                        # instead of a small corner of a large page image.
+                        # v2.7: Re-render the BOM crop areas at HIGH DPI (600) directly
+                        # from the PDF for maximum character clarity. The OCR crop at
+                        # 264 DPI gives ~27px/char; 600 DPI gives ~50px/char — enough
+                        # to reliably distinguish D/O, 3/5, etc. in SHX fonts.
+                        # Memory is fine because we're only rendering the small BOM area.
                         if bom_images_cropped:
-                            bom_images = bom_images_cropped
-                            print(f"SCAN [{filename}]: Using cropped BOM images "
-                                  f"({len(bom_images_cropped)} page(s)) for Stage 2/5",
-                                  flush=True)
+                            try:
+                                hires = _render_bom_crops_hires_auto(
+                                    bom_pdf_b64, bom_images, bom_images_cropped
+                                )
+                                if hires:
+                                    bom_images = hires
+                                    print(f"SCAN [{filename}]: Using HIGH-RES BOM crops "
+                                          f"({len(hires)} page(s), 600 DPI) for Stage 2/5",
+                                          flush=True)
+                                else:
+                                    bom_images = bom_images_cropped
+                                    print(f"SCAN [{filename}]: HiRes failed, using OCR crops "
+                                          f"({len(bom_images_cropped)} page(s)) for Stage 2/5",
+                                          flush=True)
+                            except Exception as _hr_err:
+                                bom_images = bom_images_cropped
+                                print(f"SCAN [{filename}]: HiRes error ({_hr_err}), "
+                                      f"using OCR crops", flush=True)
+                        # Free intermediate images no longer needed
+                        del bom_images_cropped
+                        import gc; gc.collect()
                         if ocr_text.strip():
                             structure["_bom_raw_text"] = ocr_text
                             # v2.7: ALWAYS use "ocr" mode for OCR-sourced text, even
