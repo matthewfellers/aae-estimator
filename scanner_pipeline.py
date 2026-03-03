@@ -1195,7 +1195,7 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
 # ---------------------------------------------------------------------------
 # Stage 1: Detect BOM table structure
 # ---------------------------------------------------------------------------
-def _stage1_detect_structure(claude_client, pdf_b64):
+def _stage1_detect_structure(claude_client, pdf_b64, thinking_budget=10000):
     prompt = (
         "You are reading an industrial electrical panel drawing PDF.\n"
         "Your ONLY job is to find the BOM (Bill of Materials) table and report its structure.\n\n"
@@ -1214,7 +1214,7 @@ def _stage1_detect_structure(claude_client, pdf_b64):
         '    "manufacturer": "MFG",\n'
         '    "description": "DESCRIPTION"\n'
         "  },\n"
-        '  "total_bom_rows": 0,\n'
+        '  "total_bom_rows": 47,\n'
         '  "has_manufacturer_column": true,\n'
         '  "has_description_column": true,\n'
         '  "notes": ""\n'
@@ -1228,7 +1228,9 @@ def _stage1_detect_structure(claude_client, pdf_b64):
         "- If a column header is ambiguous, read 2-3 cells below it to determine what data type it holds\n\n"
         "Count total_bom_rows by counting every data row in the table (not headers, not blank rows).\n"
         "Count CAREFULLY -- go row by row and count each one.\n"
-        "If the BOM spans MULTIPLE pages, add up ALL rows from ALL BOM pages.\n\n"
+        "If the BOM spans MULTIPLE pages, add up ALL rows from ALL BOM pages.\n"
+        "CRITICAL: total_bom_rows MUST be >= 1 if bom_tables_found >= 1. "
+        "Never return 0 if you found a BOM table — count carefully and report the real number.\n\n"
         "CRITICAL: Report the EXACT page number(s) where the BOM table appears in pages_with_bom.\n"
         "This drawing may have 30+ pages of schematics, wiring diagrams, etc.\n\n"
         "WHERE TO FIND THE BOM:\n"
@@ -1247,7 +1249,7 @@ def _stage1_detect_structure(claude_client, pdf_b64):
     )
 
     result = _call_claude(claude_client, pdf_b64, prompt,
-                          thinking_budget=10000, max_tokens=4000,
+                          thinking_budget=thinking_budget, max_tokens=4000,
                           stage_label="Stage1")
     print(f"SCAN Stage 1: Found {result.get('bom_tables_found', 0)} BOM table(s), "
           f"{result.get('total_bom_rows', '?')} rows, "
@@ -2002,7 +2004,35 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         row_count = structure.get("total_bom_rows", 0)
         drawing_types = structure.get("drawing_types_found", [])
 
-        if bom_count == 0 or row_count == 0:
+        # Guard: Stage 1 found the table but returned 0 rows — non-deterministic
+        # Claude failure. Retry once with a higher thinking budget to get a real count.
+        if bom_count > 0 and row_count == 0:
+            print(f"SCAN: Stage 1 found {bom_count} BOM table(s) but 0 rows — "
+                  f"retrying Stage 1 with higher thinking budget...", flush=True)
+            try:
+                structure2 = _stage1_detect_structure(claude_client, pdf_b64,
+                                                       thinking_budget=20000)
+                row_count2 = structure2.get("total_bom_rows", 0)
+                if row_count2 > 0:
+                    print(f"SCAN: Stage 1 retry succeeded — {row_count2} rows found", flush=True)
+                    structure = structure2
+                    row_count = row_count2
+                    bom_count = structure2.get("bom_tables_found", bom_count)
+                else:
+                    # Still 0 after retry — use fallback row count so the pipeline
+                    # can continue rather than silently skipping the whole BOM
+                    fallback_rows = 50
+                    print(f"SCAN: Stage 1 retry still returned 0 rows — "
+                          f"using fallback row_count={fallback_rows} to continue", flush=True)
+                    structure["total_bom_rows"] = fallback_rows
+                    row_count = fallback_rows
+            except Exception as _retry_err:
+                print(f"SCAN: Stage 1 retry failed ({_retry_err}) — "
+                      f"using fallback row_count=50", flush=True)
+                structure["total_bom_rows"] = 50
+                row_count = 50
+
+        if bom_count == 0:
             print(f"SCAN: No BOM table found -- quantity-only scan", flush=True)
             all_flags.append("No BOM table found in drawing -- quantities estimated from schematics only")
             try:
