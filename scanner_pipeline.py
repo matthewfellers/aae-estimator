@@ -595,7 +595,10 @@ def _render_pdf_to_image(pdf_b64, dpi=300):
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
         images_b64 = []
-        MAX_LONG_SIDE_PX = 5500  # cap to prevent OOM on large-format drawings (D/E-size)
+        MAX_LONG_SIDE_PX = 3000  # cap image long side — 3000px gives ~176 DPI on D-size
+        # (17x11" at 176 DPI = 2992x1937px, still sharp for BOM text).
+        # 5500px was overkill: Claude downscales large images anyway, so the extra
+        # pixels only cost upload time and memory, not accuracy.
 
         for page_num in range(len(doc)):
             page = doc[page_num]
@@ -1532,10 +1535,14 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         "If rows_extracted < " + str(total_rows) + ", you missed numbered rows — go back and find them."
     )
 
-    think_budget = max(32000, total_rows * 600)
-    think_budget = min(think_budget, 100000)
-    max_out = max(20000, total_rows * 350)
-    max_out = min(max_out, 128000)
+    # Thinking budget: Stage 2 is transcription, not reasoning — keep it lean.
+    # 300 tokens per row is ample; hard cap at 32 000 so combined total stays
+    # well under the 64 000 model limit even for very large BOMs.
+    think_budget = max(12000, total_rows * 300)
+    think_budget = min(think_budget, 32000)
+    # Output budget: ~250 tokens per row covers JSON + all fields comfortably.
+    max_out = max(12000, total_rows * 250)
+    max_out = min(max_out, 48000)
 
     print(f"SCAN Stage 2: Extracting {total_rows} rows "
           f"(thinking={think_budget}, max_tokens={max_out}, "
