@@ -595,10 +595,11 @@ def _render_pdf_to_image(pdf_b64, dpi=300):
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
         images_b64 = []
-        MAX_LONG_SIDE_PX = 3000  # cap image long side — 3000px gives ~176 DPI on D-size
-        # (17x11" at 176 DPI = 2992x1937px, still sharp for BOM text).
-        # 5500px was overkill: Claude downscales large images anyway, so the extra
-        # pixels only cost upload time and memory, not accuracy.
+        MAX_LONG_SIDE_PX = 4500  # cap image long side — 4500px gives ~264 DPI on D-size
+        # (17x11" at 264 DPI = 4488x2904px).  Empirically: 3000px (176 DPI) makes
+        # small BOM text (~17px/char) unreadable for Claude; 4500px gives ~27px/char
+        # which is reliably readable.  5500px was unnecessarily large — used only
+        # for upload overhead, not accuracy (Claude tiles at ~512px anyway).
 
         for page_num in range(len(doc)):
             page = doc[page_num]
@@ -1287,14 +1288,15 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "NO./ITEM, DESCRIPTION, MANUFACTURER, PART NUMBER, QTY).\n"
                 "Read EVERY row of that table. IGNORE everything outside the table\n"
                 "(panel component circles, wire numbers, reference labels, schematics, etc.).\n\n"
-                "=== CRITICAL: READ THE IMAGE — DO NOT INVENT ===\n"
-                "Read the text exactly as it appears in the image using your best visual judgment.\n"
-                "DO NOT substitute part numbers, descriptions, or manufacturers from your\n"
-                "training data. If the image shows SCE-24EL2412LPPL, write SCE-24EL2412LPPL.\n"
-                "If you genuinely cannot read a specific character after careful inspection,\n"
-                "write [?] for ONLY that one character (e.g. SC[?]-24EL2412LPPL).\n"
-                "Do NOT refuse to extract or use [?] for whole cells — always attempt to\n"
-                "read as much as you can. Your best visual read beats your training knowledge.\n\n"
+                "=== CRITICAL: READ THE IMAGE — DO NOT INVENT, DO NOT REFUSE ===\n"
+                "ABSOLUTE RULE: You MUST return a row for EVERY numbered item visible in the\n"
+                "BOM table. Returning 0 items when a BOM table is present is ALWAYS wrong.\n"
+                "If text is small or unclear, zoom in mentally and give your best read.\n"
+                "DO NOT substitute part numbers from your training data — read what is shown.\n"
+                "If you genuinely cannot make out one character, write [?] for THAT character\n"
+                "only (e.g. SC[?]-24EL2412LPPL). Use [?] sparingly — attempt every cell.\n"
+                "Partial data is vastly better than no data. A row with a blank part number\n"
+                "is better than a missing row. Your best visual guess beats silence.\n\n"
             )
         else:
             page_instruction = (
