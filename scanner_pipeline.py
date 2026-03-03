@@ -2496,7 +2496,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 print(f"SCAN: Rate limit on Stage 3, waiting 30s...", flush=True)
                 time.sleep(30)
                 try:
-                    qty_result = _stage3_derive_quantities(claude_client, pdf_b64, bom_items)
+                    qty_result = _stage3_derive_quantities(claude_client, stage3_pdf, bom_items)
                 except Exception:
                     print(f"SCAN: Stage 3 failed, BOM without quantities", flush=True)
                     qty_result = {"quantities": {}}
