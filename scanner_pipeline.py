@@ -595,18 +595,30 @@ def _render_pdf_to_image(pdf_b64, dpi=300):
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
         images_b64 = []
-        zoom = dpi / 72  # PDF default resolution is 72 DPI
-        mat = fitz.Matrix(zoom, zoom)
+        MAX_LONG_SIDE_PX = 5500  # cap to prevent OOM on large-format drawings (D/E-size)
 
         for page_num in range(len(doc)):
             page = doc[page_num]
-            pix = page.get_pixmap(matrix=mat, alpha=False)
+            # Adaptive DPI: cap so the long side never exceeds MAX_LONG_SIDE_PX pixels.
+            # A D-size drawing at 400 DPI = ~13600px → ~200 MB image → Railway OOM.
+            # At 5500px max the long side is still fully readable for OCR and Claude.
+            long_side_pts = max(page.rect.width, page.rect.height)
+            long_side_in  = long_side_pts / 72.0 if long_side_pts > 0 else 1.0
+            max_dpi       = int(MAX_LONG_SIDE_PX / long_side_in)
+            effective_dpi = min(dpi, max_dpi)
+            if effective_dpi < dpi:
+                print(f"  [Render] Page {page_num+1}: large page "
+                      f"({page.rect.width/72:.1f}x{page.rect.height/72:.1f}in) — "
+                      f"capping DPI {dpi}→{effective_dpi}", flush=True)
+            zoom = effective_dpi / 72
+            mat  = fitz.Matrix(zoom, zoom)
+            pix  = page.get_pixmap(matrix=mat, alpha=False)
             png_bytes = pix.tobytes("png")
             img_b64 = base64.b64encode(png_bytes).decode("ascii")
             images_b64.append(img_b64)
 
-            print(f"  [Render] Page {page_num+1}: {pix.width}x{pix.height} @ {dpi}DPI, "
-                  f"{len(png_bytes)/1024:.0f}KB PNG", flush=True)
+            print(f"  [Render] Page {page_num+1}: {pix.width}x{pix.height} "
+                  f"@ {effective_dpi}DPI, {len(png_bytes)/1024:.0f}KB PNG", flush=True)
 
         doc.close()
 
@@ -2005,38 +2017,44 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     # text (>= 300 chars) keep it — OCR on normal PDFs scrambles
                     # table structure and garbles manufacturers/quantities.
                     pypdf_chars = len(bom_raw_text.strip())
-                    ocr_text, bom_images_cropped = _ocr_images(bom_images)
-                    # If OCR successfully cropped the BOM table, use the tight
-                    # crop for Stage 2 so Claude sees the table at full resolution
-                    # instead of a small corner of a large page image.
-                    if bom_images_cropped:
-                        bom_images = bom_images_cropped
-                        print(f"SCAN [{filename}]: Using cropped BOM images "
-                              f"({len(bom_images_cropped)} page(s)) for Stage 2/5",
-                              flush=True)
-                    if ocr_text.strip() and pypdf_chars < 300:
-                        structure["_bom_raw_text"] = ocr_text
-                        # If OCR produced a column-aware pipe table (has header row
-                        # with " | " separators), treat it like fitz column extraction
-                        # so Stage 2 uses the reliable "columns" prompt path.
-                        first_line = ocr_text.split("\n")[0] if ocr_text else ""
-                        if first_line.count(" | ") >= 2:
-                            structure["_bom_text_source"] = "columns"
-                            print(f"SCAN [{filename}]: OCR produced column-aware table "
-                                  f"({len(ocr_text)} chars) — using 'columns' mode",
+                    if pypdf_chars < 300:
+                        # SHX / vector-font drawing (e.g. ABB XIO-00): run OCR to
+                        # get character-accurate text AND crop the image tightly to
+                        # the BOM table so Claude sees it at full resolution.
+                        ocr_text, bom_images_cropped = _ocr_images(bom_images)
+                        # If OCR successfully cropped the BOM table, use the tight
+                        # crop for Stage 2 so Claude sees the table at full resolution
+                        # instead of a small corner of a large page image.
+                        if bom_images_cropped:
+                            bom_images = bom_images_cropped
+                            print(f"SCAN [{filename}]: Using cropped BOM images "
+                                  f"({len(bom_images_cropped)} page(s)) for Stage 2/5",
                                   flush=True)
+                        if ocr_text.strip():
+                            structure["_bom_raw_text"] = ocr_text
+                            # If OCR produced a column-aware pipe table (has header row
+                            # with " | " separators), treat it like fitz column extraction
+                            # so Stage 2 uses the reliable "columns" prompt path.
+                            first_line = ocr_text.split("\n")[0] if ocr_text else ""
+                            if first_line.count(" | ") >= 2:
+                                structure["_bom_text_source"] = "columns"
+                                print(f"SCAN [{filename}]: OCR produced column-aware table "
+                                      f"({len(ocr_text)} chars) — using 'columns' mode",
+                                      flush=True)
+                            else:
+                                structure["_bom_text_source"] = "ocr"
+                            print(f"SCAN [{filename}]: pypdf had only {pypdf_chars} chars "
+                                  f"(SHX/vector font) — using OCR text ({len(ocr_text)} chars) "
+                                  f"as primary source", flush=True)
                         else:
-                            structure["_bom_text_source"] = "ocr"
-                        print(f"SCAN [{filename}]: pypdf had only {pypdf_chars} chars "
-                              f"(SHX/vector font) — using OCR text ({len(ocr_text)} chars) "
-                              f"as primary source", flush=True)
-                    elif ocr_text.strip():
-                        print(f"SCAN [{filename}]: pypdf text is good ({pypdf_chars} chars) "
-                              f"— keeping it as primary, OCR ({len(ocr_text)} chars) ignored",
-                              flush=True)
+                            print(f"SCAN [{filename}]: OCR returned no text "
+                                  f"— Stage 2 will rely on image only", flush=True)
                     else:
-                        print(f"SCAN [{filename}]: OCR returned no text "
-                              f"— Stage 2 will rely on image only", flush=True)
+                        # Good pypdf text — skip OCR entirely to avoid OOM on large
+                        # drawings.  pytesseract + 5 preprocessing passes on a 200 MB
+                        # image is what triggers Railway's SIGKILL.
+                        print(f"SCAN [{filename}]: pypdf text is good ({pypdf_chars} chars) "
+                              f"— skipping OCR to conserve memory", flush=True)
                 else:
                     # Image rendering failed — fall back to FULL original PDF.
                     # The page-extracted PDF has broken font resources (CAD PDFs
