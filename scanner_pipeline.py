@@ -915,27 +915,26 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat, clip=ref_clip, alpha=False)
 
-            # Convert to PIL for enhancement
+            # Convert to PIL
             pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
             pix_w, pix_h = pil_img.size
             del pix
 
-            # Enhance thin SHX strokes for better readability
-            pil_img = _enhance_for_vision(pil_img)
-
-            # Trim bottom noise: on layout+BOM pages the clip captures
-            # non-BOM content (layout labels, stamps, title block) below
-            # the BOM table.  Detect the first significant horizontal
-            # whitespace gap (≥80 px) below the header area and crop
-            # there.  This removes noise that confuses Claude and keeps
-            # the tile count minimal.
+            # Trim bottom noise BEFORE enhancement: on layout+BOM pages
+            # the clip captures non-BOM content (layout labels, stamps,
+            # title block) below the BOM table.  Detect the first
+            # significant horizontal whitespace gap (≥80 px) below the
+            # header area and crop there.
+            # Trimming first ensures _enhance_for_vision's autocontrast
+            # only sees BOM content — not drawing noise that skews the
+            # histogram and degrades character accuracy.
             gray_col = pil_img.convert("L").resize((1, pix_h), Image.LANCZOS)
             _gap_start = None
             _skip_top = 200          # skip BOM header area
             _min_gap = 80            # ~14pt at 400 DPI
             _trimmed = False
             for _y in range(_skip_top, pix_h):
-                if gray_col.getpixel((0, _y)) > 245:
+                if gray_col.getpixel((0, _y)) > 240:
                     if _gap_start is None:
                         _gap_start = _y
                 else:
@@ -958,12 +957,17 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
                 pix_h = trim_y
             del gray_col
 
-            # Tile vertically with overlap so table rows aren't split
+            # Tile vertically with overlap, enhance EACH tile individually.
+            # Per-tile autocontrast ensures each tile's histogram is based
+            # only on its own content — not skewed by other parts of the
+            # page.  This preserves character accuracy regardless of clip
+            # height or what else is on the page.
             page_tiles = []
             y = 0
             while y < pix_h:
                 y_end = min(y + tile_h, pix_h)
                 tile = pil_img.crop((0, y, pix_w, y_end))
+                tile = _enhance_for_vision(tile)
                 buf = io.BytesIO()
                 tile.save(buf, format="PNG", optimize=True)
                 page_tiles.append(base64.b64encode(buf.getvalue()).decode("ascii"))
@@ -2198,7 +2202,8 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
 
         "RULE 5 — COMPLETENESS:\n"
         "  Do NOT skip ANY rows. Every physical row in the table = one item in your output.\n"
-        '  For qty values like "A/R", "AR", "REF", use qty:1 and put the original text in notes.\n\n'
+        '  For qty values like "A/R", "AR", "REF", keep the EXACT text as the qty value (e.g. qty:"A/R").\n'
+        '  Do NOT convert these to 1 — preserve the original text exactly.\n\n'
 
         "Return this JSON:\n"
         "{\n"
@@ -2406,7 +2411,15 @@ def _stage4_validate(structure, bom_items):
     # Check 5: All qty=1
     if len(bom_items) > 5:
         try:
-            all_qty_1 = all(int(item.get("qty", 1)) == 1 for item in bom_items)
+            # Skip non-numeric qty (e.g. "A/R") when checking all-qty-1
+            numeric_qtys = []
+            for item in bom_items:
+                q = item.get("qty", 1)
+                try:
+                    numeric_qtys.append(int(q))
+                except (ValueError, TypeError):
+                    pass  # skip "A/R", "REF", etc.
+            all_qty_1 = len(numeric_qtys) > 5 and all(q == 1 for q in numeric_qtys)
         except (ValueError, TypeError):
             all_qty_1 = False
         if all_qty_1:
