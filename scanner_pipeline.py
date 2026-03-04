@@ -787,8 +787,12 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
         ref_clip = None
         hdr_data = None          # (x0, y0, x1, pg_idx) in display coords
         title_block_y = None     # topmost title-block text y in display coords
-        BOM_KEYWORDS = {"No.", "Description", "Manufacturer", "Part#",
-                        "Part", "Qty", "QTY", "DESCRIPTION", "MANUFACTURER"}
+        BOM_KEYWORDS = {"No.", "NO.", "ITEM", "Item",
+                        "Description", "DESCRIPTION", "DESC",
+                        "Manufacturer", "MANUFACTURER", "MFG", "Mfg",
+                        "Part#", "Part", "PART", "CATALOG", "Catalog",
+                        "Qty", "QTY", "Qty.",
+                        "MARK", "TAG", "SIZE", "NUMBER"}
         for pg_idx in range(n_pages):
             page = doc[pg_idx]
             raw_words = page.get_text("words")
@@ -815,10 +819,14 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
                     if title_block_y is None or dw[1] < title_block_y:
                         title_block_y = dw[1]
 
-            # Check for BOM column headers (only keep the first page hit)
+            # Check for BOM column headers (only keep the first page hit).
+            # Filter to top 30% of page — revision blocks at the bottom
+            # also contain words like "DESCRIPTION" and "NO." which are
+            # false positives.
             if hdr_data is None:
                 hits = [dw for dw in disp_words
-                        if dw[4] in BOM_KEYWORDS or dw[4].upper() in BOM_KEYWORDS]
+                        if (dw[4] in BOM_KEYWORDS or dw[4].upper() in BOM_KEYWORDS)
+                        and dw[1] < page_h * 0.30]
                 if len(hits) >= 3:
                     hdr_data = (
                         min(h[0] for h in hits) - 80,   # left margin
@@ -826,6 +834,37 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
                         max(h[2] for h in hits) + 30,   # right margin
                         pg_idx,
                     )
+
+        # ── Secondary detection: "BILL OF MATERIALS" title text ──
+        # If no column headers found, look for BOM title text to
+        # determine which side of the page the BOM is on.
+        bom_title_x = None
+        if hdr_data is None:
+            for pg_idx in range(n_pages):
+                page = doc[pg_idx]
+                raw_words = page.get_text("words")
+                rot_mat = page.rotation_matrix
+                # Build display-coord words for this page
+                dwords = []
+                for w in raw_words:
+                    if page.rotation:
+                        p0 = fitz.Point(w[0], w[1]) * rot_mat
+                        p1 = fitz.Point(w[2], w[3]) * rot_mat
+                        dwords.append((min(p0.x, p1.x), min(p0.y, p1.y),
+                                       max(p0.x, p1.x), max(p0.y, p1.y),
+                                       w[4]))
+                    else:
+                        dwords.append((w[0], w[1], w[2], w[3], w[4]))
+                # Look for "BILL" near top of page (top 20%)
+                for dw in dwords:
+                    if dw[4].upper() == "BILL" and dw[1] < page_h * 0.20:
+                        bom_title_x = dw[0]  # left edge of "BILL" text
+                        print(f"  [BOM-Direct] Found 'BILL' title text at "
+                              f"x={bom_title_x:.0f} on page {pg_idx+1}",
+                              flush=True)
+                        break
+                if bom_title_x is not None:
+                    break
 
         # Bottom clip: use title-block boundary, else generous fallback.
         # Never clip more aggressively than 55% of page height.
@@ -841,12 +880,25 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
             print(f"  [BOM-Direct] Found headers on page {hpg+1}: "
                   f"clip={ref_clip}  (title_block_y={title_block_y})",
                   flush=True)
+        elif bom_title_x is not None:
+            # Use BOM title position to determine left vs right side
+            if bom_title_x < page_w * 0.50:
+                # BOM is on the LEFT side of the page
+                ref_clip = fitz.Rect(0, 0, page_w * 0.50, bom_y1)
+                print(f"  [BOM-Direct] BOM title on LEFT side (x={bom_title_x:.0f}): "
+                      f"clip={ref_clip}", flush=True)
+            else:
+                # BOM is on the RIGHT side of the page
+                ref_clip = fitz.Rect(page_w * 0.45, 0, page_w, bom_y1)
+                print(f"  [BOM-Direct] BOM title on RIGHT side (x={bom_title_x:.0f}): "
+                      f"clip={ref_clip}", flush=True)
         else:
-            # Fallback: upper-right area of drawing (typical BOM location)
+            # Final fallback: no headers AND no title text found.
+            # Default to right side (most common BOM position).
             ref_clip = fitz.Rect(page_w * 0.55, 0, page_w, bom_y1)
-            print(f"  [BOM-Direct] No headers found, using upper-right fallback: "
-                  f"clip={ref_clip}  (title_block_y={title_block_y})",
-                  flush=True)
+            print(f"  [BOM-Direct] WARNING: No BOM headers or title found. "
+                  f"Using right-side fallback: clip={ref_clip}  "
+                  f"(title_block_y={title_block_y})", flush=True)
 
         # ── Step 2: render BOM area from each page at high DPI + tile ──
         # Without tiling, Claude's API downscales a ~3400x5400 image to
@@ -870,6 +922,41 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
 
             # Enhance thin SHX strokes for better readability
             pil_img = _enhance_for_vision(pil_img)
+
+            # Trim bottom noise: on layout+BOM pages the clip captures
+            # non-BOM content (layout labels, stamps, title block) below
+            # the BOM table.  Detect the first significant horizontal
+            # whitespace gap (≥80 px) below the header area and crop
+            # there.  This removes noise that confuses Claude and keeps
+            # the tile count minimal.
+            gray_col = pil_img.convert("L").resize((1, pix_h), Image.LANCZOS)
+            _gap_start = None
+            _skip_top = 200          # skip BOM header area
+            _min_gap = 80            # ~14pt at 400 DPI
+            _trimmed = False
+            for _y in range(_skip_top, pix_h):
+                if gray_col.getpixel((0, _y)) > 245:
+                    if _gap_start is None:
+                        _gap_start = _y
+                else:
+                    if _gap_start is not None:
+                        if _y - _gap_start >= _min_gap:
+                            trim_y = _gap_start + 10  # keep table border
+                            _trimmed = True
+                            break
+                        _gap_start = None
+            # Handle gap that extends to bottom of image
+            if not _trimmed and _gap_start is not None:
+                if pix_h - _gap_start >= _min_gap:
+                    trim_y = _gap_start + 10
+                    _trimmed = True
+            if _trimmed:
+                pil_img = pil_img.crop((0, 0, pix_w, trim_y))
+                print(f"  [BOM-Direct] Page {pg_idx+1}: "
+                      f"trimmed noise at y={trim_y} "
+                      f"(was {pix_h})", flush=True)
+                pix_h = trim_y
+            del gray_col
 
             # Tile vertically with overlap so table rows aren't split
             page_tiles = []
