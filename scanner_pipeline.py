@@ -768,8 +768,10 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
     per page, None where OCR found no BOM crop for that page).
 
     Returns:
-        list of base64 PNG tiles (may be more than len(pages) due to tiling),
-        or empty list on failure.
+        (tiles, tiles_per_page) where tiles is a flat list of base64 PNG tiles
+        and tiles_per_page[i] = number of tiles for page i, so callers can
+        group tiles by page for per-page API calls.
+        Returns ([], []) on failure.
     """
     try:
         import fitz
@@ -778,6 +780,7 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
         pdf_bytes = base64.b64decode(pdf_b64)
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         hires = []
+        tiles_per_page = []
 
         # Compute reference crop dimensions from first available crop.
         # Used as fallback for pages where OCR didn't produce a crop.
@@ -830,17 +833,6 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
                 frac_y0 = 0
                 frac_x1 = 1.0
                 frac_y1 = min(1.0, (cr_h + 120) / upscale_h)
-
-                # Cap crop height: OCR crop often extends to the title block
-                # at the bottom, producing 99% page height when the BOM table
-                # is only in the top 15-60%.  Cap at 45% to avoid sending
-                # 3 blank tiles per page (reduces 48 tiles to ~24 for 12 pages).
-                MAX_BOM_FRAC_Y = 0.45
-                if frac_y1 > MAX_BOM_FRAC_Y:
-                    print(f"  [HiRes] Page {pg_idx+1}: capping crop height "
-                          f"{frac_y1:.2f} → {MAX_BOM_FRAC_Y} "
-                          f"(BOM area, not full page)", flush=True)
-                    frac_y1 = MAX_BOM_FRAC_Y
 
                 pw = page.rect.width
                 ph = page.rect.height
@@ -903,6 +895,7 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
                 y = y_end - overlap  # overlap so rows aren't cut
 
             hires.extend(tiles)
+            tiles_per_page.append(len(tiles))
             del pil_img
             import gc; gc.collect()
 
@@ -912,11 +905,11 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
                   flush=True)
 
         doc.close()
-        return hires
+        return hires, tiles_per_page
 
     except Exception as exc:
         print(f"  [HiRes] ERROR: {exc}", flush=True)
-        return []
+        return [], []
 
 
 
@@ -1393,14 +1386,14 @@ def _ocr_images(images_b64):
             print(f"  [OCR] Cropped BOM images: {n_crops}/{len(cropped_images_b64)} "
                   f"page(s) — Stage 2 will use these for higher-resolution "
                   f"cell reading", flush=True)
-        return combined, cropped_images_b64
+        return combined, cropped_images_b64, all_text
 
     except ImportError as exc:
         print(f"  [OCR] pytesseract not available: {exc}", flush=True)
-        return "", []
+        return "", [], []
     except Exception as exc:
         print(f"  [OCR] ERROR: {exc}", flush=True)
-        return "", []
+        return "", [], []
 
 
 # System-level instruction that forces JSON-only output.
@@ -2548,6 +2541,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         bom_extracted = False
         bom_raw_text = ""
         bom_images = None  # v2.5: rendered PNG images for Stages 2 & 5
+        hires_tiles_per_page = []  # tiles-per-page for per-page batching
+        ocr_per_page = []  # per-page OCR text for per-page batching
         if bom_pages:
             bom_pdf_b64, bom_raw_text, page_text_source = _extract_pages(pdf_b64, bom_pages)
             # Check if extraction actually produced a different (smaller) PDF
@@ -2588,7 +2583,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         # SHX / vector-font drawing (e.g. ABB XIO-00): run OCR to
                         # get character-accurate text AND crop the image tightly to
                         # the BOM table so Claude sees it at full resolution.
-                        ocr_text, bom_images_cropped = _ocr_images(bom_images)
+                        ocr_text, bom_images_cropped, ocr_per_page = _ocr_images(bom_images)
                         # v2.8: Re-render BOM crop at 400 DPI, enhance strokes,
                         # and TILE into small sections. Claude's vision downscales
                         # large images, so one 3200x6600 image → only 11px/char.
@@ -2598,9 +2593,10 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         # bom_images_cropped is a dense list (one per page,
                         # None where OCR found no BOM crop for that page)
                         has_crops = any(c is not None for c in bom_images_cropped)
+                        hires_tiles_per_page = []  # populated if hires succeeds
                         if has_crops:
                             try:
-                                hires = _render_bom_crops_hires_auto(
+                                hires, hires_tiles_per_page = _render_bom_crops_hires_auto(
                                     bom_pdf_b64, bom_images, bom_images_cropped
                                 )
                                 if hires:
@@ -2609,6 +2605,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                           f"({len(hires)} tiles, enhanced) for Stage 2/5",
                                           flush=True)
                                 else:
+                                    hires_tiles_per_page = []
                                     # Filter None entries for fallback image list
                                     bom_images = [c for c in bom_images_cropped
                                                   if c is not None]
@@ -2616,6 +2613,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                           f"({len(bom_images)} page(s)) for Stage 2/5",
                                           flush=True)
                             except Exception as _hr_err:
+                                hires_tiles_per_page = []
                                 bom_images = [c for c in bom_images_cropped
                                               if c is not None]
                                 print(f"SCAN [{filename}]: HiRes error ({_hr_err}), "
@@ -2671,68 +2669,78 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows "
               f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
 
-        # --- Batch processing for large multi-page image BOMs ---
-        # When there are many image tiles (e.g., 48 from a 12-page D-size BOM),
-        # Claude gets overwhelmed and hallucinates.  Split into batches of
-        # MAX_TILES_PER_BATCH and merge the results.
-        MAX_TILES_PER_BATCH = 16  # ~4 pages × 4 tiles each
+        # --- Per-page batching for multi-page image BOMs ---
+        # For multi-page SHX/vector drawings, process each BOM page individually
+        # with its own tiles + its own OCR text — exactly like the single-page
+        # case that works reliably.  This prevents Claude from being overwhelmed
+        # by 48+ tiles and eliminates OCR text / image mismatch.
+        #
+        # hires_tiles_per_page tells us how many tiles belong to each page.
+        # ocr_per_page (from _ocr_images) gives per-page OCR text.
+        # When either is unavailable, fall back to single-call.
 
-        if bom_images and len(bom_images) > MAX_TILES_PER_BATCH:
-            n_batches = (len(bom_images) + MAX_TILES_PER_BATCH - 1) // MAX_TILES_PER_BATCH
-            print(f"SCAN [{filename}]: {len(bom_images)} tiles — batching into "
-                  f"{n_batches} batches of ≤{MAX_TILES_PER_BATCH}", flush=True)
+        use_per_page = (bom_images
+                        and len(hires_tiles_per_page) > 1
+                        and sum(hires_tiles_per_page) == len(bom_images))
+
+        if use_per_page:
+            n_pages = len(hires_tiles_per_page)
+            print(f"SCAN [{filename}]: {len(bom_images)} tiles across {n_pages} pages "
+                  f"— processing each page individually (like single-page scan)",
+                  flush=True)
 
             all_batch_items = []
-            for batch_idx in range(n_batches):
-                batch_start = batch_idx * MAX_TILES_PER_BATCH
-                batch_end = min(batch_start + MAX_TILES_PER_BATCH, len(bom_images))
-                batch_images = bom_images[batch_start:batch_end]
+            tile_offset = 0
+            for pg_idx in range(n_pages):
+                n_tiles = hires_tiles_per_page[pg_idx]
+                page_tiles = bom_images[tile_offset:tile_offset + n_tiles]
+                tile_offset += n_tiles
 
-                # Adjust row estimate for this batch (proportional)
-                batch_frac = len(batch_images) / len(bom_images)
-                batch_row_est = max(10, int(row_count * batch_frac))
-                batch_structure = dict(structure)
-                batch_structure["total_bom_rows"] = batch_row_est
-                # Clear OCR text for batched calls — the text covers ALL
-                # pages but this batch only has a SUBSET of tiles.  The
-                # mismatch causes Claude to hallucinate parts from other
-                # pages.  Also, SHX font OCR on these drawings is garbage
-                # ("Hoffrriarn" instead of "Hoffman") which actively
-                # misleads Claude.  Let it read the images directly.
-                batch_structure["_bom_raw_text"] = ""
+                # Build per-page structure with this page's OCR text
+                page_structure = dict(structure)
+                page_row_est = max(5, row_count // n_pages)
+                page_structure["total_bom_rows"] = page_row_est
 
-                print(f"SCAN [{filename}]: Stage 2 batch {batch_idx+1}/{n_batches}: "
-                      f"tiles {batch_start+1}-{batch_end} "
-                      f"(~{batch_row_est} rows est)", flush=True)
+                # Use this page's OCR text (not all pages combined)
+                if ocr_per_page and pg_idx < len(ocr_per_page) and ocr_per_page[pg_idx].strip():
+                    page_structure["_bom_raw_text"] = ocr_per_page[pg_idx]
+                else:
+                    page_structure["_bom_raw_text"] = ""
+
+                print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
+                      f"{n_tiles} tiles, ~{page_row_est} rows est, "
+                      f"OCR: {len(page_structure['_bom_raw_text'])} chars",
+                      flush=True)
+
                 try:
-                    batch_result = _stage2_extract_bom(
-                        claude_client, bom_pdf_b64, batch_structure,
-                        bom_images=batch_images)
+                    page_result = _stage2_extract_bom(
+                        claude_client, bom_pdf_b64, page_structure,
+                        bom_images=page_tiles)
                 except Exception as e2:
                     err_str = str(e2)
                     if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
-                        print(f"SCAN: Rate limit on Stage 2 batch {batch_idx+1}, "
+                        print(f"SCAN: Rate limit on page {pg_idx+1}, "
                               f"waiting 30s...", flush=True)
                         time.sleep(30)
-                        batch_result = _stage2_extract_bom(
-                            claude_client, bom_pdf_b64, batch_structure,
-                            bom_images=batch_images)
+                        page_result = _stage2_extract_bom(
+                            claude_client, bom_pdf_b64, page_structure,
+                            bom_images=page_tiles)
                     else:
                         raise
 
-                batch_items = batch_result.get("bom_line_items", [])
-                total_tokens += batch_result.get("_output_tokens", 0)
-                was_truncated = was_truncated or batch_result.get("_truncated", False)
-                all_batch_items.extend(batch_items)
-                print(f"SCAN [{filename}]: Batch {batch_idx+1} → "
-                      f"{len(batch_items)} items (running total: "
+                page_items = page_result.get("bom_line_items", [])
+                total_tokens += page_result.get("_output_tokens", 0)
+                was_truncated = was_truncated or page_result.get("_truncated", False)
+                all_batch_items.extend(page_items)
+                print(f"SCAN [{filename}]: Page {pg_idx+1} → "
+                      f"{len(page_items)} items (running total: "
                       f"{len(all_batch_items)})", flush=True)
 
             extraction = {"bom_line_items": all_batch_items,
                           "rows_extracted": len(all_batch_items)}
             bom_items = all_batch_items
         else:
-            # Normal single-call path (≤ MAX_TILES_PER_BATCH tiles or PDF mode)
+            # Normal single-call path (single page, PDF mode, or no page info)
             try:
                 extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure,
                                                  bom_images=bom_images)
@@ -2765,13 +2773,15 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # Uses BOM-ONLY PDF (not full drawing) — same extracted pages as Stage 2
         t5 = time.time()
 
-        # For batched multi-page BOMs, cap tiles sent to Stage 5 so it
-        # doesn't overwhelm Claude or blow the worker timeout budget.
+        # For multi-page BOMs, Stage 5 only needs to verify a sample of pages.
+        # Send first page's tiles (which we know works well for single-page).
         stage5_images = bom_images
-        if bom_images and len(bom_images) > MAX_TILES_PER_BATCH:
-            stage5_images = bom_images[:MAX_TILES_PER_BATCH]
-            print(f"SCAN [{filename}]: Stage 5 using first {len(stage5_images)} "
-                  f"of {len(bom_images)} tiles for verification", flush=True)
+        if use_per_page and hires_tiles_per_page:
+            first_page_tiles = hires_tiles_per_page[0]
+            stage5_images = bom_images[:first_page_tiles]
+            print(f"SCAN [{filename}]: Stage 5 using page 1 tiles "
+                  f"({first_page_tiles} of {len(bom_images)} total) for verification",
+                  flush=True)
 
         print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification "
               f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
