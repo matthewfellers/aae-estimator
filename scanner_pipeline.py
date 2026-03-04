@@ -742,20 +742,19 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
 def _enhance_for_vision(img):
     """Enhance thin SHX vector-font strokes for Claude's vision.
 
-    SHX fonts render as 1px strokes at 400 DPI — too thin for reliable
-    character discrimination (G vs C, 8 vs B, 9 vs M look identical).
+    SHX characters at 400 DPI have 1px strokes.  The distinguishing
+    features between similar characters (G vs C, 8 vs B) are sub-pixel
+    gaps and curves — so we must NOT thicken strokes (MinFilter closes
+    these gaps and destroys accuracy).
 
-    Pipeline:
-      1. Grayscale conversion
-      2. Autocontrast — normalize histogram, boost faint strokes
-      3. MinFilter(3) — morphological dilation of dark pixels, thickens
-         1px strokes to 2-3px so distinguishing features become visible
-      4. Sharpen — restore edge crispness after dilation
+    Instead: boost contrast to maximize stroke-vs-background difference,
+    then sharpen twice to make edges crisp.  This preserves the fine
+    details Claude needs for character discrimination.
     """
     from PIL import ImageFilter, ImageOps
     img = img.convert("L")
     img = ImageOps.autocontrast(img, cutoff=2)
-    img = img.filter(ImageFilter.MinFilter(3))     # thicken thin strokes
+    img = img.filter(ImageFilter.SHARPEN)
     img = img.filter(ImageFilter.SHARPEN)
     return img.convert("RGB")
 
@@ -907,14 +906,19 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
                   f"(title_block_y={title_block_y})", flush=True)
 
         # ── Step 2: render BOM area from each page at high DPI + tile ──
-        # Without tiling, Claude's API downscales a ~3400x5400 image to
-        # ~1000x1568, making characters ~4px tall regardless of render DPI.
-        # Tiling into ~1500px strips keeps each tile within Claude's native
-        # resolution — characters stay at full rendered size (~14px at 400 DPI).
+        # Tile both vertically AND horizontally so every tile fits within
+        # Claude's native ~1568px resolution.  Without horizontal tiling,
+        # a 3000px-wide BOM render gets downscaled 50%, halving character
+        # size and destroying SHX character discrimination (G vs C, etc.).
+        #
+        # With both axes tiled to ≤1568px, Claude sees characters at full
+        # rendered size (~14px at 400 DPI) with zero downscaling.
         all_tiles = []
         tiles_per_page = []
-        tile_h = 1500
-        overlap = 80
+        max_tile = 1568          # Claude's native resolution limit
+        tile_h = 1500            # vertical tile height (< max_tile)
+        overlap_v = 80           # vertical overlap between strips
+        overlap_h = 120          # horizontal overlap between columns
         for pg_idx in range(n_pages):
             page = doc[pg_idx]
             zoom = render_dpi / 72
@@ -963,28 +967,60 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
                 pix_h = trim_y
             del gray_col
 
-            # Tile vertically with overlap, enhance EACH tile individually.
-            # Per-tile autocontrast ensures each tile's histogram is based
-            # only on its own content — not skewed by other parts of the
-            # page.  This preserves character accuracy regardless of clip
-            # height or what else is on the page.
+            # ── Compute horizontal tile positions ──
+            # Each tile must be ≤ max_tile wide so Claude doesn't
+            # downscale.  Tiles overlap by overlap_h pixels so
+            # characters at boundaries appear fully in at least
+            # one tile.  Works for any image width — narrow BOMs
+            # get 1 tile, wide BOMs get 2-3+.
+            if pix_w <= max_tile:
+                h_ranges = [(0, pix_w)]
+            else:
+                h_ranges = []
+                x = 0
+                while x < pix_w:
+                    x_end = min(x + max_tile, pix_w)
+                    # If leftover after this tile is too small,
+                    # extend this tile to cover it (slight oversize
+                    # is better than a tiny sliver tile)
+                    if 0 < (pix_w - x_end) < max_tile // 4:
+                        x_end = pix_w
+                    h_ranges.append((x, x_end))
+                    if x_end >= pix_w:
+                        break
+                    x = x_end - overlap_h
+
+            n_h = len(h_ranges)
+            if n_h > 1:
+                print(f"  [BOM-Direct] Page {pg_idx+1}: "
+                      f"{pix_w}px wide -> {n_h} horizontal tiles",
+                      flush=True)
+
+            # ── Tile: vertical strips × horizontal columns ──
+            # Order: left-to-right within each vertical strip,
+            # then top-to-bottom.  Each sub-tile gets its own
+            # autocontrast + sharpen for optimal character clarity.
             page_tiles = []
             y = 0
             while y < pix_h:
                 y_end = min(y + tile_h, pix_h)
-                tile = pil_img.crop((0, y, pix_w, y_end))
-                tile = _enhance_for_vision(tile)
-                buf = io.BytesIO()
-                tile.save(buf, format="PNG", optimize=True)
-                page_tiles.append(base64.b64encode(buf.getvalue()).decode("ascii"))
-                tile_kb = len(buf.getvalue()) / 1024
-                print(f"  [BOM-Direct] Page {pg_idx+1} tile {len(page_tiles)}: "
-                      f"{pix_w}x{y_end-y} ({tile_kb:.0f}KB) [y={y}-{y_end}]",
-                      flush=True)
-                del tile, buf
+                for x0, x1 in h_ranges:
+                    tile = pil_img.crop((x0, y, x1, y_end))
+                    tile = _enhance_for_vision(tile)
+                    buf = io.BytesIO()
+                    tile.save(buf, format="PNG", optimize=True)
+                    page_tiles.append(
+                        base64.b64encode(buf.getvalue()).decode("ascii"))
+                    tile_kb = len(buf.getvalue()) / 1024
+                    print(f"  [BOM-Direct] Page {pg_idx+1} "
+                          f"tile {len(page_tiles)}: "
+                          f"{x1-x0}x{y_end-y} ({tile_kb:.0f}KB) "
+                          f"[x={x0}-{x1}, y={y}-{y_end}]",
+                          flush=True)
+                    del tile, buf
                 if y_end >= pix_h:
                     break
-                y = y_end - overlap
+                y = y_end - overlap_v
 
             all_tiles.extend(page_tiles)
             tiles_per_page.append(len(page_tiles))
