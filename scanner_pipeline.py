@@ -2580,67 +2580,67 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     pypdf_chars = len(bom_raw_text.strip())
                     expected_min_chars = max(300, row_count * 20)
                     if pypdf_chars < expected_min_chars:
-                        # SHX / vector-font drawing (e.g. ABB XIO-00): run OCR to
-                        # get character-accurate text AND crop the image tightly to
-                        # the BOM table so Claude sees it at full resolution.
-                        ocr_text, bom_images_cropped, ocr_per_page = _ocr_images(bom_images)
-                        # v2.8: Re-render BOM crop at 400 DPI, enhance strokes,
-                        # and TILE into small sections. Claude's vision downscales
-                        # large images, so one 3200x6600 image → only 11px/char.
-                        # Tiling into ~1500px sections → 23px/char (2× improvement).
-                        # Stroke enhancement thickens thin SHX lines for better D/O,
-                        # 3/5, C/O distinction.
-                        # bom_images_cropped is a dense list (one per page,
-                        # None where OCR found no BOM crop for that page)
-                        has_crops = any(c is not None for c in bom_images_cropped)
-                        hires_tiles_per_page = []  # populated if hires succeeds
-                        if has_crops:
-                            try:
-                                hires, hires_tiles_per_page = _render_bom_crops_hires_auto(
-                                    bom_pdf_b64, bom_images, bom_images_cropped
-                                )
-                                if hires:
-                                    bom_images = hires
-                                    print(f"SCAN [{filename}]: Using TILED BOM crops "
-                                          f"({len(hires)} tiles, enhanced) for Stage 2/5",
-                                          flush=True)
-                                else:
+                        # SHX / vector-font drawing — no usable text layer.
+                        # For multi-page SHX BOMs, the OCR/hires/tiling pipeline
+                        # produces hallucinated part numbers because:
+                        #   1. OCR on SHX fonts is garbage (misleads Claude)
+                        #   2. Tiled images cause Claude to hallucinate from training data
+                        #      even when tiles are perfectly readable
+                        # Instead: send per-page PDFs directly.  SHX strokes are
+                        # vector paths (not font-dependent) so they survive page
+                        # extraction intact.  Claude's internal PDF renderer handles
+                        # the resolution.  This matches how normal drawings work.
+                        n_bom_pages = len(bom_pages)
+                        if n_bom_pages > 1:
+                            # Multi-page SHX: skip OCR/hires, use per-page PDF mode
+                            bom_images = None  # triggers PDF mode in Stage 2
+                            structure["_bom_raw_text"] = ""
+                            structure["_bom_text_source"] = "pypdf"
+                            # Flag for per-page PDF batching in Stage 2
+                            structure["_per_page_pdf"] = True
+                            print(f"SCAN [{filename}]: Multi-page SHX drawing "
+                                  f"({n_bom_pages} BOM pages, {pypdf_chars} chars) "
+                                  f"— using per-page PDF mode (no OCR/tiling)",
+                                  flush=True)
+                        else:
+                            # Single-page SHX: use OCR + hires pipeline (proven to work)
+                            ocr_text, bom_images_cropped, ocr_per_page = _ocr_images(bom_images)
+                            has_crops = any(c is not None for c in bom_images_cropped)
+                            hires_tiles_per_page = []
+                            if has_crops:
+                                try:
+                                    hires, hires_tiles_per_page = _render_bom_crops_hires_auto(
+                                        bom_pdf_b64, bom_images, bom_images_cropped
+                                    )
+                                    if hires:
+                                        bom_images = hires
+                                        print(f"SCAN [{filename}]: Using TILED BOM crops "
+                                              f"({len(hires)} tiles, enhanced) for Stage 2/5",
+                                              flush=True)
+                                    else:
+                                        hires_tiles_per_page = []
+                                        bom_images = [c for c in bom_images_cropped
+                                                      if c is not None]
+                                        print(f"SCAN [{filename}]: HiRes failed, using OCR crops "
+                                              f"({len(bom_images)} page(s)) for Stage 2/5",
+                                              flush=True)
+                                except Exception as _hr_err:
                                     hires_tiles_per_page = []
-                                    # Filter None entries for fallback image list
                                     bom_images = [c for c in bom_images_cropped
                                                   if c is not None]
-                                    print(f"SCAN [{filename}]: HiRes failed, using OCR crops "
-                                          f"({len(bom_images)} page(s)) for Stage 2/5",
-                                          flush=True)
-                            except Exception as _hr_err:
-                                hires_tiles_per_page = []
-                                bom_images = [c for c in bom_images_cropped
-                                              if c is not None]
-                                print(f"SCAN [{filename}]: HiRes error ({_hr_err}), "
-                                      f"using OCR crops", flush=True)
-                        # Free intermediate images no longer needed
-                        del bom_images_cropped
-                        import gc; gc.collect()
-                        if ocr_text.strip():
-                            structure["_bom_raw_text"] = ocr_text
-                            # v2.7: ALWAYS use "ocr" mode for OCR-sourced text, even
-                            # if it produced a column-aware pipe table.  "columns" mode
-                            # tells Claude to trust part numbers verbatim, but OCR on
-                            # SHX/vector fonts misreads similar characters (3→5, D→O,
-                            # 0→O, B→8).  "ocr" mode tells Claude to use the IMAGE
-                            # as authority and only use OCR text as a structural guide.
-                            structure["_bom_text_source"] = "ocr"
-                            first_line = ocr_text.split("\n")[0] if ocr_text else ""
-                            if first_line.count(" | ") >= 2:
-                                print(f"SCAN [{filename}]: OCR produced column-aware table "
-                                      f"({len(ocr_text)} chars) — using 'ocr' mode (image "
-                                      f"is authority for part numbers)", flush=True)
-                            print(f"SCAN [{filename}]: pypdf had only {pypdf_chars} chars "
-                                  f"(SHX/vector font) — using OCR text ({len(ocr_text)} chars) "
-                                  f"as structural guide", flush=True)
-                        else:
-                            print(f"SCAN [{filename}]: OCR returned no text "
-                                  f"— Stage 2 will rely on image only", flush=True)
+                                    print(f"SCAN [{filename}]: HiRes error ({_hr_err}), "
+                                          f"using OCR crops", flush=True)
+                            del bom_images_cropped
+                            import gc; gc.collect()
+                            if ocr_text.strip():
+                                structure["_bom_raw_text"] = ocr_text
+                                structure["_bom_text_source"] = "ocr"
+                                print(f"SCAN [{filename}]: Single-page SHX — "
+                                      f"using OCR text ({len(ocr_text)} chars) "
+                                      f"as structural guide", flush=True)
+                            else:
+                                print(f"SCAN [{filename}]: OCR returned no text "
+                                      f"— Stage 2 will rely on image only", flush=True)
                     else:
                         # Good pypdf text — skip OCR entirely to avoid OOM on large
                         # drawings.  pytesseract + 5 preprocessing passes on a 200 MB
@@ -2669,53 +2669,47 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows "
               f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
 
-        # --- Per-page batching for multi-page image BOMs ---
-        # For multi-page SHX/vector drawings, process each BOM page individually
-        # with its own tiles + its own OCR text — exactly like the single-page
-        # case that works reliably.  This prevents Claude from being overwhelmed
-        # by 48+ tiles and eliminates OCR text / image mismatch.
-        #
-        # hires_tiles_per_page tells us how many tiles belong to each page.
-        # ocr_per_page (from _ocr_images) gives per-page OCR text.
-        # When either is unavailable, fall back to single-call.
+        # --- Per-page PDF batching for multi-page SHX drawings ---
+        # For multi-page SHX/vector drawings, the OCR/hires/tiling pipeline
+        # causes Claude to hallucinate part numbers from training data (even
+        # when tiles are perfectly readable).  Instead, extract each BOM page
+        # as a single-page PDF and send it directly — exactly how normal
+        # drawings work.  SHX vector strokes survive page extraction intact.
+        use_per_page_pdf = structure.get("_per_page_pdf", False)
 
-        use_per_page = (bom_images
-                        and len(hires_tiles_per_page) > 1
-                        and sum(hires_tiles_per_page) == len(bom_images))
-
-        if use_per_page:
-            n_pages = len(hires_tiles_per_page)
-            print(f"SCAN [{filename}]: {len(bom_images)} tiles across {n_pages} pages "
-                  f"— processing each page individually (like single-page scan)",
-                  flush=True)
+        if use_per_page_pdf and bom_pages:
+            n_pages = len(bom_pages)
+            print(f"SCAN [{filename}]: Per-page PDF mode — sending {n_pages} "
+                  f"individual BOM pages to Claude", flush=True)
 
             all_batch_items = []
-            tile_offset = 0
-            for pg_idx in range(n_pages):
-                n_tiles = hires_tiles_per_page[pg_idx]
-                page_tiles = bom_images[tile_offset:tile_offset + n_tiles]
-                tile_offset += n_tiles
+            for pg_idx, pg_num in enumerate(bom_pages):
+                # Extract this single page into its own PDF
+                single_pdf_b64, single_text, single_src = _extract_pages(
+                    pdf_b64, [pg_num])
 
-                # Build per-page structure with this page's OCR text
                 page_structure = dict(structure)
                 page_row_est = max(5, row_count // n_pages)
                 page_structure["total_bom_rows"] = page_row_est
-
-                # Use this page's OCR text (not all pages combined)
-                if ocr_per_page and pg_idx < len(ocr_per_page) and ocr_per_page[pg_idx].strip():
-                    page_structure["_bom_raw_text"] = ocr_per_page[pg_idx]
+                page_structure["_bom_extracted"] = True
+                page_structure["pages_with_bom"] = [1]  # single page
+                # Use whatever text the extraction found for this page
+                if single_text.strip():
+                    page_structure["_bom_raw_text"] = single_text
+                    page_structure["_bom_text_source"] = single_src
                 else:
                     page_structure["_bom_raw_text"] = ""
 
-                print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
-                      f"{n_tiles} tiles, ~{page_row_est} rows est, "
-                      f"OCR: {len(page_structure['_bom_raw_text'])} chars",
+                print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages} "
+                      f"(original page {pg_num}): PDF mode, "
+                      f"~{page_row_est} rows est, "
+                      f"text: {len(single_text)} chars",
                       flush=True)
 
                 try:
                     page_result = _stage2_extract_bom(
-                        claude_client, bom_pdf_b64, page_structure,
-                        bom_images=page_tiles)
+                        claude_client, single_pdf_b64, page_structure,
+                        bom_images=None)
                 except Exception as e2:
                     err_str = str(e2)
                     if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
@@ -2723,8 +2717,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                               f"waiting 30s...", flush=True)
                         time.sleep(30)
                         page_result = _stage2_extract_bom(
-                            claude_client, bom_pdf_b64, page_structure,
-                            bom_images=page_tiles)
+                            claude_client, single_pdf_b64, page_structure,
+                            bom_images=None)
                     else:
                         raise
 
@@ -2732,7 +2726,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 total_tokens += page_result.get("_output_tokens", 0)
                 was_truncated = was_truncated or page_result.get("_truncated", False)
                 all_batch_items.extend(page_items)
-                print(f"SCAN [{filename}]: Page {pg_idx+1} → "
+                print(f"SCAN [{filename}]: Page {pg_idx+1} (pg {pg_num}) → "
                       f"{len(page_items)} items (running total: "
                       f"{len(all_batch_items)})", flush=True)
 
@@ -2774,9 +2768,16 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         t5 = time.time()
 
         # For multi-page BOMs, Stage 5 only needs to verify a sample of pages.
-        # Send first page's tiles (which we know works well for single-page).
+        # Send first page's tiles (single-page SHX) or first page PDF (multi-page SHX).
         stage5_images = bom_images
-        if use_per_page and hires_tiles_per_page:
+        stage5_pdf = bom_pdf_b64
+        if use_per_page_pdf and bom_pages:
+            # Per-page PDF mode: send first BOM page as single-page PDF
+            stage5_pdf, _, _ = _extract_pages(pdf_b64, [bom_pages[0]])
+            stage5_images = None
+            print(f"SCAN [{filename}]: Stage 5 using page {bom_pages[0]} "
+                  f"PDF for verification", flush=True)
+        elif hires_tiles_per_page and bom_images:
             first_page_tiles = hires_tiles_per_page[0]
             stage5_images = bom_images[:first_page_tiles]
             print(f"SCAN [{filename}]: Stage 5 using page 1 tiles "
@@ -2787,7 +2788,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
               f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
         try:
             verify_result = _stage5_verify_part_numbers(
-                claude_client, bom_pdf_b64, bom_items,
+                claude_client, stage5_pdf, bom_items,
                 bom_pages=bom_pages, bom_extracted=bom_extracted,
                 bom_raw_text=bom_raw_text, bom_images=stage5_images
             )
@@ -2803,7 +2804,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 time.sleep(30)
                 try:
                     verify_result = _stage5_verify_part_numbers(
-                        claude_client, bom_pdf_b64, bom_items,
+                        claude_client, stage5_pdf, bom_items,
                         bom_pages=bom_pages, bom_extracted=bom_extracted,
                         bom_raw_text=bom_raw_text, bom_images=stage5_images
                     )
