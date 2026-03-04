@@ -29,7 +29,10 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
     If hint_pages is provided (from Stage 1), only scans nearby pages (±3)
     to find continuation pages efficiently. If no hints, scans all pages.
 
-    Returns a list of 1-based page numbers that likely contain BOM tables.
+    Returns (bom_pages, bom_bboxes) where:
+      - bom_pages: sorted list of 1-based page numbers with BOM tables
+      - bom_bboxes: dict mapping page_num → (x0, y0, x1, y1) PDF-point bbox
+        (only populated for pages found via find_tables Strategy 1)
     Uses three strategies (each page tries all until one succeeds):
       1. find_tables(): pages with a table having >= MIN_BOM_ROWS rows
       2. Word-scan: pages containing BOM header keywords in the text layer
@@ -49,25 +52,24 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
         bom_pages = []
+        bom_bboxes = {}  # page_num → (x0, y0, x1, y1) in PDF points
         needs_ocr_scan = []  # pages where text-layer strategies failed
 
-        # Determine which pages to scan.  If Stage 1 found BOM pages,
-        # only check nearby pages (±3) for continuations — scanning all
-        # 15+ pages with OCR adds ~30s and can cause timeouts.
+        # Scan ALL pages with fast strategies (find_tables + keyword scan).
+        # These are milliseconds per page, so no need to limit the range.
+        # Only OCR (Strategy 3) is slow and gets limited to ±3 of hints.
+        pages_to_scan = list(range(1, total_pages + 1))
         if hint_pages:
-            scan_set = set()
+            ocr_scan_set = set()
             for hp in hint_pages:
                 for offset in range(-3, 4):  # hp-3 … hp+3
                     pg = hp + offset
                     if 1 <= pg <= total_pages:
-                        scan_set.add(pg)
-            # Always include hint pages themselves
-            scan_set.update(hint_pages)
-            pages_to_scan = sorted(scan_set)
-            print(f"  [BOM-detect] Scanning {len(pages_to_scan)} pages near "
-                  f"Stage 1 hints {hint_pages}", flush=True)
+                        ocr_scan_set.add(pg)
+            print(f"  [BOM-detect] Scanning all {total_pages} pages "
+                  f"(OCR limited to ±3 of hints {hint_pages})", flush=True)
         else:
-            pages_to_scan = list(range(1, total_pages + 1))
+            ocr_scan_set = set(range(1, total_pages + 1))
 
         for pg_num in pages_to_scan:
             pg_idx = pg_num - 1
@@ -78,11 +80,24 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
             try:
                 tabs = page.find_tables()
                 if tabs.tables:
-                    best = max(tabs.tables, key=lambda t: len(t.rows))
-                    if len(best.rows) >= MIN_BOM_ROWS:
+                    # Collect all qualifying tables on this page
+                    qualifying = [t for t in tabs.tables
+                                  if len(t.rows) >= MIN_BOM_ROWS]
+                    if qualifying:
+                        best = max(qualifying, key=lambda t: len(t.rows))
                         bom_pages.append(pg_num)
+                        # Compute union bbox of all qualifying tables
+                        if len(qualifying) == 1:
+                            bom_bboxes[pg_num] = tuple(best.bbox)
+                        else:
+                            x0 = min(t.bbox[0] for t in qualifying)
+                            y0 = min(t.bbox[1] for t in qualifying)
+                            x1 = max(t.bbox[2] for t in qualifying)
+                            y1 = max(t.bbox[3] for t in qualifying)
+                            bom_bboxes[pg_num] = (x0, y0, x1, y1)
                         print(f"  [BOM-detect] Page {pg_num}: table with "
-                              f"{len(best.rows)} rows (find_tables)", flush=True)
+                              f"{len(best.rows)} rows (find_tables) "
+                              f"bbox={bom_bboxes[pg_num]}", flush=True)
                         found = True
             except (AttributeError, Exception):
                 pass
@@ -104,7 +119,9 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
                     pass
 
             if not found:
-                needs_ocr_scan.append(pg_idx)
+                # Only queue for OCR if this page is near a Stage 1 hint
+                if (pg_num) in ocr_scan_set:
+                    needs_ocr_scan.append(pg_idx)
 
         # --- Strategy 3: OCR scan for SHX/vector-font drawings ---
         # Only runs if Strategies 1 & 2 found nothing on the scanned pages.
@@ -171,14 +188,14 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
                 print(f"  [BOM-detect] OCR scan error: {ocr_err}", flush=True)
 
         doc.close()
-        return sorted(set(bom_pages))
+        return sorted(set(bom_pages)), bom_bboxes
 
     except ImportError:
         print("  [BOM-detect] fitz not available, skipping", flush=True)
-        return []
+        return [], {}
     except Exception as exc:
         print(f"  [BOM-detect] ERROR: {exc}", flush=True)
-        return []
+        return [], {}
 
 
 # ---------------------------------------------------------------------------
@@ -755,14 +772,13 @@ def _enhance_for_vision(img):
 
 
 def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
-                                  render_dpi=600):
+                                  render_dpi=600, table_bboxes=None):
     """Re-render BOM crops at high DPI, enhance strokes, and tile for Claude.
 
-    1. Deduce crop coordinates by comparing full-page vs OCR-cropped sizes.
-    2. Render the BOM area from the PDF at render_dpi (600).
-    3. Apply stroke thickening for thin SHX fonts.
-    4. Tile vertically into sections ≤ CLAUDE_MAX_DIM pixels tall so Claude
-       processes each at high effective resolution (~40-50px per character).
+    Three-branch clip logic per page:
+      1. table_bboxes[pg_idx] available → use direct PDF-point bbox + margin
+      2. No bbox but OCR crop available → deduce from full-page vs crop sizes
+      3. Neither → render full page as fallback
 
     Returns:
         list of base64 PNG tiles (may be more than len(pages) due to tiling),
@@ -776,35 +792,58 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         hires = []
 
-        for pg_idx in range(min(len(doc), len(full_page_images), len(cropped_images))):
+        for pg_idx in range(len(doc)):
             page = doc[pg_idx]
 
-            # Get dimensions of the full-page render
-            fp_bytes = base64.b64decode(full_page_images[pg_idx])
-            fp_img = Image.open(io.BytesIO(fp_bytes))
-            fp_w, fp_h = fp_img.size
+            # --- Branch 1: direct bbox from find_tables() ---
+            bbox = (table_bboxes[pg_idx]
+                    if table_bboxes and pg_idx < len(table_bboxes)
+                       and table_bboxes[pg_idx] is not None
+                    else None)
 
-            # Get dimensions of the OCR crop
-            cr_bytes = base64.b64decode(cropped_images[pg_idx])
-            cr_img = Image.open(io.BytesIO(cr_bytes))
-            cr_w, cr_h = cr_img.size
-            del fp_img, cr_img
+            if bbox is not None:
+                margin = 20  # PDF points (~0.28 in)
+                clip = fitz.Rect(
+                    max(0, bbox[0] - margin),
+                    max(0, bbox[1] - margin),
+                    min(page.rect.width,  bbox[2] + margin),
+                    min(page.rect.height, bbox[3] + margin),
+                )
+                clip_source = "find_tables() bbox"
 
-            UPSCALE_W = 6000
-            upscale_h = int(fp_h * (UPSCALE_W / fp_w))
+            # --- Branch 2: deduce from OCR crop dimensions ---
+            elif (pg_idx < len(full_page_images) and
+                  pg_idx < len(cropped_images)):
+                fp_bytes = base64.b64decode(full_page_images[pg_idx])
+                fp_img = Image.open(io.BytesIO(fp_bytes))
+                fp_w, fp_h = fp_img.size
 
-            # BOM is right-aligned on panel drawings
-            frac_x0 = max(0, (UPSCALE_W - cr_w - 60)) / UPSCALE_W
-            frac_y0 = 0
-            frac_x1 = 1.0
-            frac_y1 = min(1.0, (cr_h + 120) / upscale_h)
+                cr_bytes = base64.b64decode(cropped_images[pg_idx])
+                cr_img = Image.open(io.BytesIO(cr_bytes))
+                cr_w, cr_h = cr_img.size
+                del fp_img, cr_img
 
-            pw = page.rect.width
-            ph = page.rect.height
-            clip = fitz.Rect(
-                frac_x0 * pw, frac_y0 * ph,
-                frac_x1 * pw, frac_y1 * ph,
-            )
+                UPSCALE_W = 6000
+                upscale_h = int(fp_h * (UPSCALE_W / fp_w))
+
+                # BOM is right-aligned on panel drawings
+                frac_x0 = max(0, (UPSCALE_W - cr_w - 60)) / UPSCALE_W
+                frac_y0 = 0
+                frac_x1 = 1.0
+                frac_y1 = min(1.0, (cr_h + 120) / upscale_h)
+
+                pw = page.rect.width
+                ph = page.rect.height
+                clip = fitz.Rect(
+                    frac_x0 * pw, frac_y0 * ph,
+                    frac_x1 * pw, frac_y1 * ph,
+                )
+                clip_source = "OCR crop deduction"
+
+            # --- Branch 3: no bbox, no crop → full page fallback ---
+            else:
+                clip = page.rect
+                clip_source = "full page (no bbox/crop)"
 
             zoom = render_dpi / 72
             mat = fitz.Matrix(zoom, zoom)
@@ -862,7 +901,7 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
 
             print(f"  [HiRes] Page {pg_idx+1}: {len(tiles)} tile(s) from "
                   f"{pix_w}x{pix_h} crop "
-                  f"[clip: x={frac_x0:.2f}-{frac_x1:.2f} y={frac_y0:.2f}-{frac_y1:.2f}]",
+                  f"[{clip_source}: {clip}]",
                   flush=True)
 
         doc.close()
@@ -1524,9 +1563,11 @@ def _call_claude(claude_client, pdf_b64, prompt, model="claude-sonnet-4-20250514
 def _stage1_detect_structure(claude_client, pdf_b64, thinking_budget=10000):
     prompt = (
         "You are reading an industrial electrical panel drawing PDF.\n"
-        "Your ONLY job is to find the BOM (Bill of Materials) table and report its structure.\n\n"
+        "Your ONLY job is to find ALL BOM (Bill of Materials) tables and report the structure.\n\n"
         "DO NOT extract any row data yet. Just report the table structure.\n\n"
-        "Look through EVERY page. Find any table that lists parts/components with quantities.\n\n"
+        "Look through EVERY page. Find any table that lists parts/components with quantities.\n"
+        "IMPORTANT: Multi-panel drawings may have SEPARATE BOM tables on DIFFERENT pages — "
+        "one per panel. List ALL pages that contain a BOM table in pages_with_bom.\n\n"
         "Return this JSON:\n"
         "{\n"
         '  "bom_tables_found": 1,\n'
@@ -2463,9 +2504,10 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # programmatic scan with fitz to catch any pages Claude missed.
         bom_pages = structure.get("pages_with_bom", [])
         orig_bom_pages = list(bom_pages)  # save original for comparison
+        table_bboxes_ordered = None  # safety default — set below if bboxes available
         try:
-            prog_pages = _detect_bom_pages_programmatic(pdf_b64,
-                                                         hint_pages=bom_pages)
+            prog_pages, prog_bboxes = _detect_bom_pages_programmatic(
+                pdf_b64, hint_pages=bom_pages)
             if prog_pages:
                 merged = sorted(set(bom_pages) | set(prog_pages))
                 if merged != sorted(bom_pages):
@@ -2484,6 +2526,15 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                   f"{len(merged)} BOM pages", flush=True)
                             structure["total_bom_rows"] = new_estimate
                             row_count = new_estimate
+            # Build ordered bbox list aligned with bom_pages order.
+            # After _extract_pages, the extracted PDF has pages 0..N-1
+            # matching bom_pages[0..N-1], so the list index is the
+            # extracted-PDF page index.
+            if prog_bboxes:
+                table_bboxes_ordered = [prog_bboxes.get(pg) for pg in bom_pages]
+                n_with = sum(1 for b in table_bboxes_ordered if b is not None)
+                print(f"SCAN [{filename}]: Table bboxes available for "
+                      f"{n_with}/{len(bom_pages)} BOM pages", flush=True)
         except Exception as _prog_err:
             print(f"SCAN [{filename}]: Programmatic BOM detection failed: "
                   f"{_prog_err}", flush=True)
@@ -2545,7 +2596,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         if bom_images_cropped:
                             try:
                                 hires = _render_bom_crops_hires_auto(
-                                    bom_pdf_b64, bom_images, bom_images_cropped
+                                    bom_pdf_b64, bom_images, bom_images_cropped,
+                                    table_bboxes=table_bboxes_ordered
                                 )
                                 if hires:
                                     bom_images = hires
