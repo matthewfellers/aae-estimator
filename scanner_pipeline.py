@@ -2659,26 +2659,84 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         input_mode = "IMAGES" if bom_images else ("BOM PDF" if bom_extracted else "full PDF")
         print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows "
               f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
-        try:
-            extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure,
-                                             bom_images=bom_images)
-        except Exception as e2:
-            err_str = str(e2)
-            if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
-                print(f"SCAN: Rate limit on Stage 2, waiting 30s...", flush=True)
-                time.sleep(30)
-                try:
-                    extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure,
-                                                     bom_images=bom_images)
-                except Exception:
-                    raise e2
-            else:
-                raise
 
-        total_tokens += extraction.get("_output_tokens", 0)
-        was_truncated = was_truncated or extraction.get("_truncated", False)
-        bom_items = extraction.get("bom_line_items", [])
-        print(f"SCAN Stage 2 done in {time.time()-t2:.1f}s", flush=True)
+        # --- Batch processing for large multi-page image BOMs ---
+        # When there are many image tiles (e.g., 48 from a 12-page D-size BOM),
+        # Claude gets overwhelmed and hallucinates.  Split into batches of
+        # MAX_TILES_PER_BATCH and merge the results.
+        MAX_TILES_PER_BATCH = 16  # ~4 pages × 4 tiles each
+
+        if bom_images and len(bom_images) > MAX_TILES_PER_BATCH:
+            n_batches = (len(bom_images) + MAX_TILES_PER_BATCH - 1) // MAX_TILES_PER_BATCH
+            print(f"SCAN [{filename}]: {len(bom_images)} tiles — batching into "
+                  f"{n_batches} batches of ≤{MAX_TILES_PER_BATCH}", flush=True)
+
+            all_batch_items = []
+            for batch_idx in range(n_batches):
+                batch_start = batch_idx * MAX_TILES_PER_BATCH
+                batch_end = min(batch_start + MAX_TILES_PER_BATCH, len(bom_images))
+                batch_images = bom_images[batch_start:batch_end]
+
+                # Adjust row estimate for this batch (proportional)
+                batch_frac = len(batch_images) / len(bom_images)
+                batch_row_est = max(10, int(row_count * batch_frac))
+                batch_structure = dict(structure)
+                batch_structure["total_bom_rows"] = batch_row_est
+
+                print(f"SCAN [{filename}]: Stage 2 batch {batch_idx+1}/{n_batches}: "
+                      f"tiles {batch_start+1}-{batch_end} "
+                      f"(~{batch_row_est} rows est)", flush=True)
+                try:
+                    batch_result = _stage2_extract_bom(
+                        claude_client, bom_pdf_b64, batch_structure,
+                        bom_images=batch_images)
+                except Exception as e2:
+                    err_str = str(e2)
+                    if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
+                        print(f"SCAN: Rate limit on Stage 2 batch {batch_idx+1}, "
+                              f"waiting 30s...", flush=True)
+                        time.sleep(30)
+                        batch_result = _stage2_extract_bom(
+                            claude_client, bom_pdf_b64, batch_structure,
+                            bom_images=batch_images)
+                    else:
+                        raise
+
+                batch_items = batch_result.get("bom_line_items", [])
+                total_tokens += batch_result.get("_output_tokens", 0)
+                was_truncated = was_truncated or batch_result.get("_truncated", False)
+                all_batch_items.extend(batch_items)
+                print(f"SCAN [{filename}]: Batch {batch_idx+1} → "
+                      f"{len(batch_items)} items (running total: "
+                      f"{len(all_batch_items)})", flush=True)
+
+            extraction = {"bom_line_items": all_batch_items,
+                          "rows_extracted": len(all_batch_items)}
+            bom_items = all_batch_items
+        else:
+            # Normal single-call path (≤ MAX_TILES_PER_BATCH tiles or PDF mode)
+            try:
+                extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure,
+                                                 bom_images=bom_images)
+            except Exception as e2:
+                err_str = str(e2)
+                if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
+                    print(f"SCAN: Rate limit on Stage 2, waiting 30s...", flush=True)
+                    time.sleep(30)
+                    try:
+                        extraction = _stage2_extract_bom(claude_client, bom_pdf_b64, structure,
+                                                         bom_images=bom_images)
+                    except Exception:
+                        raise e2
+                else:
+                    raise
+
+            total_tokens += extraction.get("_output_tokens", 0)
+            was_truncated = was_truncated or extraction.get("_truncated", False)
+            bom_items = extraction.get("bom_line_items", [])
+
+        print(f"SCAN Stage 2 done in {time.time()-t2:.1f}s — "
+              f"{len(bom_items)} total items", flush=True)
 
         # == STAGE 4 (deterministic) ========================================
         print(f"SCAN [{filename}]: Stage 4 -- validation", flush=True)
@@ -2688,13 +2746,22 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # == STAGE 5 ========================================================
         # Uses BOM-ONLY PDF (not full drawing) — same extracted pages as Stage 2
         t5 = time.time()
+        # For large multi-page BOMs, cap images sent to Stage 5 to avoid
+        # overwhelming Claude. Stage 2 batching already did thorough extraction;
+        # Stage 5 is a spot-check verification pass.
+        stage5_images = bom_images
+        if bom_images and len(bom_images) > MAX_TILES_PER_BATCH:
+            stage5_images = bom_images[:MAX_TILES_PER_BATCH]
+            print(f"SCAN [{filename}]: Stage 5 using first {len(stage5_images)} "
+                  f"of {len(bom_images)} tiles for verification", flush=True)
+
         print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification "
               f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
         try:
             verify_result = _stage5_verify_part_numbers(
                 claude_client, bom_pdf_b64, bom_items,
                 bom_pages=bom_pages, bom_extracted=bom_extracted,
-                bom_raw_text=bom_raw_text, bom_images=bom_images
+                bom_raw_text=bom_raw_text, bom_images=stage5_images
             )
             total_tokens += verify_result.get("_output_tokens", 0)
             bom_items, correction_flags, verification_summary = _apply_corrections(
@@ -2710,7 +2777,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     verify_result = _stage5_verify_part_numbers(
                         claude_client, bom_pdf_b64, bom_items,
                         bom_pages=bom_pages, bom_extracted=bom_extracted,
-                        bom_raw_text=bom_raw_text, bom_images=bom_images
+                        bom_raw_text=bom_raw_text, bom_images=stage5_images
                     )
                     total_tokens += verify_result.get("_output_tokens", 0)
                     bom_items, correction_flags, verification_summary = _apply_corrections(
