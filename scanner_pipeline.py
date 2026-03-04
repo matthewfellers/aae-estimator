@@ -2686,7 +2686,34 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     # → the BOM is image-only, OCR is needed.
                     pypdf_chars = len(bom_raw_text.strip())
                     expected_min_chars = max(300, row_count * 20)
-                    if pypdf_chars < expected_min_chars:
+
+                    # Also check if the text has REAL BOM data, not just
+                    # headers/stamps.  SHX drawings fool the char count:
+                    # column extraction picks up "No. Description Manufacturer
+                    # Part# Qty" headers + title block text on every page,
+                    # giving 6000+ chars — but ZERO actual part numbers.
+                    # Fix: count unique alphanumeric tokens >4 chars that
+                    # aren't noise.  A real extraction has dozens of PNs;
+                    # SHX has <5 unique product tokens.
+                    import re as _re
+                    _noise = {'ISSUED', 'CONSTRUCTION', 'UTILITY', 'MATERIALS',
+                              'DESCRIPTION', 'MANUFACTURER', 'PANEL', 'WIRING',
+                              'DIAGRAM', 'SCHEDULE', 'TERMINAL', 'DRAWING',
+                              'REVISION', 'SHEET', 'OFFICE'}
+                    _tokens = set(_re.findall(
+                        r'\b[A-Z0-9][A-Z0-9\-/]{3,}\b', bom_raw_text.upper()))
+                    _tokens -= _noise
+                    # Remove address/phone patterns
+                    _tokens = {t for t in _tokens
+                               if not _re.match(r'^\d{3}[\.\-]\d{3}', t)}
+                    _has_real_data = len(_tokens) >= max(5, row_count * 0.15)
+                    if not _has_real_data:
+                        print(f"SCAN [{filename}]: Text has {pypdf_chars} chars "
+                              f"but only {len(_tokens)} unique data tokens "
+                              f"(need {max(5, int(row_count*0.15))}+) — "
+                              f"likely SHX vector fonts", flush=True)
+
+                    if pypdf_chars < expected_min_chars or not _has_real_data:
                         # SHX / vector-font drawing — no usable text layer.
                         # For multi-page SHX BOMs, the OCR/hires/tiling pipeline
                         # produces hallucinated part numbers because:
