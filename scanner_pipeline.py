@@ -734,31 +734,28 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
 # ---------------------------------------------------------------------------
 # Claude's vision API downscales images larger than ~1568px on the long side.
 # A 3200x6600 image becomes ~764x1568 internally = ~11px/char = unreadable.
-# Solution: render at 400 DPI, thicken thin SHX strokes, then TILE into
-# sections of ~1500px height so Claude processes each tile at ~1568x1100.
-# This gives ~23px/char = 2× improvement over single-image approach.
-# 400 DPI is optimal: fewer tiles (6 vs 10 at 600 DPI), same effective
-# resolution, and proportionally thicker strokes after enhancement.
-CLAUDE_MAX_DIM = 1568  # Claude's internal scaling threshold
+# Solution: render at 600 DPI, then TILE into sections of ~1500px height
+# so Claude processes each tile at higher effective resolution.
+# NO hard binary threshold — preserve anti-aliasing / gray levels that
+# help Claude distinguish similar SHX characters (3/5, C/O, D/O).
 
 def _enhance_for_vision(img):
-    """Thicken thin SHX vector-font strokes so Claude's vision can read them.
+    """Enhance thin SHX vector-font strokes for Claude's vision.
 
-    SHX fonts are single-stroke (~1-2px at 600 DPI).  MinFilter expands dark
-    pixels, making strokes ~4px — thick enough to survive Claude's downscaling.
+    Uses autocontrast + sharpen to improve readability WITHOUT destroying
+    anti-aliasing. No binary threshold — gray levels help Claude distinguish
+    similar characters (3 vs 5, D vs O) in SHX fonts.
     """
     from PIL import ImageFilter, ImageOps
     img = img.convert("L")
-    img = ImageOps.autocontrast(img, cutoff=1)
-    # Threshold to clean binary
-    img = img.point(lambda x: 0 if x < 180 else 255)
-    # MinFilter(3) expands dark strokes by ~1px in each direction
-    img = img.filter(ImageFilter.MinFilter(3))
+    img = ImageOps.autocontrast(img, cutoff=2)
+    img = img.filter(ImageFilter.SHARPEN)
+    img = img.filter(ImageFilter.SHARPEN)
     return img.convert("RGB")
 
 
 def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
-                                  render_dpi=400):
+                                  render_dpi=600):
     """Re-render BOM crops at high DPI, enhance strokes, and tile for Claude.
 
     1. Deduce crop coordinates by comparing full-page vs OCR-cropped sizes.
@@ -822,11 +819,12 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
             pil_img = _enhance_for_vision(pil_img)
 
             # Tile vertically so Claude sees each section at high resolution.
-            # At 400 DPI, a ~2140x4400 crop → 3 tiles of ~2140x1500 each.
-            # Claude scales each tile to ~1568x1100 = ~23px/char (vs 11px without tiles).
-            # Use overlap of ~50px so table rows at tile boundaries aren't split.
+            # At 600 DPI, a ~3200x6600 crop → 5 tiles of ~3200x1500 each.
+            # Claude scales each tile to ~1568x732 — much better than one
+            # huge image that gets scaled to ~764x1568 (~11px/char).
+            # Use overlap of ~80px so table rows at tile boundaries aren't split.
             tile_h = 1500
-            overlap = 50
+            overlap = 80
             tiles = []
             y = 0
             while y < pix_h:
