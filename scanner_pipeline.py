@@ -831,6 +831,17 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
                 frac_x1 = 1.0
                 frac_y1 = min(1.0, (cr_h + 120) / upscale_h)
 
+                # Cap crop height: OCR crop often extends to the title block
+                # at the bottom, producing 99% page height when the BOM table
+                # is only in the top 15-60%.  Cap at 45% to avoid sending
+                # 3 blank tiles per page (reduces 48 tiles to ~24 for 12 pages).
+                MAX_BOM_FRAC_Y = 0.45
+                if frac_y1 > MAX_BOM_FRAC_Y:
+                    print(f"  [HiRes] Page {pg_idx+1}: capping crop height "
+                          f"{frac_y1:.2f} → {MAX_BOM_FRAC_Y} "
+                          f"(BOM area, not full page)", flush=True)
+                    frac_y1 = MAX_BOM_FRAC_Y
+
                 pw = page.rect.width
                 ph = page.rect.height
                 clip = fitz.Rect(
@@ -2682,6 +2693,13 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 batch_row_est = max(10, int(row_count * batch_frac))
                 batch_structure = dict(structure)
                 batch_structure["total_bom_rows"] = batch_row_est
+                # Clear OCR text for batched calls — the text covers ALL
+                # pages but this batch only has a SUBSET of tiles.  The
+                # mismatch causes Claude to hallucinate parts from other
+                # pages.  Also, SHX font OCR on these drawings is garbage
+                # ("Hoffrriarn" instead of "Hoffman") which actively
+                # misleads Claude.  Let it read the images directly.
+                batch_structure["_bom_raw_text"] = ""
 
                 print(f"SCAN [{filename}]: Stage 2 batch {batch_idx+1}/{n_batches}: "
                       f"tiles {batch_start+1}-{batch_end} "
