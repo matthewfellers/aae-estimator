@@ -2746,9 +2746,9 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # == STAGE 5 ========================================================
         # Uses BOM-ONLY PDF (not full drawing) — same extracted pages as Stage 2
         t5 = time.time()
-        # For large multi-page BOMs, cap images sent to Stage 5 to avoid
-        # overwhelming Claude. Stage 2 batching already did thorough extraction;
-        # Stage 5 is a spot-check verification pass.
+
+        # For batched multi-page BOMs, cap tiles sent to Stage 5 so it
+        # doesn't overwhelm Claude or blow the worker timeout budget.
         stage5_images = bom_images
         if bom_images and len(bom_images) > MAX_TILES_PER_BATCH:
             stage5_images = bom_images[:MAX_TILES_PER_BATCH]
