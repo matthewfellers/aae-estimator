@@ -29,10 +29,7 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
     If hint_pages is provided (from Stage 1), only scans nearby pages (±3)
     to find continuation pages efficiently. If no hints, scans all pages.
 
-    Returns (bom_pages, bom_bboxes) where:
-      - bom_pages: sorted list of 1-based page numbers with BOM tables
-      - bom_bboxes: dict mapping page_num → (x0, y0, x1, y1) PDF-point bbox
-        (only populated for pages found via find_tables Strategy 1)
+    Returns sorted list of 1-based page numbers with BOM tables.
     Uses three strategies (each page tries all until one succeeds):
       1. find_tables(): pages with a table having >= MIN_BOM_ROWS rows
       2. Word-scan: pages containing BOM header keywords in the text layer
@@ -52,7 +49,6 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
         bom_pages = []
-        bom_bboxes = {}  # page_num → (x0, y0, x1, y1) in PDF points
         needs_ocr_scan = []  # pages where text-layer strategies failed
 
         # Scan ALL pages with fast strategies (find_tables + keyword scan).
@@ -80,24 +76,11 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
             try:
                 tabs = page.find_tables()
                 if tabs.tables:
-                    # Collect all qualifying tables on this page
-                    qualifying = [t for t in tabs.tables
-                                  if len(t.rows) >= MIN_BOM_ROWS]
-                    if qualifying:
-                        best = max(qualifying, key=lambda t: len(t.rows))
+                    best = max(tabs.tables, key=lambda t: len(t.rows))
+                    if len(best.rows) >= MIN_BOM_ROWS:
                         bom_pages.append(pg_num)
-                        # Compute union bbox of all qualifying tables
-                        if len(qualifying) == 1:
-                            bom_bboxes[pg_num] = tuple(best.bbox)
-                        else:
-                            x0 = min(t.bbox[0] for t in qualifying)
-                            y0 = min(t.bbox[1] for t in qualifying)
-                            x1 = max(t.bbox[2] for t in qualifying)
-                            y1 = max(t.bbox[3] for t in qualifying)
-                            bom_bboxes[pg_num] = (x0, y0, x1, y1)
                         print(f"  [BOM-detect] Page {pg_num}: table with "
-                              f"{len(best.rows)} rows (find_tables) "
-                              f"bbox={bom_bboxes[pg_num]}", flush=True)
+                              f"{len(best.rows)} rows (find_tables)", flush=True)
                         found = True
             except (AttributeError, Exception):
                 pass
@@ -188,14 +171,14 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
                 print(f"  [BOM-detect] OCR scan error: {ocr_err}", flush=True)
 
         doc.close()
-        return sorted(set(bom_pages)), bom_bboxes
+        return sorted(set(bom_pages))
 
     except ImportError:
         print("  [BOM-detect] fitz not available, skipping", flush=True)
-        return [], {}
+        return []
     except Exception as exc:
         print(f"  [BOM-detect] ERROR: {exc}", flush=True)
-        return [], {}
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -772,13 +755,17 @@ def _enhance_for_vision(img):
 
 
 def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
-                                  render_dpi=600, table_bboxes=None):
+                                  render_dpi=600):
     """Re-render BOM crops at high DPI, enhance strokes, and tile for Claude.
 
-    Three-branch clip logic per page:
-      1. table_bboxes[pg_idx] available → use direct PDF-point bbox + margin
-      2. No bbox but OCR crop available → deduce from full-page vs crop sizes
-      3. Neither → render full page as fallback
+    Clip logic per page:
+      1. Per-page OCR crop available → deduce clip from full-page vs crop sizes
+      2. No crop for this page but reference crop exists → use reference crop
+         dimensions (from first available crop) as fallback
+      3. No crops at all → render full page as fallback
+
+    cropped_images is a dense list aligned with full_page_images (one entry
+    per page, None where OCR found no BOM crop for that page).
 
     Returns:
         list of base64 PNG tiles (may be more than len(pages) due to tiling),
@@ -792,36 +779,48 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         hires = []
 
+        # Compute reference crop dimensions from first available crop.
+        # Used as fallback for pages where OCR didn't produce a crop.
+        ref_cr_w = ref_cr_h = None
+        for ci in cropped_images:
+            if ci is not None:
+                _ci = Image.open(io.BytesIO(base64.b64decode(ci)))
+                ref_cr_w, ref_cr_h = _ci.size
+                del _ci
+                n_crops = sum(1 for c in cropped_images if c is not None)
+                print(f"  [HiRes] Reference BOM crop: {ref_cr_w}x{ref_cr_h}px "
+                      f"(from first of {n_crops} crops)", flush=True)
+                break
+
         for pg_idx in range(len(doc)):
             page = doc[pg_idx]
 
-            # --- Branch 1: direct bbox from find_tables() ---
-            bbox = (table_bboxes[pg_idx]
-                    if table_bboxes and pg_idx < len(table_bboxes)
-                       and table_bboxes[pg_idx] is not None
-                    else None)
+            # Get this page's crop (if available) or use reference
+            crop_b64 = (cropped_images[pg_idx]
+                        if pg_idx < len(cropped_images)
+                           and cropped_images[pg_idx] is not None
+                        else None)
 
-            if bbox is not None:
-                margin = 20  # PDF points (~0.28 in)
-                clip = fitz.Rect(
-                    max(0, bbox[0] - margin),
-                    max(0, bbox[1] - margin),
-                    min(page.rect.width,  bbox[2] + margin),
-                    min(page.rect.height, bbox[3] + margin),
-                )
-                clip_source = "find_tables() bbox"
+            # Determine crop dimensions to use for clip deduction
+            if crop_b64 is not None and pg_idx < len(full_page_images):
+                # Per-page crop — use this page's actual dimensions
+                cr_img = Image.open(io.BytesIO(base64.b64decode(crop_b64)))
+                cr_w, cr_h = cr_img.size
+                del cr_img
+                clip_source = "per-page OCR crop"
+            elif ref_cr_w and pg_idx < len(full_page_images):
+                # No crop for this page — use reference crop dimensions
+                cr_w, cr_h = ref_cr_w, ref_cr_h
+                clip_source = "reference crop (fallback)"
+            else:
+                cr_w = None
 
-            # --- Branch 2: deduce from OCR crop dimensions ---
-            elif (pg_idx < len(full_page_images) and
-                  pg_idx < len(cropped_images)):
+            if cr_w is not None:
+                # Deduce clip from full-page vs crop sizes
                 fp_bytes = base64.b64decode(full_page_images[pg_idx])
                 fp_img = Image.open(io.BytesIO(fp_bytes))
                 fp_w, fp_h = fp_img.size
-
-                cr_bytes = base64.b64decode(cropped_images[pg_idx])
-                cr_img = Image.open(io.BytesIO(cr_bytes))
-                cr_w, cr_h = cr_img.size
-                del fp_img, cr_img
+                del fp_img
 
                 UPSCALE_W = 6000
                 upscale_h = int(fp_h * (UPSCALE_W / fp_w))
@@ -838,12 +837,9 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
                     frac_x0 * pw, frac_y0 * ph,
                     frac_x1 * pw, frac_y1 * ph,
                 )
-                clip_source = "OCR crop deduction"
-
-            # --- Branch 3: no bbox, no crop → full page fallback ---
             else:
                 clip = page.rect
-                clip_source = "full page (no bbox/crop)"
+                clip_source = "full page (no crop available)"
 
             zoom = render_dpi / 72
             mat = fitz.Matrix(zoom, zoom)
@@ -1300,6 +1296,7 @@ def _ocr_images(images_b64):
             if not words:
                 print(f"  [OCR] Page {i + 1}: no words detected", flush=True)
                 all_text.append("")
+                cropped_images_b64.append(None)  # keep dense alignment
                 continue
 
             # Sort by vertical position then horizontal
@@ -1327,6 +1324,8 @@ def _ocr_images(images_b64):
                     print(f"  [OCR] Page {i+1}: cropped BOM table "
                           f"{x1-x0}×{y1-y0}px  (full page was "
                           f"{img_width}×{img_height}px)", flush=True)
+                else:
+                    cropped_images_b64.append(None)  # keep dense alignment
                 print(f"  [OCR] Page {i + 1}: {len(words)} words → "
                       f"column-aware table ({len(col_text)} chars)", flush=True)
                 # Free memory before next page
@@ -1366,6 +1365,7 @@ def _ocr_images(images_b64):
 
             text = "\n".join(text_lines)
             all_text.append(text)
+            cropped_images_b64.append(None)  # flat fallback has no crop
             print(f"  [OCR] Page {i + 1}: {len(words)} words, "
                   f"{len(lines)} lines, {len(text)} chars", flush=True)
             print(f"  [OCR] First 400: {text[:400]!r}", flush=True)
@@ -1377,8 +1377,9 @@ def _ocr_images(images_b64):
         combined = "\n".join(all_text)
         print(f"  [OCR] Total: {len(combined)} chars across "
               f"{len(images_b64)} page(s)", flush=True)
-        if cropped_images_b64:
-            print(f"  [OCR] Cropped BOM images: {len(cropped_images_b64)} "
+        n_crops = sum(1 for c in cropped_images_b64 if c is not None)
+        if n_crops:
+            print(f"  [OCR] Cropped BOM images: {n_crops}/{len(cropped_images_b64)} "
                   f"page(s) — Stage 2 will use these for higher-resolution "
                   f"cell reading", flush=True)
         return combined, cropped_images_b64
@@ -2504,9 +2505,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # programmatic scan with fitz to catch any pages Claude missed.
         bom_pages = structure.get("pages_with_bom", [])
         orig_bom_pages = list(bom_pages)  # save original for comparison
-        table_bboxes_ordered = None  # safety default — set below if bboxes available
         try:
-            prog_pages, prog_bboxes = _detect_bom_pages_programmatic(
+            prog_pages = _detect_bom_pages_programmatic(
                 pdf_b64, hint_pages=bom_pages)
             if prog_pages:
                 merged = sorted(set(bom_pages) | set(prog_pages))
@@ -2526,15 +2526,6 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                   f"{len(merged)} BOM pages", flush=True)
                             structure["total_bom_rows"] = new_estimate
                             row_count = new_estimate
-            # Build ordered bbox list aligned with bom_pages order.
-            # After _extract_pages, the extracted PDF has pages 0..N-1
-            # matching bom_pages[0..N-1], so the list index is the
-            # extracted-PDF page index.
-            if prog_bboxes:
-                table_bboxes_ordered = [prog_bboxes.get(pg) for pg in bom_pages]
-                n_with = sum(1 for b in table_bboxes_ordered if b is not None)
-                print(f"SCAN [{filename}]: Table bboxes available for "
-                      f"{n_with}/{len(bom_pages)} BOM pages", flush=True)
         except Exception as _prog_err:
             print(f"SCAN [{filename}]: Programmatic BOM detection failed: "
                   f"{_prog_err}", flush=True)
@@ -2593,11 +2584,13 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         # Tiling into ~1500px sections → 23px/char (2× improvement).
                         # Stroke enhancement thickens thin SHX lines for better D/O,
                         # 3/5, C/O distinction.
-                        if bom_images_cropped:
+                        # bom_images_cropped is a dense list (one per page,
+                        # None where OCR found no BOM crop for that page)
+                        has_crops = any(c is not None for c in bom_images_cropped)
+                        if has_crops:
                             try:
                                 hires = _render_bom_crops_hires_auto(
-                                    bom_pdf_b64, bom_images, bom_images_cropped,
-                                    table_bboxes=table_bboxes_ordered
+                                    bom_pdf_b64, bom_images, bom_images_cropped
                                 )
                                 if hires:
                                     bom_images = hires
@@ -2605,12 +2598,15 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                           f"({len(hires)} tiles, enhanced) for Stage 2/5",
                                           flush=True)
                                 else:
-                                    bom_images = bom_images_cropped
+                                    # Filter None entries for fallback image list
+                                    bom_images = [c for c in bom_images_cropped
+                                                  if c is not None]
                                     print(f"SCAN [{filename}]: HiRes failed, using OCR crops "
-                                          f"({len(bom_images_cropped)} page(s)) for Stage 2/5",
+                                          f"({len(bom_images)} page(s)) for Stage 2/5",
                                           flush=True)
                             except Exception as _hr_err:
-                                bom_images = bom_images_cropped
+                                bom_images = [c for c in bom_images_cropped
+                                              if c is not None]
                                 print(f"SCAN [{filename}]: HiRes error ({_hr_err}), "
                                       f"using OCR crops", flush=True)
                         # Free intermediate images no longer needed
