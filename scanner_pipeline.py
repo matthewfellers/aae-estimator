@@ -750,7 +750,6 @@ def _enhance_for_vision(img):
     img = img.convert("L")
     img = ImageOps.autocontrast(img, cutoff=2)
     img = img.filter(ImageFilter.SHARPEN)
-    img = img.filter(ImageFilter.SHARPEN)
     return img.convert("RGB")
 
 
@@ -2731,7 +2730,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                             # ~125 DPI and makes BOM text unreadable).
                             # No tiling, no OCR — one clean BOM crop per page.
                             bom_crops = _render_bom_area_direct(
-                                bom_pdf_b64, render_dpi=300)
+                                bom_pdf_b64, render_dpi=400)
                             if bom_crops:
                                 bom_images = bom_crops
                                 structure["_bom_raw_text"] = ""
