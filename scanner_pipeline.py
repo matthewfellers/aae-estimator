@@ -2048,7 +2048,9 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "       If OCR says IR18219K, do NOT change it to IR1821K9.\n"
                 "    3. Verify EACH character against the HIGH-RES IMAGE. SHX fonts confuse:\n"
                 "       D↔O (both oval), 3↔5 (both have curves), S↔5 (nearly identical in SHX!),\n"
-                "       0↔O, 6↔8, B↔8, 1↔I, C↔O\n"
+                "       0↔O, 6↔8, B↔8, 1↔I, C↔O, F↔P (check if top stroke curves back),\n"
+                "       4↔M (check stroke angles), C↔G (check if shape closes),\n"
+                "       9↔J (check for curve vs straight descent)\n"
                 "       CONTEXT HELPS: if a character could be S or 5, consider whether it is\n"
                 "       part of a letter sequence (→ S) or a digit sequence (→ 5).\n"
                 "       Example: 'BOOS' = letters → S not 5.  '1800' = digits → 8 not B.\n"
@@ -2219,7 +2221,8 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
             "    d) If the PN has dashes (e.g., 2090-CSBM1DG-14LN03), verify each segment between dashes independently.\n"
             "  CONFUSABLE CHARACTERS — pay extra attention to:\n"
             "    O (letter) vs 0 (zero), l (lowercase L) vs 1 (one), I (letter I) vs 1 (one),\n"
-            "    B vs 8, S vs 5, G vs 6, Z vs 2, D vs 0\n"
+            "    B vs 8, S vs 5, G vs 6, Z vs 2, D vs 0, F vs P, 4 vs M, C vs G,\n"
+            "    9 vs J, W vs F (look at stroke angles carefully)\n"
             '  If you cannot read even ONE character clearly, write "[UNREADABLE]" for the whole part number.\n'
             "  NEVER fill in a character from your training knowledge. Read it from the PDF or mark it unreadable.\n\n"
         )
@@ -2247,6 +2250,17 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         '  For qty values like "A/R", "AR", "REF", keep the EXACT text as the qty value (e.g. qty:"A/R").\n'
         '  Do NOT convert these to 1 — preserve the original text exactly.\n\n'
 
+        "RULE 6 — SUB-ITEMS:\n"
+        "  Some rows have NO item number — they appear directly below a numbered row\n"
+        "  and represent sub-components, accessories, or end-pieces for that item.\n"
+        "  These are CRITICAL — do NOT skip them. Extract each sub-item as a separate\n"
+        "  JSON object with item_num:0. Common sub-item examples:\n"
+        "    - End sections / end covers for terminal blocks\n"
+        "    - Ground connectors / bus bar pieces under a bus bar assembly\n"
+        "    - Mounting hardware below a main component\n"
+        "  After extracting all numbered rows, go BACK through the table and verify\n"
+        "  you captured every un-numbered row between numbered items.\n\n"
+
         "Return this JSON:\n"
         "{\n"
         '  "bom_line_items": [\n'
@@ -2266,6 +2280,8 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         f"The BOM has {total_rows} numbered rows. You may return MORE than {total_rows} if there are\n"
         "un-numbered sub-item or accessory rows — include every physical row in the table.\n"
         "For sub-items, use item_num:0 (or leave it blank). Do NOT skip them.\n"
+        "IMPORTANT: After finishing, SCAN EVERY PAGE IMAGE AGAIN looking specifically for\n"
+        "rows WITHOUT an item number that you may have missed. These are sub-items.\n"
         "If rows_extracted < " + str(total_rows) + ", you missed numbered rows — go back and find them."
     )
 
@@ -2937,7 +2953,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                             # ~125 DPI and makes BOM text unreadable).
                             # No tiling, no OCR — one clean BOM crop per page.
                             bom_crops, bom_tpp = _render_bom_area_direct(
-                                bom_pdf_b64, render_dpi=400)
+                                bom_pdf_b64, render_dpi=600)
                             if bom_crops:
                                 bom_images = bom_crops
                                 hires_tiles_per_page = bom_tpp
