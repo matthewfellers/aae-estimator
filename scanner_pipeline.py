@@ -779,32 +779,74 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
         # ── Step 1: find BOM header coordinates from any page ──
         # fitz can extract real-text headers even when BOM DATA is SHX.
         # Look for column header words: No., Description, Manufacturer, etc.
+        #
+        # Rotated pages (e.g. 270°) return word coords in mediabox space
+        # but get_pixmap(clip=...) expects display space.  Transform all
+        # word coords to display space via page.rotation_matrix so the
+        # clip is always in the correct coordinate system.
         ref_clip = None
+        hdr_data = None          # (x0, y0, x1, pg_idx) in display coords
+        title_block_y = None     # topmost title-block text y in display coords
         BOM_KEYWORDS = {"No.", "Description", "Manufacturer", "Part#",
                         "Part", "Qty", "QTY", "DESCRIPTION", "MANUFACTURER"}
         for pg_idx in range(n_pages):
             page = doc[pg_idx]
-            words = page.get_text("words")
-            hits = [w for w in words
-                    if w[4] in BOM_KEYWORDS or w[4].upper() in BOM_KEYWORDS]
-            if len(hits) >= 3:
-                # Found BOM headers — compute bounding box
-                hdr_x0 = min(w[0] for w in hits) - 30   # small left margin
-                hdr_y0 = min(w[1] for w in hits) - 30   # above header row
-                hdr_x1 = max(w[2] for w in hits) + 30   # small right margin
-                # BOM table extends downward — use generous bottom bound.
-                # Most BOMs are in the top 40-55% of a D-size page.
-                hdr_y1 = page_h * 0.58
-                ref_clip = fitz.Rect(hdr_x0, hdr_y0, hdr_x1, hdr_y1)
-                print(f"  [BOM-Direct] Found headers on page {pg_idx+1}: "
-                      f"clip={ref_clip}", flush=True)
-                break
+            raw_words = page.get_text("words")
+            rot_mat = page.rotation_matrix
 
-        if ref_clip is None:
-            # Fallback: upper-right area of D-size drawing (typical BOM location)
-            ref_clip = fitz.Rect(page_w * 0.55, 0, page_w, page_h * 0.58)
+            # Convert to display coordinates (identity for non-rotated pages)
+            disp_words = []
+            for w in raw_words:
+                if page.rotation:
+                    p0 = fitz.Point(w[0], w[1]) * rot_mat
+                    p1 = fitz.Point(w[2], w[3]) * rot_mat
+                    disp_words.append((min(p0.x, p1.x), min(p0.y, p1.y),
+                                       max(p0.x, p1.x), max(p0.y, p1.y),
+                                       w[4]))
+                else:
+                    disp_words.append((w[0], w[1], w[2], w[3], w[4]))
+
+            # Detect title-block boundary: find the topmost extractable
+            # text in the bottom 15% of the display page.  Engineering
+            # drawings always have real-text company info / address in
+            # the title block.  This marks the bottom of the BOM area.
+            for dw in disp_words:
+                if dw[1] > page_h * 0.85:
+                    if title_block_y is None or dw[1] < title_block_y:
+                        title_block_y = dw[1]
+
+            # Check for BOM column headers (only keep the first page hit)
+            if hdr_data is None:
+                hits = [dw for dw in disp_words
+                        if dw[4] in BOM_KEYWORDS or dw[4].upper() in BOM_KEYWORDS]
+                if len(hits) >= 3:
+                    hdr_data = (
+                        min(h[0] for h in hits) - 80,   # left margin
+                        min(h[1] for h in hits) - 30,   # above header row
+                        max(h[2] for h in hits) + 30,   # right margin
+                        pg_idx,
+                    )
+
+        # Bottom clip: use title-block boundary, else generous fallback.
+        # Never clip more aggressively than 55% of page height.
+        if title_block_y is not None:
+            bom_y1 = title_block_y
+        else:
+            bom_y1 = page_h * 0.92
+        bom_y1 = max(bom_y1, page_h * 0.55)
+
+        if hdr_data is not None:
+            hx0, hy0, hx1, hpg = hdr_data
+            ref_clip = fitz.Rect(hx0, hy0, hx1, bom_y1)
+            print(f"  [BOM-Direct] Found headers on page {hpg+1}: "
+                  f"clip={ref_clip}  (title_block_y={title_block_y})",
+                  flush=True)
+        else:
+            # Fallback: upper-right area of drawing (typical BOM location)
+            ref_clip = fitz.Rect(page_w * 0.55, 0, page_w, bom_y1)
             print(f"  [BOM-Direct] No headers found, using upper-right fallback: "
-                  f"clip={ref_clip}", flush=True)
+                  f"clip={ref_clip}  (title_block_y={title_block_y})",
+                  flush=True)
 
         # ── Step 2: render BOM area from each page at high DPI + tile ──
         # Without tiling, Claude's API downscales a ~3400x5400 image to
