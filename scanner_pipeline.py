@@ -754,6 +754,94 @@ def _enhance_for_vision(img):
     return img.convert("RGB")
 
 
+def _render_bom_area_direct(pdf_b64, render_dpi=300):
+    """Render JUST the BOM table area from each page at high DPI — no tiling.
+
+    Uses fitz word coordinates to find BOM column headers (Description,
+    Manufacturer, Part#, Qty) and renders a tight clip around the BOM table.
+    For pages where headers aren't extractable (pure SHX), uses reference
+    coordinates from a page that has them.
+
+    Returns list of base64 PNG images (one per page).  Each image is a
+    crop of the BOM area, enhanced for vision — ready to send directly
+    to Claude as a single image per API call.  Returns [] on failure.
+    """
+    try:
+        import fitz
+        from PIL import Image
+
+        pdf_bytes = base64.b64decode(pdf_b64)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        n_pages = len(doc)
+        page_w = doc[0].rect.width if n_pages else 2592
+        page_h = doc[0].rect.height if n_pages else 1728
+
+        # ── Step 1: find BOM header coordinates from any page ──
+        # fitz can extract real-text headers even when BOM DATA is SHX.
+        # Look for column header words: No., Description, Manufacturer, etc.
+        ref_clip = None
+        BOM_KEYWORDS = {"No.", "Description", "Manufacturer", "Part#",
+                        "Part", "Qty", "QTY", "DESCRIPTION", "MANUFACTURER"}
+        for pg_idx in range(n_pages):
+            page = doc[pg_idx]
+            words = page.get_text("words")
+            hits = [w for w in words
+                    if w[4] in BOM_KEYWORDS or w[4].upper() in BOM_KEYWORDS]
+            if len(hits) >= 3:
+                # Found BOM headers — compute bounding box
+                hdr_x0 = min(w[0] for w in hits) - 30   # small left margin
+                hdr_y0 = min(w[1] for w in hits) - 30   # above header row
+                hdr_x1 = max(w[2] for w in hits) + 30   # small right margin
+                # BOM table extends downward — use generous bottom bound.
+                # Most BOMs are in the top 40-55% of a D-size page.
+                hdr_y1 = page_h * 0.58
+                ref_clip = fitz.Rect(hdr_x0, hdr_y0, hdr_x1, hdr_y1)
+                print(f"  [BOM-Direct] Found headers on page {pg_idx+1}: "
+                      f"clip={ref_clip}", flush=True)
+                break
+
+        if ref_clip is None:
+            # Fallback: upper-right area of D-size drawing (typical BOM location)
+            ref_clip = fitz.Rect(page_w * 0.55, 0, page_w, page_h * 0.58)
+            print(f"  [BOM-Direct] No headers found, using upper-right fallback: "
+                  f"clip={ref_clip}", flush=True)
+
+        # ── Step 2: render BOM area from each page at high DPI ──
+        images_b64 = []
+        for pg_idx in range(n_pages):
+            page = doc[pg_idx]
+            zoom = render_dpi / 72
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, clip=ref_clip, alpha=False)
+
+            # Convert to PIL for enhancement
+            pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            del pix
+
+            # Enhance thin SHX strokes for better readability
+            pil_img = _enhance_for_vision(pil_img)
+
+            # Encode to PNG
+            buf = io.BytesIO()
+            pil_img.save(buf, format="PNG", optimize=True)
+            img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            images_b64.append(img_b64)
+
+            print(f"  [BOM-Direct] Page {pg_idx+1}: {pil_img.size[0]}x{pil_img.size[1]} "
+                  f"@ {render_dpi}DPI ({len(buf.getvalue())/1024:.0f}KB)",
+                  flush=True)
+            del pil_img, buf
+
+        doc.close()
+        import gc; gc.collect()
+        print(f"  [BOM-Direct] Rendered {len(images_b64)} BOM crop images", flush=True)
+        return images_b64
+
+    except Exception as exc:
+        print(f"  [BOM-Direct] ERROR: {exc}", flush=True)
+        return []
+
+
 def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
                                   render_dpi=600):
     """Re-render BOM crops at high DPI, enhance strokes, and tile for Claude.
@@ -1665,8 +1753,27 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
     # Critical: tell Claude exactly what it's looking at
     bom_extracted = structure.get("_bom_extracted", False)
     using_images = bom_images is not None and len(bom_images) > 0
+    text_source = structure.get("_bom_text_source", "pypdf")
     if bom_extracted:
-        if using_images:
+        if using_images and text_source == "image_only":
+            # Direct BOM crop image — single image of the BOM area, not tiles
+            page_instruction = (
+                "This is a HIGH-RESOLUTION image of the BILL OF MATERIALS table\n"
+                "cropped directly from an engineering drawing.\n"
+                "The image shows ONLY the BOM table area. Read EVERY row.\n\n"
+                "This drawing uses SHX vector fonts (CAD line-art text).\n"
+                "The text IS readable — read each character carefully from the image.\n\n"
+                "=== CRITICAL: READ THE IMAGE — DO NOT INVENT ===\n"
+                "RULE 1 — Read character-by-character: Part numbers like 'A24H2008SSLP'\n"
+                "or '3046184' must be copied EXACTLY as shown. Do NOT substitute similar\n"
+                "part numbers from your training data.\n"
+                "RULE 2 — Never skip rows: Return a JSON entry for EVERY numbered row.\n"
+                "RULE 3 — If a character is unclear, write your best visual read.\n"
+                "An imperfect read is far better than inventing a different part number.\n"
+                "RULE 4 — Do NOT confuse this BOM with any BOM you may have seen before.\n"
+                "These are UNIQUE part numbers for THIS specific project.\n\n"
+            )
+        elif using_images:
             page_instruction = (
                 "The BOM table is provided as HIGH-RESOLUTION image tile(s).\n"
                 "Each tall BOM page has been split into multiple overlapping vertical tiles\n"
@@ -2592,16 +2699,30 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         # the resolution.  This matches how normal drawings work.
                         n_bom_pages = len(bom_pages)
                         if n_bom_pages > 1:
-                            # Multi-page SHX: skip OCR/hires, use per-page PDF mode
-                            bom_images = None  # triggers PDF mode in Stage 2
-                            structure["_bom_raw_text"] = ""
-                            structure["_bom_text_source"] = "pypdf"
-                            # Flag for per-page PDF batching in Stage 2
-                            structure["_per_page_pdf"] = True
-                            print(f"SCAN [{filename}]: Multi-page SHX drawing "
-                                  f"({n_bom_pages} BOM pages, {pypdf_chars} chars) "
-                                  f"— using per-page PDF mode (no OCR/tiling)",
-                                  flush=True)
+                            # Multi-page SHX: render just the BOM area at high
+                            # DPI (not the full D-size page which gets capped to
+                            # ~125 DPI and makes BOM text unreadable).
+                            # No tiling, no OCR — one clean BOM crop per page.
+                            bom_crops = _render_bom_area_direct(
+                                bom_pdf_b64, render_dpi=300)
+                            if bom_crops:
+                                bom_images = bom_crops
+                                structure["_bom_raw_text"] = ""
+                                structure["_bom_text_source"] = "image_only"
+                                structure["_per_page_image"] = True
+                                print(f"SCAN [{filename}]: Multi-page SHX "
+                                      f"({n_bom_pages} pages) — rendered "
+                                      f"{len(bom_crops)} BOM crops at 300 DPI "
+                                      f"(direct, no tiling)", flush=True)
+                            else:
+                                # Fallback: per-page PDF mode
+                                bom_images = None
+                                structure["_bom_raw_text"] = ""
+                                structure["_bom_text_source"] = "pypdf"
+                                structure["_per_page_pdf"] = True
+                                print(f"SCAN [{filename}]: BOM crop render "
+                                      f"failed, using per-page PDF fallback",
+                                      flush=True)
                         else:
                             # Single-page SHX: use OCR + hires pipeline (proven to work)
                             ocr_text, bom_images_cropped, ocr_per_page = _ocr_images(bom_images)
@@ -2669,15 +2790,61 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         print(f"SCAN [{filename}]: Starting Stage 2 -- extracting {row_count} rows "
               f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
 
-        # --- Per-page PDF batching for multi-page SHX drawings ---
-        # For multi-page SHX/vector drawings, the OCR/hires/tiling pipeline
-        # causes Claude to hallucinate part numbers from training data (even
-        # when tiles are perfectly readable).  Instead, extract each BOM page
-        # as a single-page PDF and send it directly — exactly how normal
-        # drawings work.  SHX vector strokes survive page extraction intact.
+        # --- Per-page batching for multi-page SHX drawings ---
+        # D-size drawings (36"x24") get capped to ~125 DPI when rendered as
+        # full pages (MAX_LONG_SIDE_PX=4500).  BOM text becomes ~5px tall =
+        # unreadable → Claude hallucinates from training data.
+        # Fix: render just the BOM table area at 300 DPI → one image per page.
+        use_per_page_image = structure.get("_per_page_image", False)
         use_per_page_pdf = structure.get("_per_page_pdf", False)
 
-        if use_per_page_pdf and bom_pages:
+        if use_per_page_image and bom_images:
+            n_pages = len(bom_images)
+            print(f"SCAN [{filename}]: Per-page IMAGE mode — sending {n_pages} "
+                  f"BOM crop images to Claude (one per call)", flush=True)
+
+            all_batch_items = []
+            for pg_idx, img_b64 in enumerate(bom_images):
+                page_structure = dict(structure)
+                page_row_est = max(5, row_count // n_pages)
+                page_structure["total_bom_rows"] = page_row_est
+                page_structure["_bom_extracted"] = True
+                page_structure["pages_with_bom"] = [1]
+                page_structure["_bom_raw_text"] = ""
+                page_structure["_bom_text_source"] = "image_only"
+
+                print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
+                      f"BOM crop image, ~{page_row_est} rows est", flush=True)
+
+                try:
+                    page_result = _stage2_extract_bom(
+                        claude_client, bom_pdf_b64, page_structure,
+                        bom_images=[img_b64])
+                except Exception as e2:
+                    err_str = str(e2)
+                    if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
+                        print(f"SCAN: Rate limit on page {pg_idx+1}, "
+                              f"waiting 30s...", flush=True)
+                        time.sleep(30)
+                        page_result = _stage2_extract_bom(
+                            claude_client, bom_pdf_b64, page_structure,
+                            bom_images=[img_b64])
+                    else:
+                        raise
+
+                page_items = page_result.get("bom_line_items", [])
+                total_tokens += page_result.get("_output_tokens", 0)
+                was_truncated = was_truncated or page_result.get("_truncated", False)
+                all_batch_items.extend(page_items)
+                print(f"SCAN [{filename}]: Page {pg_idx+1} → "
+                      f"{len(page_items)} items (running total: "
+                      f"{len(all_batch_items)})", flush=True)
+
+            extraction = {"bom_line_items": all_batch_items,
+                          "rows_extracted": len(all_batch_items)}
+            bom_items = all_batch_items
+
+        elif use_per_page_pdf and bom_pages:
             n_pages = len(bom_pages)
             print(f"SCAN [{filename}]: Per-page PDF mode — sending {n_pages} "
                   f"individual BOM pages to Claude", flush=True)
@@ -2768,10 +2935,14 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         t5 = time.time()
 
         # For multi-page BOMs, Stage 5 only needs to verify a sample of pages.
-        # Send first page's tiles (single-page SHX) or first page PDF (multi-page SHX).
         stage5_images = bom_images
         stage5_pdf = bom_pdf_b64
-        if use_per_page_pdf and bom_pages:
+        if use_per_page_image and bom_images:
+            # Per-page image mode: send first BOM crop for verification
+            stage5_images = [bom_images[0]]
+            print(f"SCAN [{filename}]: Stage 5 using page 1 BOM crop for verification",
+                  flush=True)
+        elif use_per_page_pdf and bom_pages:
             # Per-page PDF mode: send first BOM page as single-page PDF
             stage5_pdf, _, _ = _extract_pages(pdf_b64, [bom_pages[0]])
             stage5_images = None
