@@ -818,6 +818,20 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
             # Thicken thin SHX strokes for Claude's vision
             pil_img = _enhance_for_vision(pil_img)
 
+            # Claude API limits images to 2000px per dimension when sending
+            # many images (>5).  D-size drawings at 600 DPI can produce crops
+            # 6000+ px wide.  Scale down to fit the limit before tiling.
+            CLAUDE_MULTI_IMG_MAX = 2000
+            if pix_w > CLAUDE_MULTI_IMG_MAX:
+                scale = CLAUDE_MULTI_IMG_MAX / pix_w
+                new_w = CLAUDE_MULTI_IMG_MAX
+                new_h = int(pix_h * scale)
+                pil_img = pil_img.resize((new_w, new_h), Image.LANCZOS)
+                print(f"  [HiRes] Page {pg_idx+1}: scaled {pix_w}x{pix_h} → "
+                      f"{new_w}x{new_h} (max {CLAUDE_MULTI_IMG_MAX}px for multi-image)",
+                      flush=True)
+                pix_w, pix_h = new_w, new_h
+
             # Tile vertically so Claude sees each section at high resolution.
             # At 600 DPI, a ~3200x6600 crop → 5 tiles of ~3200x1500 each.
             # Claude scales each tile to ~1568x732 — much better than one
