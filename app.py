@@ -2294,7 +2294,16 @@ def bom_from_scan():
     _seen_pn = _OD()
     for _itm in line_items:  # preserve scanner's document order (page 1→2→3, top→bottom)
         _pn_key = (_itm.get("part_number") or "").strip().upper()
-        if _pn_key and _pn_key != "[UNREADABLE]":
+        # Skip consolidation for non-numeric qty (e.g. "A/R", "AR", "REF")
+        _itm_qty = _itm.get("qty", 1)
+        _is_numeric_qty = isinstance(_itm_qty, (int, float))
+        if not _is_numeric_qty:
+            try:
+                int(_itm_qty)
+                _is_numeric_qty = True
+            except (ValueError, TypeError):
+                pass
+        if _pn_key and _pn_key != "[UNREADABLE]" and _is_numeric_qty:
             if _pn_key in _seen_pn:
                 # Duplicate part number — sum quantities, keep first row's other fields
                 try:
@@ -2306,6 +2315,10 @@ def bom_from_scan():
                     pass  # keep existing qty if int conversion fails
             else:
                 _seen_pn[_pn_key] = dict(_itm)
+        elif _pn_key and _pn_key != "[UNREADABLE]":
+            # Non-numeric qty (A/R, REF, etc.) — keep as separate row, don't consolidate
+            _unique_key = f"__ar_{_pn_key}_{_itm.get('item_num', id(_itm))}"
+            _seen_pn[_unique_key] = dict(_itm)
         else:
             # Blank or unreadable part number — can't safely consolidate, keep as-is
             _unique_key = f"__nopn_{_itm.get('item_num', id(_itm))}"
@@ -2334,18 +2347,22 @@ def bom_from_scan():
         qty_raw = itm.get("qty", 1) or 1
         try:
             qty_val = int(qty_raw)
+            qty_display = qty_val
+            qty_for_cost = qty_val
         except (ValueError, TypeError):
-            qty_val = 1
+            # Non-numeric qty (e.g. "A/R", "REF") — keep as text
+            qty_display = str(qty_raw)
+            qty_for_cost = 0
         vals = [
             item_counter,                          # A: sequential ITEM #
             itm.get("part_number", ""),            # B: PART NUMBER
             itm.get("description", ""),            # C: DESCRIPTION
-            qty_val,                               # D: QTY (consolidated)
+            qty_display,                           # D: QTY (A/R stays as text)
             itm.get("unit", "ea"),                 # E: U/M
             mfr,                                   # F: MANUFACTURER
             vendor,                                # G: VENDOR
             unit_cost,                             # H: UNIT COST
-            unit_cost * qty_val,                   # I: TOTAL COST
+            unit_cost * qty_for_cost,              # I: TOTAL COST
             itm.get("notes", "")                   # J: NOTES
         ]
         for ci, val in enumerate(vals, 1):
@@ -2540,7 +2557,12 @@ def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estima
         row += 1
 
     # Total row
-    total_qty = sum(int(itm.get("qty") or 1) for itm in items)
+    def _safe_qty(q):
+        try:
+            return int(q)
+        except (ValueError, TypeError):
+            return 0
+    total_qty = sum(_safe_qty(itm.get("qty") or 1) for itm in items)
     ws.merge_cells(f"A{row}:C{row}")
     tl = ws.cell(row=row, column=1, value=f"TOTAL LINE ITEMS — {vendor_name.upper()}:")
     tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
@@ -3566,7 +3588,10 @@ def bom_convert_excel():
             tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
             tl.fill = PatternFill("solid", fgColor=LIGHT_RED)
             tl.alignment = Alignment(horizontal="right", vertical="center")
-            tv = ws.cell(row=row, column=4, value=sum(int(itm.get("qty") or 1) for itm in line_items))
+            def _sq(q):
+                try: return int(q)
+                except (ValueError, TypeError): return 0
+            tv = ws.cell(row=row, column=4, value=sum(_sq(itm.get("qty") or 1) for itm in line_items))
             tv.font = Font(name="Arial", bold=True, color="008800", size=11)
             tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
             tv.alignment = Alignment(horizontal="center", vertical="center")
