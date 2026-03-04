@@ -742,14 +742,20 @@ def _extract_bom_columns(pdf_bytes, page_numbers):
 def _enhance_for_vision(img):
     """Enhance thin SHX vector-font strokes for Claude's vision.
 
-    Uses autocontrast + sharpen to improve readability WITHOUT destroying
-    anti-aliasing. No binary threshold — gray levels help Claude distinguish
-    similar characters (3 vs 5, D vs O) in SHX fonts.
+    SHX fonts render as 1px strokes at 400 DPI — too thin for reliable
+    character discrimination (G vs C, 8 vs B, 9 vs M look identical).
+
+    Pipeline:
+      1. Grayscale conversion
+      2. Autocontrast — normalize histogram, boost faint strokes
+      3. MinFilter(3) — morphological dilation of dark pixels, thickens
+         1px strokes to 2-3px so distinguishing features become visible
+      4. Sharpen — restore edge crispness after dilation
     """
     from PIL import ImageFilter, ImageOps
     img = img.convert("L")
     img = ImageOps.autocontrast(img, cutoff=2)
-    img = img.filter(ImageFilter.SHARPEN)
+    img = img.filter(ImageFilter.MinFilter(3))     # thicken thin strokes
     img = img.filter(ImageFilter.SHARPEN)
     return img.convert("RGB")
 
