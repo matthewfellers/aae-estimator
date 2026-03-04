@@ -750,6 +750,7 @@ def _enhance_for_vision(img):
     img = img.convert("L")
     img = ImageOps.autocontrast(img, cutoff=2)
     img = img.filter(ImageFilter.SHARPEN)
+    img = img.filter(ImageFilter.SHARPEN)
     return img.convert("RGB")
 
 
@@ -805,8 +806,15 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
             print(f"  [BOM-Direct] No headers found, using upper-right fallback: "
                   f"clip={ref_clip}", flush=True)
 
-        # ── Step 2: render BOM area from each page at high DPI ──
-        images_b64 = []
+        # ── Step 2: render BOM area from each page at high DPI + tile ──
+        # Without tiling, Claude's API downscales a ~3400x5400 image to
+        # ~1000x1568, making characters ~4px tall regardless of render DPI.
+        # Tiling into ~1500px strips keeps each tile within Claude's native
+        # resolution — characters stay at full rendered size (~14px at 400 DPI).
+        all_tiles = []
+        tiles_per_page = []
+        tile_h = 1500
+        overlap = 80
         for pg_idx in range(n_pages):
             page = doc[pg_idx]
             zoom = render_dpi / 72
@@ -815,30 +823,45 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
 
             # Convert to PIL for enhancement
             pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            pix_w, pix_h = pil_img.size
             del pix
 
             # Enhance thin SHX strokes for better readability
             pil_img = _enhance_for_vision(pil_img)
 
-            # Encode to PNG
-            buf = io.BytesIO()
-            pil_img.save(buf, format="PNG", optimize=True)
-            img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-            images_b64.append(img_b64)
+            # Tile vertically with overlap so table rows aren't split
+            page_tiles = []
+            y = 0
+            while y < pix_h:
+                y_end = min(y + tile_h, pix_h)
+                tile = pil_img.crop((0, y, pix_w, y_end))
+                buf = io.BytesIO()
+                tile.save(buf, format="PNG", optimize=True)
+                page_tiles.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+                tile_kb = len(buf.getvalue()) / 1024
+                print(f"  [BOM-Direct] Page {pg_idx+1} tile {len(page_tiles)}: "
+                      f"{pix_w}x{y_end-y} ({tile_kb:.0f}KB) [y={y}-{y_end}]",
+                      flush=True)
+                del tile, buf
+                if y_end >= pix_h:
+                    break
+                y = y_end - overlap
 
-            print(f"  [BOM-Direct] Page {pg_idx+1}: {pil_img.size[0]}x{pil_img.size[1]} "
-                  f"@ {render_dpi}DPI ({len(buf.getvalue())/1024:.0f}KB)",
-                  flush=True)
-            del pil_img, buf
+            all_tiles.extend(page_tiles)
+            tiles_per_page.append(len(page_tiles))
+            print(f"  [BOM-Direct] Page {pg_idx+1}: {pix_w}x{pix_h} @ {render_dpi}DPI "
+                  f"-> {len(page_tiles)} tiles", flush=True)
+            del pil_img
+            import gc; gc.collect()
 
         doc.close()
-        import gc; gc.collect()
-        print(f"  [BOM-Direct] Rendered {len(images_b64)} BOM crop images", flush=True)
-        return images_b64
+        print(f"  [BOM-Direct] Rendered {len(all_tiles)} tiles from {n_pages} pages",
+              flush=True)
+        return all_tiles, tiles_per_page
 
     except Exception as exc:
         print(f"  [BOM-Direct] ERROR: {exc}", flush=True)
-        return []
+        return [], []
 
 
 def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
@@ -2729,17 +2752,19 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                             # DPI (not the full D-size page which gets capped to
                             # ~125 DPI and makes BOM text unreadable).
                             # No tiling, no OCR — one clean BOM crop per page.
-                            bom_crops = _render_bom_area_direct(
+                            bom_crops, bom_tpp = _render_bom_area_direct(
                                 bom_pdf_b64, render_dpi=400)
                             if bom_crops:
                                 bom_images = bom_crops
+                                hires_tiles_per_page = bom_tpp
                                 structure["_bom_raw_text"] = ""
                                 structure["_bom_text_source"] = "image_only"
                                 structure["_per_page_image"] = True
                                 print(f"SCAN [{filename}]: Multi-page SHX "
                                       f"({n_bom_pages} pages) — rendered "
-                                      f"{len(bom_crops)} BOM crops at 300 DPI "
-                                      f"(direct, no tiling)", flush=True)
+                                      f"{len(bom_crops)} tiles at 400 DPI "
+                                      f"({n_bom_pages} pages, tiled)",
+                                      flush=True)
                             else:
                                 # Fallback: per-page PDF mode
                                 bom_images = None
@@ -2825,12 +2850,23 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         use_per_page_pdf = structure.get("_per_page_pdf", False)
 
         if use_per_page_image and bom_images:
-            n_pages = len(bom_images)
-            print(f"SCAN [{filename}]: Per-page IMAGE mode — sending {n_pages} "
-                  f"BOM crop images to Claude (one per call)", flush=True)
+            # Group tiles by page: hires_tiles_per_page tells us how many
+            # tiles belong to each page.  Without it, each image = one page.
+            if hires_tiles_per_page:
+                n_pages = len(hires_tiles_per_page)
+            else:
+                n_pages = len(bom_images)
+                hires_tiles_per_page = [1] * n_pages
+            print(f"SCAN [{filename}]: Per-page IMAGE mode — {n_pages} pages, "
+                  f"{len(bom_images)} tiles total", flush=True)
 
             all_batch_items = []
-            for pg_idx, img_b64 in enumerate(bom_images):
+            tile_offset = 0
+            for pg_idx in range(n_pages):
+                n_tiles = hires_tiles_per_page[pg_idx]
+                page_tiles = bom_images[tile_offset:tile_offset + n_tiles]
+                tile_offset += n_tiles
+
                 page_structure = dict(structure)
                 page_row_est = max(5, row_count // n_pages)
                 page_structure["total_bom_rows"] = page_row_est
@@ -2840,12 +2876,12 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 page_structure["_bom_text_source"] = "image_only"
 
                 print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
-                      f"BOM crop image, ~{page_row_est} rows est", flush=True)
+                      f"{n_tiles} tile(s), ~{page_row_est} rows est", flush=True)
 
                 try:
                     page_result = _stage2_extract_bom(
                         claude_client, bom_pdf_b64, page_structure,
-                        bom_images=[img_b64])
+                        bom_images=page_tiles)
                 except Exception as e2:
                     err_str = str(e2)
                     if "429" in err_str or "rate_limit" in err_str.lower() or "overloaded" in err_str.lower():
@@ -2854,7 +2890,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                         time.sleep(30)
                         page_result = _stage2_extract_bom(
                             claude_client, bom_pdf_b64, page_structure,
-                            bom_images=[img_b64])
+                            bom_images=page_tiles)
                     else:
                         raise
 
@@ -2964,10 +3000,15 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         stage5_images = bom_images
         stage5_pdf = bom_pdf_b64
         if use_per_page_image and bom_images:
-            # Per-page image mode: send first BOM crop for verification
-            stage5_images = [bom_images[0]]
-            print(f"SCAN [{filename}]: Stage 5 using page 1 BOM crop for verification",
-                  flush=True)
+            # Per-page image mode: send first page's tiles for verification
+            if hires_tiles_per_page:
+                first_page_tiles = hires_tiles_per_page[0]
+                stage5_images = bom_images[:first_page_tiles]
+            else:
+                first_page_tiles = 1
+                stage5_images = [bom_images[0]]
+            print(f"SCAN [{filename}]: Stage 5 using page 1 ({first_page_tiles} "
+                  f"tile(s)) for verification", flush=True)
         elif use_per_page_pdf and bom_pages:
             # Per-page PDF mode: send first BOM page as single-page PDF
             stage5_pdf, _, _ = _extract_pages(pdf_b64, [bom_pages[0]])
