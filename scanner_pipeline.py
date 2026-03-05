@@ -51,20 +51,23 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
         bom_pages = []
         needs_ocr_scan = []  # pages where text-layer strategies failed
 
-        # Scan ALL pages with fast strategies (find_tables + keyword scan).
-        # These are milliseconds per page, so no need to limit the range.
-        # Only OCR (Strategy 3) is slow and gets limited to ±3 of hints.
-        pages_to_scan = list(range(1, total_pages + 1))
+        # When Stage 1 provides hint pages, limit ALL strategies to nearby
+        # pages (±3).  Engineering drawings have tables on schematic pages
+        # (terminal schedules, wire lists, I/O tables) that match find_tables()
+        # but are NOT BOMs.  Only look for continuations near known BOM pages.
         if hint_pages:
-            ocr_scan_set = set()
+            nearby_set = set()
             for hp in hint_pages:
                 for offset in range(-3, 4):  # hp-3 … hp+3
                     pg = hp + offset
                     if 1 <= pg <= total_pages:
-                        ocr_scan_set.add(pg)
-            print(f"  [BOM-detect] Scanning all {total_pages} pages "
-                  f"(OCR limited to ±3 of hints {hint_pages})", flush=True)
+                        nearby_set.add(pg)
+            pages_to_scan = sorted(nearby_set)
+            ocr_scan_set = nearby_set
+            print(f"  [BOM-detect] Scanning {len(pages_to_scan)} pages near "
+                  f"hints {hint_pages} (±3)", flush=True)
         else:
+            pages_to_scan = list(range(1, total_pages + 1))
             ocr_scan_set = set(range(1, total_pages + 1))
 
         for pg_num in pages_to_scan:
@@ -3215,78 +3218,85 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # == STAGE 5 ========================================================
         # Uses BOM-ONLY PDF (not full drawing) — same extracted pages as Stage 2
         t5 = time.time()
-
-        # For multi-page BOMs, Stage 5 only needs to verify a sample of pages.
-        stage5_images = bom_images
-        stage5_pdf = bom_pdf_b64
+        _elapsed_so_far = t5 - pipeline_start
+        _MAX_STAGE5_TIME = 600  # Skip Stage 5 if scan already took >600s
         _MAX_STAGE5_TILES = 10  # Cap tiles to avoid worker timeout
-        if use_per_page_image and bom_images:
-            # Per-page image mode: send first page's tiles for verification
-            if hires_tiles_per_page:
+
+        if _elapsed_so_far > _MAX_STAGE5_TIME:
+            print(f"SCAN [{filename}]: Skipping Stage 5 — elapsed "
+                  f"{_elapsed_so_far:.0f}s already exceeds {_MAX_STAGE5_TIME}s "
+                  f"safety limit (Stage 4 validation still applied)", flush=True)
+        else:
+            # For multi-page BOMs, Stage 5 only needs to verify a sample of pages.
+            stage5_images = bom_images
+            stage5_pdf = bom_pdf_b64
+            if use_per_page_image and bom_images:
+                # Per-page image mode: send first page's tiles for verification
+                if hires_tiles_per_page:
+                    first_page_tiles = min(hires_tiles_per_page[0], _MAX_STAGE5_TILES)
+                    stage5_images = bom_images[:first_page_tiles]
+                else:
+                    first_page_tiles = 1
+                    stage5_images = [bom_images[0]]
+                print(f"SCAN [{filename}]: Stage 5 using page 1 ({first_page_tiles} "
+                      f"tile(s)) for verification", flush=True)
+            elif use_per_page_pdf and bom_pages:
+                # Per-page PDF mode: send first BOM page as single-page PDF
+                stage5_pdf, _, _ = _extract_pages(pdf_b64, [bom_pages[0]])
+                stage5_images = None
+                print(f"SCAN [{filename}]: Stage 5 using page {bom_pages[0]} "
+                      f"PDF for verification", flush=True)
+            elif hires_tiles_per_page and bom_images:
                 first_page_tiles = min(hires_tiles_per_page[0], _MAX_STAGE5_TILES)
                 stage5_images = bom_images[:first_page_tiles]
-            else:
-                first_page_tiles = 1
-                stage5_images = [bom_images[0]]
-            print(f"SCAN [{filename}]: Stage 5 using page 1 ({first_page_tiles} "
-                  f"tile(s)) for verification", flush=True)
-        elif use_per_page_pdf and bom_pages:
-            # Per-page PDF mode: send first BOM page as single-page PDF
-            stage5_pdf, _, _ = _extract_pages(pdf_b64, [bom_pages[0]])
-            stage5_images = None
-            print(f"SCAN [{filename}]: Stage 5 using page {bom_pages[0]} "
-                  f"PDF for verification", flush=True)
-        elif hires_tiles_per_page and bom_images:
-            first_page_tiles = min(hires_tiles_per_page[0], _MAX_STAGE5_TILES)
-            stage5_images = bom_images[:first_page_tiles]
-            print(f"SCAN [{filename}]: Stage 5 using page 1 tiles "
-                  f"({first_page_tiles} of {len(bom_images)} total) for verification",
-                  flush=True)
+                print(f"SCAN [{filename}]: Stage 5 using page 1 tiles "
+                      f"({first_page_tiles} of {len(bom_images)} total) for verification",
+                      flush=True)
 
-        print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification "
-              f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
-        try:
-            verify_result = _stage5_verify_part_numbers(
-                claude_client, stage5_pdf, bom_items,
-                bom_pages=bom_pages, bom_extracted=bom_extracted,
-                bom_raw_text=bom_raw_text, bom_images=stage5_images
-            )
-            total_tokens += verify_result.get("_output_tokens", 0)
-            bom_items, correction_flags, verification_summary = _apply_corrections(
-                bom_items, verify_result
-            )
-            all_flags.extend(correction_flags)
-        except Exception as e5:
-            err_str = str(e5)
-            if "429" in err_str or "rate_limit" in err_str.lower():
-                print(f"SCAN: Rate limit on Stage 5, waiting 30s...", flush=True)
-                time.sleep(30)
-                try:
-                    verify_result = _stage5_verify_part_numbers(
-                        claude_client, stage5_pdf, bom_items,
-                        bom_pages=bom_pages, bom_extracted=bom_extracted,
-                        bom_raw_text=bom_raw_text, bom_images=stage5_images
-                    )
-                    total_tokens += verify_result.get("_output_tokens", 0)
-                    bom_items, correction_flags, verification_summary = _apply_corrections(
-                        bom_items, verify_result
-                    )
-                    all_flags.extend(correction_flags)
-                except Exception:
-                    print(f"SCAN: Stage 5 failed, PNs unverified", flush=True)
+            print(f"SCAN [{filename}]: Starting Stage 5 -- PN verification "
+                  f"(mode: {input_mode}, pages: {bom_pages})", flush=True)
+            try:
+                verify_result = _stage5_verify_part_numbers(
+                    claude_client, stage5_pdf, bom_items,
+                    bom_pages=bom_pages, bom_extracted=bom_extracted,
+                    bom_raw_text=bom_raw_text, bom_images=stage5_images
+                )
+                total_tokens += verify_result.get("_output_tokens", 0)
+                bom_items, correction_flags, verification_summary = _apply_corrections(
+                    bom_items, verify_result
+                )
+                all_flags.extend(correction_flags)
+            except Exception as e5:
+                err_str = str(e5)
+                if "429" in err_str or "rate_limit" in err_str.lower():
+                    print(f"SCAN: Rate limit on Stage 5, waiting 30s...", flush=True)
+                    time.sleep(30)
+                    try:
+                        verify_result = _stage5_verify_part_numbers(
+                            claude_client, stage5_pdf, bom_items,
+                            bom_pages=bom_pages, bom_extracted=bom_extracted,
+                            bom_raw_text=bom_raw_text, bom_images=stage5_images
+                        )
+                        total_tokens += verify_result.get("_output_tokens", 0)
+                        bom_items, correction_flags, verification_summary = _apply_corrections(
+                            bom_items, verify_result
+                        )
+                        all_flags.extend(correction_flags)
+                    except Exception:
+                        print(f"SCAN: Stage 5 failed, PNs unverified", flush=True)
+                        all_flags.append(
+                            "Part number verification skipped due to rate limit -- "
+                            "review all part numbers manually"
+                        )
+                        for item in bom_items:
+                            item["_verification_status"] = "unverified"
+                else:
+                    print(f"SCAN: Stage 5 error: {err_str}, continuing unverified", flush=True)
                     all_flags.append(
-                        "Part number verification skipped due to rate limit -- "
-                        "review all part numbers manually"
+                        "Part number verification failed -- review all part numbers manually"
                     )
                     for item in bom_items:
                         item["_verification_status"] = "unverified"
-            else:
-                print(f"SCAN: Stage 5 error: {err_str}, continuing unverified", flush=True)
-                all_flags.append(
-                    "Part number verification failed -- review all part numbers manually"
-                )
-                for item in bom_items:
-                    item["_verification_status"] = "unverified"
         print(f"SCAN Stage 5 done in {time.time()-t5:.1f}s", flush=True)
 
         # == STAGE 3 ========================================================
