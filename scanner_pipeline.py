@@ -1236,10 +1236,19 @@ def _extract_raster_bom_images(pdf_b64):
     than re-rendering the full page (e.g. 2729x1704 native vs ~1795x1133
     effective from a full-page render at capped DPI).
 
-    Enhancement: converts JPEG screenshots to clean B&W to eliminate
-    compression artifacts that blur similar characters (0/O, T/I, 8/B).
-    BOM tables are inherently black-on-white, so thresholding removes
-    ALL gray JPEG noise while making text edges razor-sharp.
+    Processing pipeline per image:
+      1. B&W enhancement — grayscale + threshold at 180.  Eliminates JPEG
+         compression artifacts that blur similar chars (800T↔8001, 0↔O).
+      2. Rotation correction — Tesseract OSD detects if the image is
+         sideways (common for Excel screenshots pasted into landscape CAD
+         pages) and rotates to upright.  This is CRITICAL: without it,
+         tiling splits the table so Claude sees items 26-51 (no headers)
+         BEFORE items 1-25 (with headers), causing scrambled output.
+      3. Fit-to-width — resize so width = 1568 (Claude's native limit).
+         Eliminates horizontal tiling: every tile shows the FULL table
+         width.  Headers appear in tile 0, items flow top→bottom.
+      4. Vertical-only tiling — clean sequential tiles that Claude reads
+         in natural reading order.
 
     Returns (images, tiles_per_page) where images is a list of base64 PNG
     strings.  Returns ([], []) if extraction fails or no suitable images found.
@@ -1248,6 +1257,7 @@ def _extract_raster_bom_images(pdf_b64):
         import fitz
         from PIL import Image, ImageOps
         import io
+        import re as _re
 
         pdf_bytes = base64.b64decode(pdf_b64)
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -1255,6 +1265,8 @@ def _extract_raster_bom_images(pdf_b64):
         images = []
         tiles_per_page = []
         max_tile = 1568  # Claude's native resolution limit
+        tile_h = 1500
+        overlap_v = 80
 
         for pg_idx in range(len(doc)):
             page = doc[pg_idx]
@@ -1285,61 +1297,74 @@ def _extract_raster_bom_images(pdf_b64):
             img = Image.open(io.BytesIO(best_img["image"]))
             w_orig, h_orig = img.size
 
-            # ── B&W enhancement for JPEG screenshots ──
-            # JPEG compression creates gray artifacts around text edges that
-            # blur similar characters (800T↔8001, 0↔O, T↔I).  Converting
-            # to clean B&W eliminates ALL gray noise.  BOM tables are always
-            # black text on white background — no information is lost.
-            #
-            # Pipeline: grayscale → threshold at 180 → RGB
-            # Threshold 180 = 70% brightness cutoff:
-            #   - Text (0-100): → black ✓
-            #   - Gridlines (20-120): → black ✓
-            #   - JPEG blur around text (130-200): mostly → white ✓
-            #   - Background (220-255): → white ✓
+            # ── Step 1: B&W enhancement ──
+            # JPEG compression creates gray artifacts around text edges.
+            # Threshold at 180 eliminates ALL gray noise.  BOM tables are
+            # always black text on white — no information is lost.
             img_gray = ImageOps.grayscale(img)
             img = img_gray.point(lambda x: 0 if x < 180 else 255, '1')
             img = img.convert("RGB")
             del img_gray
 
+            # ── Step 2: Rotation correction ──
+            # Excel screenshots pasted into landscape CAD pages are often
+            # rotated 90°.  Without correction, tiling produces tiles where
+            # the table header is in tile 2 instead of tile 0, and Claude
+            # sees half the items before the column headers → scrambled.
+            # Tesseract OSD reliably detects the rotation angle.
+            rotation = 0
+            try:
+                import pytesseract
+                osd = pytesseract.image_to_osd(img)
+                rot_match = _re.search(r'Rotate:\s*(\d+)', osd)
+                if rot_match:
+                    rotation = int(rot_match.group(1))
+                    if rotation and rotation != 360:
+                        # Tesseract "Rotate: X" = rotate X° CW to fix.
+                        # PIL rotate() is CCW, so: pil_angle = 360 - X
+                        pil_angle = (360 - rotation) % 360
+                        img = img.rotate(pil_angle, expand=True)
+            except Exception as _osd_err:
+                print(f"  [Raster-Extract] OSD failed ({_osd_err}), "
+                      f"skipping rotation", flush=True)
+
             w, h = img.size
+
+            # ── Step 3: Fit-to-width ──
+            # Resize so width <= max_tile.  This eliminates horizontal
+            # tiling: every tile shows the FULL table width (all columns).
+            # Scaling is minor (~8-10%) so text stays sharp.
+            if w > max_tile:
+                scale = max_tile / w
+                new_w = max_tile
+                new_h = int(h * scale)
+                img = img.resize((new_w, new_h), Image.LANCZOS)
+                w, h = new_w, new_h
+
+            rot_msg = f", rotated {rotation}°" if rotation else ""
             print(f"  [Raster-Extract] Page {pg_num}: {w_orig}x{h_orig} "
-                  f"embedded image ({best_img['ext']}) → B&W enhanced",
-                  flush=True)
+                  f"→ B&W + {w}x{h}{rot_msg}", flush=True)
 
-            # Tile large images so Claude sees characters at full size.
-            # Use both horizontal and vertical tiling like _render_bom_area_direct.
-            tile_h = 1500
-            overlap_v = 80
-            overlap_h = 120
+            # ── Step 4: Vertical-only tiling ──
+            # Single column, tiles stacked top-to-bottom.  Claude sees
+            # headers first (tile 0), then items in natural reading order.
             page_tiles = []
-
-            if w <= max_tile and h <= max_tile:
-                # Small enough — send as-is
+            if h <= tile_h:
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 page_tiles.append(base64.b64encode(buf.getvalue()).decode())
             else:
-                # Need tiling
-                n_cols = max(1, -(-w // (max_tile - overlap_h)))  # ceiling div
-                col_w = max_tile if n_cols == 1 else (w + overlap_h * (n_cols - 1)) // n_cols
-                col_w = min(col_w, max_tile)
-
-                for col in range(n_cols):
-                    x0 = col * (col_w - overlap_h) if col > 0 else 0
-                    x1 = min(x0 + col_w, w)
-
-                    y = 0
-                    while y < h:
-                        y_end = min(y + tile_h, h)
-                        tile = img.crop((x0, y, x1, y_end))
-                        buf = io.BytesIO()
-                        tile.save(buf, format="PNG")
-                        page_tiles.append(
-                            base64.b64encode(buf.getvalue()).decode())
-                        if y_end >= h:
-                            break
-                        y = y_end - overlap_v
+                y = 0
+                while y < h:
+                    y_end = min(y + tile_h, h)
+                    tile = img.crop((0, y, w, y_end))
+                    buf = io.BytesIO()
+                    tile.save(buf, format="PNG")
+                    page_tiles.append(
+                        base64.b64encode(buf.getvalue()).decode())
+                    if y_end >= h:
+                        break
+                    y = y_end - overlap_v
 
             images.extend(page_tiles)
             tiles_per_page.append(len(page_tiles))
