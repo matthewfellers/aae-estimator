@@ -2964,9 +2964,16 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                             # Multi-page SHX: render just the BOM area at high
                             # DPI (not the full D-size page which gets capped to
                             # ~125 DPI and makes BOM text unreadable).
-                            # No tiling, no OCR — one clean BOM crop per page.
+                            # Adaptive DPI: higher for small BOMs (fine detail),
+                            # lower for large BOMs (keep tile count manageable).
+                            if n_bom_pages <= 3:
+                                _dpi = 600   # ≤3 pages: max detail, tiles stay small
+                            elif n_bom_pages <= 6:
+                                _dpi = 450   # 4-6 pages: balanced
+                            else:
+                                _dpi = 400   # 7+ pages: keep total tiles under control
                             bom_crops, bom_tpp = _render_bom_area_direct(
-                                bom_pdf_b64, render_dpi=600)
+                                bom_pdf_b64, render_dpi=_dpi)
                             if bom_crops:
                                 bom_images = bom_crops
                                 hires_tiles_per_page = bom_tpp
@@ -2975,7 +2982,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                 structure["_per_page_image"] = True
                                 print(f"SCAN [{filename}]: Multi-page SHX "
                                       f"({n_bom_pages} pages) — rendered "
-                                      f"{len(bom_crops)} tiles at 400 DPI "
+                                      f"{len(bom_crops)} tiles at {_dpi} DPI "
                                       f"({n_bom_pages} pages, tiled)",
                                       flush=True)
                             else:
@@ -3212,10 +3219,11 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         # For multi-page BOMs, Stage 5 only needs to verify a sample of pages.
         stage5_images = bom_images
         stage5_pdf = bom_pdf_b64
+        _MAX_STAGE5_TILES = 10  # Cap tiles to avoid worker timeout
         if use_per_page_image and bom_images:
             # Per-page image mode: send first page's tiles for verification
             if hires_tiles_per_page:
-                first_page_tiles = hires_tiles_per_page[0]
+                first_page_tiles = min(hires_tiles_per_page[0], _MAX_STAGE5_TILES)
                 stage5_images = bom_images[:first_page_tiles]
             else:
                 first_page_tiles = 1
@@ -3229,7 +3237,7 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
             print(f"SCAN [{filename}]: Stage 5 using page {bom_pages[0]} "
                   f"PDF for verification", flush=True)
         elif hires_tiles_per_page and bom_images:
-            first_page_tiles = hires_tiles_per_page[0]
+            first_page_tiles = min(hires_tiles_per_page[0], _MAX_STAGE5_TILES)
             stage5_images = bom_images[:first_page_tiles]
             print(f"SCAN [{filename}]: Stage 5 using page 1 tiles "
                   f"({first_page_tiles} of {len(bom_images)} total) for verification",
