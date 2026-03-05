@@ -1236,12 +1236,17 @@ def _extract_raster_bom_images(pdf_b64):
     than re-rendering the full page (e.g. 2729x1704 native vs ~1795x1133
     effective from a full-page render at capped DPI).
 
+    Enhancement: converts JPEG screenshots to clean B&W to eliminate
+    compression artifacts that blur similar characters (0/O, T/I, 8/B).
+    BOM tables are inherently black-on-white, so thresholding removes
+    ALL gray JPEG noise while making text edges razor-sharp.
+
     Returns (images, tiles_per_page) where images is a list of base64 PNG
     strings.  Returns ([], []) if extraction fails or no suitable images found.
     """
     try:
         import fitz
-        from PIL import Image
+        from PIL import Image, ImageOps
         import io
 
         pdf_bytes = base64.b64decode(pdf_b64)
@@ -1278,12 +1283,29 @@ def _extract_raster_bom_images(pdf_b64):
                 continue
 
             img = Image.open(io.BytesIO(best_img["image"]))
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            w, h = img.size
+            w_orig, h_orig = img.size
 
-            print(f"  [Raster-Extract] Page {pg_num}: {w}x{h} embedded "
-                  f"image ({best_img['ext']})", flush=True)
+            # ── B&W enhancement for JPEG screenshots ──
+            # JPEG compression creates gray artifacts around text edges that
+            # blur similar characters (800T↔8001, 0↔O, T↔I).  Converting
+            # to clean B&W eliminates ALL gray noise.  BOM tables are always
+            # black text on white background — no information is lost.
+            #
+            # Pipeline: grayscale → threshold at 180 → RGB
+            # Threshold 180 = 70% brightness cutoff:
+            #   - Text (0-100): → black ✓
+            #   - Gridlines (20-120): → black ✓
+            #   - JPEG blur around text (130-200): mostly → white ✓
+            #   - Background (220-255): → white ✓
+            img_gray = ImageOps.grayscale(img)
+            img = img_gray.point(lambda x: 0 if x < 180 else 255, '1')
+            img = img.convert("RGB")
+            del img_gray
+
+            w, h = img.size
+            print(f"  [Raster-Extract] Page {pg_num}: {w_orig}x{h_orig} "
+                  f"embedded image ({best_img['ext']}) → B&W enhanced",
+                  flush=True)
 
             # Tile large images so Claude sees characters at full size.
             # Use both horizontal and vertical tiling like _render_bom_area_direct.
