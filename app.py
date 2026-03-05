@@ -2530,7 +2530,7 @@ def _build_vendor_excel(vendor_name, items, customer, project, quote_num, estima
             return int(q)
         except (ValueError, TypeError):
             return 0
-    total_qty = sum(_safe_qty(itm.get("qty") or 1) for itm in items)
+    total_qty = sum(_safe_qty(itm.get("qty", 0)) for itm in items)
     ws.merge_cells(f"A{row}:C{row}")
     tl = ws.cell(row=row, column=1, value=f"TOTAL LINE ITEMS — {vendor_name.upper()}:")
     tl.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
@@ -3529,7 +3529,7 @@ def bom_convert_excel():
                     item_counter,
                     pn,
                     itm.get("description", ""),
-                    itm.get("qty", 1) or 1,
+                    itm.get("qty", 0) if itm.get("qty") is not None else 1,
                     itm.get("unit", "ea"),
                     mfr,
                     vendor,
@@ -3559,7 +3559,7 @@ def bom_convert_excel():
             def _sq(q):
                 try: return int(q)
                 except (ValueError, TypeError): return 0
-            tv = ws.cell(row=row, column=4, value=sum(_sq(itm.get("qty") or 1) for itm in line_items))
+            tv = ws.cell(row=row, column=4, value=sum(_sq(itm.get("qty", 0)) for itm in line_items))
             tv.font = Font(name="Arial", bold=True, color="008800", size=11)
             tv.fill = PatternFill("solid", fgColor=LIGHT_RED)
             tv.alignment = Alignment(horizontal="center", vertical="center")
