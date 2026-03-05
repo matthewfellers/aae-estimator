@@ -1434,7 +1434,7 @@ async function startScan(file) {
         else statusIcon = '<span title="Not verified" style="color:#666">\u2022</span>';
         var pn   = String(itm.part_number   || '\u2014');
         var desc = String(itm.description   || '\u2014');
-        var qty  = String(itm.qty           || 1);
+        var qty  = String(itm.qty != null ? itm.qty : 1);
         var um   = String(itm.unit          || 'ea');
         var mfr  = String(itm.manufacturer  || '\u2014');
         var cat  = String(itm.category      || 'Other');
@@ -1471,7 +1471,7 @@ async function startScan(file) {
       }
       var totalQty = 0;
       for (var bi2 = 0; bi2 < lastScanBOM.length; bi2++) {
-        totalQty += parseInt(lastScanBOM[bi2].qty) || 1;
+        totalQty += parseInt(lastScanBOM[bi2].qty) || 0;
       }
       var tblHtml = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
         + '<thead><tr style="background:#6B0A0A;color:#fff;position:sticky;top:0">'
@@ -2356,13 +2356,13 @@ function renderBomConverterResults(panels) {
       var rowBg = bi % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(155,27,27,0.06)';
       var pn   = String(itm.part_number  || '\u2014');
       var desc = String(itm.description  || '\u2014');
-      var qty  = String(itm.qty          || 1);
+      var qty  = String(itm.qty != null ? itm.qty : 1);
       var um   = String(itm.unit         || 'ea');
       var cost = parseFloat(itm.cost) || 0;
       var mfr  = String(itm.manufacturer || '\u2014');
       var cat  = String(itm.category     || 'Other');
       var num  = String(itm.item_num     || bi + 1);
-      totalCost += cost * (parseInt(qty) || 1);
+      totalCost += cost * (parseInt(qty) || 0);
       rows += '<tr style="background:' + rowBg + ';border-bottom:1px solid rgba(155,27,27,0.15)">'
             + '<td style="padding:5px 8px;color:var(--muted)">' + num + '</td>'
             + '<td style="padding:5px 8px;color:#F4A9A8;font-weight:600">' + pn + '</td>'
