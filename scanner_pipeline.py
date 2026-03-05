@@ -1250,8 +1250,10 @@ def _extract_raster_bom_images(pdf_b64):
       4. Vertical-only tiling — clean sequential tiles that Claude reads
          in natural reading order.
 
-    Returns (images, tiles_per_page) where images is a list of base64 PNG
-    strings.  Returns ([], []) if extraction fails or no suitable images found.
+    Returns (images, tiles_per_page, ocr_text) where images is a list of
+    base64 PNG strings and ocr_text is Tesseract OCR of the B&W enhanced
+    images (structural guide for Stage 2).
+    Returns ([], [], "") if extraction fails or no suitable images found.
     """
     try:
         import fitz
@@ -1264,6 +1266,7 @@ def _extract_raster_bom_images(pdf_b64):
 
         images = []
         tiles_per_page = []
+        ocr_texts = []  # per-page OCR text for structural guide
         max_tile = 1568  # Claude's native resolution limit
         tile_h = 1500
         overlap_v = 80
@@ -1359,7 +1362,24 @@ def _extract_raster_bom_images(pdf_b64):
             print(f"  [Raster-Extract] Page {pg_num}: {w_orig}x{h_orig} "
                   f"→ B&W + {w}x{h}{rot_msg}", flush=True)
 
-            # ── Step 4: Vertical-only tiling ──
+            # ── Step 4: OCR the B&W image for structural guide ──
+            # The B&W threshold makes OCR very accurate — much better than
+            # raw JPEG.  This text gives Claude column structure, quantities,
+            # and approximate PNs to cross-reference against its visual read.
+            try:
+                import pytesseract
+                page_ocr = pytesseract.image_to_string(
+                    img, config="--psm 6 --oem 3").strip()
+                if page_ocr:
+                    ocr_texts.append(
+                        f"--- Page {pg_num} (OCR) ---\n{page_ocr}")
+                    print(f"  [Raster-Extract] Page {pg_num}: OCR "
+                          f"{len(page_ocr)} chars", flush=True)
+            except Exception as _ocr_err:
+                print(f"  [Raster-Extract] Page {pg_num}: OCR failed "
+                      f"({_ocr_err})", flush=True)
+
+            # ── Step 5: Vertical-only tiling ──
             # Single column, tiles stacked top-to-bottom.  Claude sees
             # headers first (tile 0), then items in natural reading order.
             page_tiles = []
@@ -1389,15 +1409,17 @@ def _extract_raster_bom_images(pdf_b64):
         doc.close()
 
         if not images:
-            return [], []
+            return [], [], ""
 
+        combined_ocr = "\n\n".join(ocr_texts) if ocr_texts else ""
         print(f"  [Raster-Extract] Total: {len(images)} tiles from "
-              f"{len(tiles_per_page)} pages", flush=True)
-        return images, tiles_per_page
+              f"{len(tiles_per_page)} pages, OCR {len(combined_ocr)} chars",
+              flush=True)
+        return images, tiles_per_page, combined_ocr
 
     except Exception as e:
         print(f"  [Raster-Extract] Failed: {e}", flush=True)
-        return [], []
+        return [], [], ""
 
 
 # ---------------------------------------------------------------------------
@@ -2229,45 +2251,75 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "=== END STRUCTURED TABLE ===\n\n"
             )
         elif text_source == "ocr":
-            # SHX / vector-font drawing — text came from pytesseract.
-            # v2.8: Combined approach — OCR provides STRUCTURE (format, length,
-            # hyphens, column alignment), high-res image provides CHARACTER
-            # verification. OCR is reliable for multi-char sequences but can
-            # confuse similar SHX glyphs (D↔O, 3↔5, 0↔O). The 600 DPI image
-            # has ~50px per character which helps distinguish these.
-            text_section = (
-                "=== OCR TEXT FROM BOM IMAGE (PYTESSERACT) ===\n"
-                "The following text was extracted by pytesseract OCR from the rendered BOM image.\n"
-                "It provides character-by-character data for each BOM row.\n\n"
-                "HOW TO USE OCR + IMAGE TOGETHER:\n"
-                "  This is a thin-stroke SHX vector font drawing. Both OCR and visual reading\n"
-                "  can make errors on similar-looking characters. Use BOTH sources together:\n\n"
-                "  PART NUMBER:\n"
-                "    1. Start with the OCR text — it gives you the correct NUMBER of characters,\n"
-                "       hyphens, slashes, and overall structure of each part number.\n"
-                "    2. Do NOT transpose, rearrange, or drop characters from the OCR reading.\n"
-                "       If OCR says IR18219K, do NOT change it to IR1821K9.\n"
-                "    3. Verify EACH character against the HIGH-RES IMAGE. SHX fonts confuse:\n"
-                "       D↔O (both oval), 3↔5 (both have curves), S↔5 (nearly identical in SHX!),\n"
-                "       0↔O, 6↔8, B↔8, 1↔I, C↔O, F↔P (check if top stroke curves back),\n"
-                "       4↔M (check stroke angles), C↔G (check if shape closes),\n"
-                "       9↔J (check for curve vs straight descent)\n"
-                "       CONTEXT HELPS: if a character could be S or 5, consider whether it is\n"
-                "       part of a letter sequence (→ S) or a digit sequence (→ 5).\n"
-                "       Example: 'BOOS' = letters → S not 5.  '1800' = digits → 8 not B.\n"
-                "       When the image clearly shows a different character, USE THE IMAGE.\n"
-                "       Example: OCR says 'OTC2AP' but image clearly shows 'DTC2AP' → use DTC2AP.\n"
-                "    4. For trailing characters (end of part number), look especially carefully —\n"
-                "       OCR often drops the last character if it's near a column border.\n"
-                "       Example: OCR says 'BOOS-K' but image shows 'BOOS-K9' → use BOOS-K9.\n\n"
-                "  DESCRIPTION / MANUFACTURER — Use OCR as guide, fill in truncations from image.\n\n"
-                "  QTY — READ FROM THE IMAGE ONLY. IGNORE OCR QTY VALUES.\n"
-                "    OCR misreads single-digit numbers and column boundaries.\n"
-                "    Always read QTY by looking at the rightmost column in the image.\n\n"
-                "  ITEM NUMBER (NO.) — Use OCR text, verify sequence against image.\n\n"
-                f"{raw_text}\n\n"
-                "=== END OCR TEXT ===\n\n"
-            )
+            is_raster = structure.get("_raster_bom", False)
+            if is_raster:
+                # Raster BOM — embedded screenshot (e.g. Excel pasted into CAD).
+                # B&W threshold at 180 gives very clean OCR. Quantities and
+                # row structure are highly accurate.
+                text_section = (
+                    "=== OCR TEXT FROM BOM IMAGE (B&W ENHANCED) ===\n"
+                    "The following text was extracted by Tesseract OCR from a high-contrast\n"
+                    "B&W enhanced BOM image. The image was cleaned (threshold at 180) which\n"
+                    "makes OCR highly accurate for structure, quantities, and most text.\n\n"
+                    "HOW TO USE OCR + IMAGE TOGETHER:\n\n"
+                    "  QUANTITIES (QTY) — TRUST THE OCR TEXT:\n"
+                    "    The OCR quantities are accurate because the B&W enhancement gives\n"
+                    "    clean digit recognition. Use OCR qty values as your PRIMARY source.\n"
+                    "    Only override with the image if OCR shows something clearly wrong\n"
+                    "    (e.g. a letter instead of a digit).\n\n"
+                    "  PART NUMBERS — USE OCR AS PRIMARY, VERIFY WITH IMAGE:\n"
+                    "    1. Start with the OCR part number — structure, length, hyphens are correct.\n"
+                    "    2. Verify each character against the image. Common OCR confusions:\n"
+                    "       T↔I (check for top crossbar), R↔I, 0↔O, B↔8, S↔5, 6↔8\n"
+                    "    3. If the image CLEARLY shows a different character, use the image.\n"
+                    "    4. Do NOT rearrange or transpose character order from OCR.\n\n"
+                    "  ITEM NUMBERS — Trust OCR. They should be sequential (1, 2, 3...).\n\n"
+                    "  DESCRIPTIONS — Use OCR as primary, fill in truncations from image.\n\n"
+                    "  DUPLICATE PART NUMBERS — CRITICAL:\n"
+                    "    The SAME part number CAN appear on MULTIPLE rows (different item numbers).\n"
+                    "    Output EVERY row exactly as shown. Do NOT merge or skip duplicate PNs.\n"
+                    "    Example: Item 2 = SCE-N80P40, Item 4 = SCE-N80P40 → output BOTH rows.\n\n"
+                    f"{raw_text}\n\n"
+                    "=== END OCR TEXT ===\n\n"
+                )
+            else:
+                # SHX / vector-font drawing — text came from pytesseract.
+                # v2.8: Combined approach — OCR provides STRUCTURE (format, length,
+                # hyphens, column alignment), high-res image provides CHARACTER
+                # verification.
+                text_section = (
+                    "=== OCR TEXT FROM BOM IMAGE (PYTESSERACT) ===\n"
+                    "The following text was extracted by pytesseract OCR from the rendered BOM image.\n"
+                    "It provides character-by-character data for each BOM row.\n\n"
+                    "HOW TO USE OCR + IMAGE TOGETHER:\n"
+                    "  This is a thin-stroke SHX vector font drawing. Both OCR and visual reading\n"
+                    "  can make errors on similar-looking characters. Use BOTH sources together:\n\n"
+                    "  PART NUMBER:\n"
+                    "    1. Start with the OCR text — it gives you the correct NUMBER of characters,\n"
+                    "       hyphens, slashes, and overall structure of each part number.\n"
+                    "    2. Do NOT transpose, rearrange, or drop characters from the OCR reading.\n"
+                    "       If OCR says IR18219K, do NOT change it to IR1821K9.\n"
+                    "    3. Verify EACH character against the HIGH-RES IMAGE. SHX fonts confuse:\n"
+                    "       D↔O (both oval), 3↔5 (both have curves), S↔5 (nearly identical in SHX!),\n"
+                    "       0↔O, 6↔8, B↔8, 1↔I, C↔O, F↔P (check if top stroke curves back),\n"
+                    "       4↔M (check stroke angles), C↔G (check if shape closes),\n"
+                    "       9↔J (check for curve vs straight descent)\n"
+                    "       CONTEXT HELPS: if a character could be S or 5, consider whether it is\n"
+                    "       part of a letter sequence (→ S) or a digit sequence (→ 5).\n"
+                    "       Example: 'BOOS' = letters → S not 5.  '1800' = digits → 8 not B.\n"
+                    "       When the image clearly shows a different character, USE THE IMAGE.\n"
+                    "       Example: OCR says 'OTC2AP' but image clearly shows 'DTC2AP' → use DTC2AP.\n"
+                    "    4. For trailing characters (end of part number), look especially carefully —\n"
+                    "       OCR often drops the last character if it's near a column border.\n"
+                    "       Example: OCR says 'BOOS-K' but image shows 'BOOS-K9' → use BOOS-K9.\n\n"
+                    "  DESCRIPTION / MANUFACTURER — Use OCR as guide, fill in truncations from image.\n\n"
+                    "  QTY — READ FROM THE IMAGE ONLY. IGNORE OCR QTY VALUES.\n"
+                    "    OCR misreads single-digit numbers and column boundaries.\n"
+                    "    Always read QTY by looking at the rightmost column in the image.\n\n"
+                    "  ITEM NUMBER (NO.) — Use OCR text, verify sequence against image.\n\n"
+                    f"{raw_text}\n\n"
+                    "=== END OCR TEXT ===\n\n"
+                )
         else:
             # Normal PDF with real text layer — pypdf extracted exact characters.
             # This text is authoritative; image is for layout/structure only.
@@ -2353,49 +2405,61 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "  Use the image to confirm row count and catch rows the table may have missed.\n\n"
             )
         elif text_source == "ocr":
-            prompt += (
-                "  === PART NUMBERS — USE OCR STRUCTURE + IMAGE VERIFICATION ===\n"
-                "  The OCR text provides the STRUCTURE of each part number (number of characters,\n"
-                "  hyphens, slashes, format). Start with the OCR reading.\n"
-                "  Then VERIFY each character against the high-res image, especially for SHX\n"
-                "  font characters that OCR commonly confuses:\n"
-                "    D↔O (oval shapes), 3↔5, S↔5 (nearly identical!), 0↔O, C↔O, 6↔8, B↔8, 1↔I\n"
-                "  If the image CLEARLY shows a different character than OCR, use the image.\n"
-                "  Example: OCR='OTC2AP' but image shows 'DTC2AP' → use DTC2AP.\n"
-                "  NEVER transpose or rearrange character ORDER from OCR (e.g. do NOT change\n"
-                "  IR18219K to IR1821K9 — keep OCR's character sequence).\n"
-                "  Check the LAST character carefully — OCR often drops trailing characters\n"
-                "  near column borders. If the image shows an extra character, include it.\n\n"
-                "  === MANUFACTURER — Fill in truncated names from the image ===\n"
-                "  OCR often truncates manufacturer names (e.g. 'EN-BRADLEY' → 'ALLEN-BRADLEY',\n"
-                "  'PHOENIX CONTAC' → 'PHOENIX CONTACT'). Use the image to complete these.\n\n"
-                "  === QTY COLUMN — CRITICAL READING RULES ===\n"
-                "  1. Look at the HEADER ROW in the image. Identify every column heading.\n"
-                "     The QTY (or QUANTITY) column is typically the RIGHTMOST column.\n"
-                "  2. For EACH row: find that row's cell in the QTY column and read the number.\n"
-                "     Read it INDEPENDENTLY — do not carry over the previous row's quantity.\n"
-                "  3. The OCR may merge 'PART NUMBER' and 'QTY' into one header — IGNORE that.\n"
-                "     Trust the IMAGE column layout, not the OCR header text.\n"
-                "  4. Common SHX font OCR mistakes in QTY: '1' read as 'l', '6' as 'b', '0' as 'O'.\n"
-                "     When in doubt, zoom mentally into that specific cell and re-read.\n\n"
-                "  === ITEM NUMBER (NO.) COLUMN — CRITICAL READING RULES ===\n"
-                "  1. The NO. or ITEM column is typically the LEFTMOST column.\n"
-                "  2. Numbered rows: read the item number exactly (1, 2, 3 ...).\n"
-                "  3. Sub-item / accessory rows have a BLANK NO. cell — output item_num=0.\n"
-                "     Do NOT carry forward the parent item's number into the sub-item row.\n"
-                "  4. After a sub-item row, the NEXT numbered item resumes the sequence.\n"
-                "     Stay synchronized with the actual row you are reading in the image.\n\n"
-                "  === ANTI-SWAP CHECK (LEFTMOST vs RIGHTMOST NARROW COLUMN) ===\n"
-                "  A BOM has TWO narrow integer columns that look similar:\n"
-                "    - LEFTMOST narrow column  = Item Number  (1, 2, 3 ... sequential)\n"
-                "    - RIGHTMOST narrow column = QTY          (can repeat: 1,1,1,6,6,1,...)\n"
-                "  These are EASY TO SWAP. After reading every row, ask:\n"
-                "    'Is my item_num value from the LEFT edge of the table?'  (YES = correct)\n"
-                "    'Is my qty value from the RIGHT edge of the table?'      (YES = correct)\n"
-                "  If you accidentally wrote the left-column number as qty and the right as item_num,\n"
-                "  your output will look like: item_num=6, qty=21 for what should be item_num=21, qty=6.\n"
-                "  Always verify: item_num counts sequentially row by row; qty can be any positive integer.\n\n"
-            )
+            if is_raster:
+                prompt += (
+                    "  === RASTER BOM — OCR IS HIGHLY RELIABLE ===\n"
+                    "  This BOM was extracted from a high-resolution embedded image with B&W\n"
+                    "  enhancement. The OCR text is very accurate for structure and quantities.\n\n"
+                    "  PART NUMBERS: Start with OCR, verify against image. Watch for:\n"
+                    "    T↔I (check crossbar), R↔I, 0↔O, B↔8. Use image when it clearly differs.\n\n"
+                    "  QUANTITIES: Use OCR values as primary source. They are accurate.\n\n"
+                    "  ITEM NUMBERS: Trust OCR. Sequential 1, 2, 3...\n\n"
+                    "  DUPLICATE PNs: Output EVERY row, even if the same PN appears twice.\n\n"
+                )
+            else:
+                prompt += (
+                    "  === PART NUMBERS — USE OCR STRUCTURE + IMAGE VERIFICATION ===\n"
+                    "  The OCR text provides the STRUCTURE of each part number (number of characters,\n"
+                    "  hyphens, slashes, format). Start with the OCR reading.\n"
+                    "  Then VERIFY each character against the high-res image, especially for SHX\n"
+                    "  font characters that OCR commonly confuses:\n"
+                    "    D↔O (oval shapes), 3↔5, S↔5 (nearly identical!), 0↔O, C↔O, 6↔8, B↔8, 1↔I\n"
+                    "  If the image CLEARLY shows a different character than OCR, use the image.\n"
+                    "  Example: OCR='OTC2AP' but image shows 'DTC2AP' → use DTC2AP.\n"
+                    "  NEVER transpose or rearrange character ORDER from OCR (e.g. do NOT change\n"
+                    "  IR18219K to IR1821K9 — keep OCR's character sequence).\n"
+                    "  Check the LAST character carefully — OCR often drops trailing characters\n"
+                    "  near column borders. If the image shows an extra character, include it.\n\n"
+                    "  === MANUFACTURER — Fill in truncated names from the image ===\n"
+                    "  OCR often truncates manufacturer names (e.g. 'EN-BRADLEY' → 'ALLEN-BRADLEY',\n"
+                    "  'PHOENIX CONTAC' → 'PHOENIX CONTACT'). Use the image to complete these.\n\n"
+                    "  === QTY COLUMN — CRITICAL READING RULES ===\n"
+                    "  1. Look at the HEADER ROW in the image. Identify every column heading.\n"
+                    "     The QTY (or QUANTITY) column is typically the RIGHTMOST column.\n"
+                    "  2. For EACH row: find that row's cell in the QTY column and read the number.\n"
+                    "     Read it INDEPENDENTLY — do not carry over the previous row's quantity.\n"
+                    "  3. The OCR may merge 'PART NUMBER' and 'QTY' into one header — IGNORE that.\n"
+                    "     Trust the IMAGE column layout, not the OCR header text.\n"
+                    "  4. Common SHX font OCR mistakes in QTY: '1' read as 'l', '6' as 'b', '0' as 'O'.\n"
+                    "     When in doubt, zoom mentally into that specific cell and re-read.\n\n"
+                    "  === ITEM NUMBER (NO.) COLUMN — CRITICAL READING RULES ===\n"
+                    "  1. The NO. or ITEM column is typically the LEFTMOST column.\n"
+                    "  2. Numbered rows: read the item number exactly (1, 2, 3 ...).\n"
+                    "  3. Sub-item / accessory rows have a BLANK NO. cell — output item_num=0.\n"
+                    "     Do NOT carry forward the parent item's number into the sub-item row.\n"
+                    "  4. After a sub-item row, the NEXT numbered item resumes the sequence.\n"
+                    "     Stay synchronized with the actual row you are reading in the image.\n\n"
+                    "  === ANTI-SWAP CHECK (LEFTMOST vs RIGHTMOST NARROW COLUMN) ===\n"
+                    "  A BOM has TWO narrow integer columns that look similar:\n"
+                    "    - LEFTMOST narrow column  = Item Number  (1, 2, 3 ... sequential)\n"
+                    "    - RIGHTMOST narrow column = QTY          (can repeat: 1,1,1,6,6,1,...)\n"
+                    "  These are EASY TO SWAP. After reading every row, ask:\n"
+                    "    'Is my item_num value from the LEFT edge of the table?'  (YES = correct)\n"
+                    "    'Is my qty value from the RIGHT edge of the table?'      (YES = correct)\n"
+                    "  If you accidentally wrote the left-column number as qty and the right as item_num,\n"
+                    "  your output will look like: item_num=6, qty=21 for what should be item_num=21, qty=6.\n"
+                    "  Always verify: item_num counts sequentially row by row; qty can be any positive integer.\n\n"
+                )
         else:
             prompt += (
                 "  PART NUMBERS — use the RAW TEXT as your primary source:\n"
@@ -3209,8 +3273,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                 # on non-BOM content)
                                 print(f"SCAN [{filename}]: Raster BOM — extracting "
                                       f"embedded images", flush=True)
-                                raster_imgs, raster_tpp = _extract_raster_bom_images(
-                                    bom_pdf_b64)
+                                raster_imgs, raster_tpp, raster_ocr = \
+                                    _extract_raster_bom_images(bom_pdf_b64)
                                 if raster_imgs:
                                     bom_images = raster_imgs
                                     hires_tiles_per_page = raster_tpp
@@ -3218,6 +3282,17 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                           f"{len(raster_imgs)} tiles from "
                                           f"{len(raster_tpp)} raster BOM pages",
                                           flush=True)
+                                    # Use OCR text as structural guide if available
+                                    if raster_ocr:
+                                        structure["_bom_raw_text"] = raster_ocr
+                                        structure["_bom_text_source"] = "ocr"
+                                        structure["_raster_bom"] = True
+                                        print(f"SCAN [{filename}]: Raster OCR "
+                                              f"guide: {len(raster_ocr)} chars",
+                                              flush=True)
+                                    else:
+                                        structure["_bom_raw_text"] = ""
+                                        structure["_bom_text_source"] = "image_only"
                                 else:
                                     # Final fallback: full-page renders
                                     print(f"SCAN [{filename}]: No embedded images, "
@@ -3225,8 +3300,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                     bom_images = _render_pdf_to_image(
                                         bom_pdf_b64, dpi=min(_dpi, 400))
                                     hires_tiles_per_page = [1] * len(bom_images)
-                                structure["_bom_raw_text"] = ""
-                                structure["_bom_text_source"] = "image_only"
+                                    structure["_bom_raw_text"] = ""
+                                    structure["_bom_text_source"] = "image_only"
                                 structure["_per_page_image"] = True
                         else:
                             # Single-page SHX: use OCR + hires pipeline (proven to work)
