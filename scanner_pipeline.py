@@ -1311,7 +1311,11 @@ def _extract_raster_bom_images(pdf_b64):
             # rotated 90°.  Without correction, tiling produces tiles where
             # the table header is in tile 2 instead of tile 0, and Claude
             # sees half the items before the column headers → scrambled.
-            # Tesseract OSD reliably detects the rotation angle.
+            #
+            # Primary: Tesseract OSD detects rotation angle.
+            # Fallback: if OSD unavailable (missing osd.traineddata) and
+            # image is landscape (wider than tall), BOM tables are always
+            # portrait → rotate 90° CCW.
             rotation = 0
             try:
                 import pytesseract
@@ -1325,10 +1329,20 @@ def _extract_raster_bom_images(pdf_b64):
                         pil_angle = (360 - rotation) % 360
                         img = img.rotate(pil_angle, expand=True)
             except Exception as _osd_err:
-                print(f"  [Raster-Extract] OSD failed ({_osd_err}), "
-                      f"skipping rotation", flush=True)
+                print(f"  [Raster-Extract] OSD unavailable ({_osd_err})",
+                      flush=True)
 
             w, h = img.size
+
+            # Fallback: if OSD didn't rotate and image is landscape,
+            # BOM tables are always portrait (many rows, few columns).
+            # A landscape image is almost certainly a rotated BOM.
+            if rotation == 0 and w > h * 1.2:
+                img = img.rotate(90, expand=True)
+                w, h = img.size
+                rotation = 90  # for logging
+                print(f"  [Raster-Extract] Landscape heuristic: "
+                      f"rotated 90° CCW → {w}x{h}", flush=True)
 
             # ── Step 3: Fit-to-width ──
             # Resize so width <= max_tile.  This eliminates horizontal
