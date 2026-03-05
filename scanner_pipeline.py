@@ -1226,6 +1226,120 @@ def _render_bom_crops_hires_auto(pdf_b64, full_page_images, cropped_images,
 
 
 # ---------------------------------------------------------------------------
+# Raster BOM Image Extraction — extract embedded images at native resolution
+# ---------------------------------------------------------------------------
+def _extract_raster_bom_images(pdf_b64):
+    """Extract embedded BOM images directly from raster-only PDF pages.
+
+    For PDFs where BOM tables are pasted-in screenshots (not vector text),
+    extracting the original embedded images gives much higher resolution
+    than re-rendering the full page (e.g. 2729x1704 native vs ~1795x1133
+    effective from a full-page render at capped DPI).
+
+    Returns (images, tiles_per_page) where images is a list of base64 PNG
+    strings.  Returns ([], []) if extraction fails or no suitable images found.
+    """
+    try:
+        import fitz
+        from PIL import Image
+        import io
+
+        pdf_bytes = base64.b64decode(pdf_b64)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+        images = []
+        tiles_per_page = []
+        max_tile = 1568  # Claude's native resolution limit
+
+        for pg_idx in range(len(doc)):
+            page = doc[pg_idx]
+            page_images = page.get_images(full=True)
+            pg_num = pg_idx + 1
+
+            if not page_images:
+                continue
+
+            # Find the largest embedded image (the BOM table, not logos)
+            best_img = None
+            best_pixels = 0
+            for img_info in page_images:
+                xref = img_info[0]
+                try:
+                    base_image = doc.extract_image(xref)
+                    w, h = base_image["width"], base_image["height"]
+                    pixels = w * h
+                    if pixels > best_pixels and w > 300 and h > 300:
+                        best_img = base_image
+                        best_pixels = pixels
+                except Exception:
+                    continue
+
+            if best_img is None:
+                continue
+
+            img = Image.open(io.BytesIO(best_img["image"]))
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            w, h = img.size
+
+            print(f"  [Raster-Extract] Page {pg_num}: {w}x{h} embedded "
+                  f"image ({best_img['ext']})", flush=True)
+
+            # Tile large images so Claude sees characters at full size.
+            # Use both horizontal and vertical tiling like _render_bom_area_direct.
+            tile_h = 1500
+            overlap_v = 80
+            overlap_h = 120
+            page_tiles = []
+
+            if w <= max_tile and h <= max_tile:
+                # Small enough — send as-is
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                page_tiles.append(base64.b64encode(buf.getvalue()).decode())
+            else:
+                # Need tiling
+                n_cols = max(1, -(-w // (max_tile - overlap_h)))  # ceiling div
+                col_w = max_tile if n_cols == 1 else (w + overlap_h * (n_cols - 1)) // n_cols
+                col_w = min(col_w, max_tile)
+
+                for col in range(n_cols):
+                    x0 = col * (col_w - overlap_h) if col > 0 else 0
+                    x1 = min(x0 + col_w, w)
+
+                    y = 0
+                    while y < h:
+                        y_end = min(y + tile_h, h)
+                        tile = img.crop((x0, y, x1, y_end))
+                        buf = io.BytesIO()
+                        tile.save(buf, format="PNG")
+                        page_tiles.append(
+                            base64.b64encode(buf.getvalue()).decode())
+                        if y_end >= h:
+                            break
+                        y = y_end - overlap_v
+
+            images.extend(page_tiles)
+            tiles_per_page.append(len(page_tiles))
+            print(f"  [Raster-Extract] Page {pg_num}: {len(page_tiles)} tile(s)",
+                  flush=True)
+            del img
+
+        doc.close()
+
+        if not images:
+            return [], []
+
+        print(f"  [Raster-Extract] Total: {len(images)} tiles from "
+              f"{len(tiles_per_page)} pages", flush=True)
+        return images, tiles_per_page
+
+    except Exception as e:
+        print(f"  [Raster-Extract] Failed: {e}", flush=True)
+        return [], []
+
+
+# ---------------------------------------------------------------------------
 # PDF-to-Image Rendering — THE v2.5 FIX for hallucinated part numbers
 # ---------------------------------------------------------------------------
 def _render_pdf_to_image(pdf_b64, dpi=300):
@@ -3028,13 +3142,28 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                       f"({n_bom_pages} pages, tiled)",
                                       flush=True)
                             else:
-                                # Raster/image-based BOM — use full-page renders
-                                # instead of per-page PDF (which has no text layer)
-                                print(f"SCAN [{filename}]: Raster BOM — using "
-                                      f"full-page renders", flush=True)
-                                bom_images = _render_pdf_to_image(
-                                    bom_pdf_b64, dpi=min(_dpi, 400))
-                                hires_tiles_per_page = [1] * len(bom_images)
+                                # Raster/image-based BOM — extract embedded images
+                                # at native resolution (much higher quality than
+                                # full-page renders which cap DPI and waste pixels
+                                # on non-BOM content)
+                                print(f"SCAN [{filename}]: Raster BOM — extracting "
+                                      f"embedded images", flush=True)
+                                raster_imgs, raster_tpp = _extract_raster_bom_images(
+                                    bom_pdf_b64)
+                                if raster_imgs:
+                                    bom_images = raster_imgs
+                                    hires_tiles_per_page = raster_tpp
+                                    print(f"SCAN [{filename}]: Extracted "
+                                          f"{len(raster_imgs)} tiles from "
+                                          f"{len(raster_tpp)} raster BOM pages",
+                                          flush=True)
+                                else:
+                                    # Final fallback: full-page renders
+                                    print(f"SCAN [{filename}]: No embedded images, "
+                                          f"using full-page renders", flush=True)
+                                    bom_images = _render_pdf_to_image(
+                                        bom_pdf_b64, dpi=min(_dpi, 400))
+                                    hires_tiles_per_page = [1] * len(bom_images)
                                 structure["_bom_raw_text"] = ""
                                 structure["_bom_text_source"] = "image_only"
                                 structure["_per_page_image"] = True
