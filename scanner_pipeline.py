@@ -119,7 +119,7 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
                       f"OCR scanning {len(needs_ocr_scan)} pages", flush=True)
 
                 # Exact keywords for clean OCR at higher DPI
-                BOM_KW_EXACT = list(BOM_KEYWORDS)
+                BOM_KW_EXACT = list(BOM_KEYWORDS) + ["BOM"]
                 # Fuzzy fragments for noisy SHX font OCR —
                 # "BILL OF MATERIALS" often OCRs as "BLL OF WATERALS" etc.
                 BOM_KW_FUZZY = [
@@ -166,6 +166,21 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
                             bom_pages.append(pg_num)
                             print(f"  [BOM-detect] Page {pg_num}: {fuzzy_hits} "
                                   f"fuzzy BOM keywords (OCR-scan)", flush=True)
+                            found_kw = True
+
+                    # Strategy 3c: Column header pattern — if OCR text has ≥3
+                    # BOM column headers, this is almost certainly a BOM page
+                    # even if "BILL OF MATERIALS" is garbled
+                    if not found_kw:
+                        col_headers = {"ITEM NO", "PART NUMBER", "DESCRIPTION",
+                                       "QTY", "QUANTITY", "MANUFACTURER",
+                                       "MFG", "CATALOG"}
+                        col_hits = sum(1 for ch in col_headers
+                                       if ch in ocr_text)
+                        if col_hits >= 3:
+                            bom_pages.append(pg_num)
+                            print(f"  [BOM-detect] Page {pg_num}: {col_hits} "
+                                  f"column headers found (OCR)", flush=True)
 
             except ImportError:
                 print("  [BOM-detect] pytesseract not available for OCR scan",
@@ -842,6 +857,14 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
                         max(h[2] for h in hits) + 30,   # right margin
                         pg_idx,
                     )
+
+        # ── Check if ANY page had extractable words (raster detection) ──
+        total_words = sum(len(doc[i].get_text("words")) for i in range(n_pages))
+        if total_words == 0:
+            print("  [BOM-Direct] No text words on any page (raster BOM) — "
+                  "signaling full-page render fallback", flush=True)
+            doc.close()
+            return [], []
 
         # ── Secondary detection: "BILL OF MATERIALS" title text ──
         # If no column headers found, look for BOM title text to
@@ -2825,6 +2848,22 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 row_count = 50
 
         if bom_count == 0:
+            # Stage 1 missed — try programmatic detection (catches raster BOMs via OCR)
+            try:
+                prog_pages = _detect_bom_pages_programmatic(pdf_b64, hint_pages=[])
+                if prog_pages:
+                    print(f"SCAN [{filename}]: Programmatic fallback found BOM on "
+                          f"pages {prog_pages}", flush=True)
+                    bom_pages = prog_pages
+                    structure["pages_with_bom"] = prog_pages
+                    bom_count = len(prog_pages)
+                    row_count = bom_count * 15  # conservative estimate
+                    structure["bom_tables_found"] = bom_count
+                    structure["total_bom_rows"] = row_count
+            except Exception as e:
+                print(f"SCAN [{filename}]: Programmatic fallback failed: {e}", flush=True)
+
+        if bom_count == 0:
             print(f"SCAN: No BOM table found -- quantity-only scan", flush=True)
             all_flags.append("No BOM table found in drawing -- quantities estimated from schematics only")
             try:
@@ -2989,14 +3028,16 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                                       f"({n_bom_pages} pages, tiled)",
                                       flush=True)
                             else:
-                                # Fallback: per-page PDF mode
-                                bom_images = None
+                                # Raster/image-based BOM — use full-page renders
+                                # instead of per-page PDF (which has no text layer)
+                                print(f"SCAN [{filename}]: Raster BOM — using "
+                                      f"full-page renders", flush=True)
+                                bom_images = _render_pdf_to_image(
+                                    bom_pdf_b64, dpi=min(_dpi, 400))
+                                hires_tiles_per_page = [1] * len(bom_images)
                                 structure["_bom_raw_text"] = ""
-                                structure["_bom_text_source"] = "pypdf"
-                                structure["_per_page_pdf"] = True
-                                print(f"SCAN [{filename}]: BOM crop render "
-                                      f"failed, using per-page PDF fallback",
-                                      flush=True)
+                                structure["_bom_text_source"] = "image_only"
+                                structure["_per_page_image"] = True
                         else:
                             # Single-page SHX: use OCR + hires pipeline (proven to work)
                             ocr_text, bom_images_cropped, ocr_per_page = _ocr_images(bom_images)
