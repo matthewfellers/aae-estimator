@@ -2289,42 +2289,10 @@ def bom_from_scan():
     # ── Load routing rules (deterministic 4-tier engine) ─────────────────────
     routing_rules = load_routing_rules()
 
-    # ── Consolidate identical part numbers — sum quantities, preserve draw order ──
-    from collections import OrderedDict as _OD
-    _seen_pn = _OD()
-    for _itm in line_items:  # preserve scanner's document order (page 1→2→3, top→bottom)
-        _pn_key = (_itm.get("part_number") or "").strip().upper()
-        # Skip consolidation for non-numeric qty (e.g. "A/R", "AR", "REF")
-        _itm_qty = _itm.get("qty", 1)
-        _is_numeric_qty = isinstance(_itm_qty, (int, float))
-        if not _is_numeric_qty:
-            try:
-                int(_itm_qty)
-                _is_numeric_qty = True
-            except (ValueError, TypeError):
-                pass
-        if _pn_key and _pn_key != "[UNREADABLE]" and _is_numeric_qty:
-            if _pn_key in _seen_pn:
-                # Duplicate part number — sum quantities, keep first row's other fields
-                try:
-                    _seen_pn[_pn_key]["qty"] = (
-                        int(_seen_pn[_pn_key].get("qty", 1) or 1)
-                        + int(_itm.get("qty", 1) or 1)
-                    )
-                except (ValueError, TypeError):
-                    pass  # keep existing qty if int conversion fails
-            else:
-                _seen_pn[_pn_key] = dict(_itm)
-        elif _pn_key and _pn_key != "[UNREADABLE]":
-            # Non-numeric qty (A/R, REF, etc.) — keep as separate row, don't consolidate
-            _unique_key = f"__ar_{_pn_key}_{_itm.get('item_num', id(_itm))}"
-            _seen_pn[_unique_key] = dict(_itm)
-        else:
-            # Blank or unreadable part number — can't safely consolidate, keep as-is
-            _unique_key = f"__nopn_{_itm.get('item_num', id(_itm))}"
-            _seen_pn[_unique_key] = dict(_itm)
-    line_items_out = list(_seen_pn.values())
-    # ── End consolidation ──────────────────────────────────────────────────────
+    # ── Preserve every line item as-is from the scanner ──
+    # Each BOM row is a distinct line item, even if the same part number
+    # appears multiple times (different assemblies, locations, etc.).
+    line_items_out = list(line_items)
 
     row = 7; item_counter = 0
     even_fill = PatternFill("solid", fgColor="FDF8F8")
