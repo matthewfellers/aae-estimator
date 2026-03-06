@@ -977,18 +977,18 @@ def _render_bom_area_direct(pdf_b64, render_dpi=300):
 
             # Trim bottom noise BEFORE enhancement: on layout+BOM pages
             # the clip captures non-BOM content (layout labels, stamps,
-            # title block) below the BOM table.  Detect the first
-            # significant horizontal whitespace gap (≥80 px) below the
-            # header area and crop there.
-            # Trimming first ensures _enhance_for_vision's autocontrast
-            # only sees BOM content — not drawing noise that skews the
-            # histogram and degrades character accuracy.
+            # title block) below the BOM table.
+            # IMPORTANT: Only trim at a gap in the BOTTOM 30% of the
+            # image.  Pages can have MULTIPLE BOM tables (sub-assembly
+            # BOMs) with small gaps between them — we must NOT cut
+            # between tables.  Only trim the empty margin / title block
+            # area at the very bottom.
             gray_col = pil_img.convert("L").resize((1, pix_h), Image.LANCZOS)
-            _gap_start = None
-            _skip_top = 200          # skip BOM header area
-            _min_gap = 80            # ~14pt at 400 DPI
+            _min_gap = 100           # ~18pt at 400 DPI
+            _bottom_zone = int(pix_h * 0.70)  # only trim gaps below 70%
             _trimmed = False
-            for _y in range(_skip_top, pix_h):
+            _gap_start = None
+            for _y in range(_bottom_zone, pix_h):
                 if gray_col.getpixel((0, _y)) > 240:
                     if _gap_start is None:
                         _gap_start = _y
