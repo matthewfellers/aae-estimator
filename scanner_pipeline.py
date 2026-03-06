@@ -3571,10 +3571,28 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
         _MAX_STAGE5_TIME = 600  # Skip Stage 5 if scan already took >600s
         _MAX_STAGE5_TILES = 10  # Cap tiles to avoid worker timeout
 
+        # Skip Stage 5 for per-page modes: Stage 5 only gets page 1's
+        # tiles/PDF but tries to verify items from ALL pages.  Items from
+        # other pages can't be found on page 1, so Stage 5 "corrects" them
+        # by grabbing random nearby PNs — catastrophically wrong.
+        _skip_stage5_reason = None
         if _elapsed_so_far > _MAX_STAGE5_TIME:
-            print(f"SCAN [{filename}]: Skipping Stage 5 — elapsed "
-                  f"{_elapsed_so_far:.0f}s already exceeds {_MAX_STAGE5_TIME}s "
-                  f"safety limit (Stage 4 validation still applied)", flush=True)
+            _skip_stage5_reason = (
+                f"elapsed {_elapsed_so_far:.0f}s exceeds "
+                f"{_MAX_STAGE5_TIME}s safety limit"
+            )
+        elif use_per_page_image:
+            _skip_stage5_reason = (
+                "per-page image mode — Stage 5 only sees page 1 tiles "
+                "but items span multiple pages"
+            )
+
+        if _skip_stage5_reason:
+            print(f"SCAN [{filename}]: Skipping Stage 5 — "
+                  f"{_skip_stage5_reason} "
+                  f"(Stage 4 validation still applied)", flush=True)
+            for item in bom_items:
+                item["_verification_status"] = "unverified"
         else:
             # For multi-page BOMs, Stage 5 only needs to verify a sample of pages.
             stage5_images = bom_images
