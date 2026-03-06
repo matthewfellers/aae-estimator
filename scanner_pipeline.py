@@ -3147,28 +3147,30 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
             }
 
         # == PROGRAMMATIC BOM PAGE DETECTION (v2.7) ============================
-        # Stage 1 (Claude) may miss continuation BOM pages. Run a fast
-        # programmatic scan with fitz to catch any pages Claude missed.
+        # Only run programmatic detection as a FALLBACK when Stage 1 (Claude
+        # Vision) found zero BOM pages.  When Stage 1 already found pages,
+        # trust it — programmatic detection produces false positives on
+        # engineering drawings (wire schedules, terminal tables, cover-page
+        # TOC entries containing "BILL OF MATERIALS", etc.).
         bom_pages = structure.get("pages_with_bom", [])
         orig_bom_pages = list(bom_pages)  # save original for comparison
-        try:
-            prog_pages = _detect_bom_pages_programmatic(
-                pdf_b64, hint_pages=bom_pages)
-            if prog_pages:
-                merged = sorted(set(bom_pages) | set(prog_pages))
-                if merged != sorted(bom_pages):
-                    print(f"SCAN [{filename}]: Programmatic BOM detection found "
-                          f"additional pages: Stage1={bom_pages} + "
-                          f"programmatic={prog_pages} → merged={merged}", flush=True)
-                    bom_pages = merged
-                    structure["pages_with_bom"] = merged
-                    # Trust Stage 1's row count — don't inflate based on
-                    # page count.  The old "pages * 40" heuristic caused
-                    # massive overestimates (e.g. 280 vs 51 actual) when
-                    # programmatic detection added non-BOM pages.
-        except Exception as _prog_err:
-            print(f"SCAN [{filename}]: Programmatic BOM detection failed: "
-                  f"{_prog_err}", flush=True)
+        if not bom_pages:
+            # Stage 1 found nothing — try programmatic fallback
+            try:
+                prog_pages = _detect_bom_pages_programmatic(
+                    pdf_b64, hint_pages=[])
+                if prog_pages:
+                    print(f"SCAN [{filename}]: Programmatic fallback found "
+                          f"BOM on pages {prog_pages} (Stage 1 found none)",
+                          flush=True)
+                    bom_pages = prog_pages
+                    structure["pages_with_bom"] = prog_pages
+            except Exception as _prog_err:
+                print(f"SCAN [{filename}]: Programmatic BOM detection failed: "
+                      f"{_prog_err}", flush=True)
+        else:
+            print(f"SCAN [{filename}]: Stage 1 found BOM on pages "
+                  f"{bom_pages} — skipping programmatic detection", flush=True)
 
         # == EXTRACT BOM PAGES (THE KEY FIX) ==================================
         # Instead of sending the full 35-page drawing to Stage 2 & 5, extract
