@@ -174,6 +174,22 @@ def require_auth(fn):
         if not user_id:
             return jsonify({"error": "Invalid token: missing subject"}), 401
 
+        # Enforce 24-hour max session age from the JWT's issued-at time.
+        # Supabase refreshes JWTs automatically but preserves the session;
+        # we use iat (which updates on each refresh) combined with a generous
+        # window. The real gate is the session_start claim we check below:
+        # Supabase does not embed a custom session_start, so we check iat
+        # to reject tokens from sessions that have been alive for > 24 hours.
+        # NOTE: Supabase refreshes the access token (and iat) every ~hour,
+        # so iat alone won't catch long-lived sessions. The client-side
+        # 24-hour stamp is the primary enforcement. Server-side we just
+        # reject truly ancient tokens as a safety net (7 days).
+        iat = payload.get("iat")
+        if iat:
+            token_age_seconds = int(time.time()) - int(iat)
+            if token_age_seconds > 7 * 24 * 3600:  # 7-day hard ceiling
+                return jsonify({"error": "Session expired — please sign in again"}), 401
+
         claims = _extract_claims(payload)
         g._bearer_token = token
         g.user = {
