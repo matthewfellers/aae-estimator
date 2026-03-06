@@ -1618,7 +1618,15 @@ def api_test():
 
 
 @app.route("/")
-def index():
+def homepage():
+    return render_template(
+        "homepage.html",
+        supabase_url=os.environ.get("SUPABASE_URL", ""),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", ""),
+    )
+
+@app.route("/estimator")
+def estimator():
     return render_template(
         "index.html",
         supabase_url=os.environ.get("SUPABASE_URL", ""),
