@@ -2320,7 +2320,9 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 text_section = (
                     "=== OCR TEXT FROM BOM IMAGE (PYTESSERACT) ===\n"
                     "The following text was extracted by pytesseract OCR from the rendered BOM image.\n"
-                    "It provides character-by-character data for each BOM row.\n\n"
+                    "It provides character-by-character data for each BOM row.\n"
+                    "NOTE: This text may contain MULTIPLE BOM tables (e.g. sub-assembly BOMs).\n"
+                    "Extract rows from ALL tables found in this OCR text.\n\n"
                     "HOW TO USE OCR + IMAGE TOGETHER:\n"
                     "  This is a thin-stroke SHX vector font drawing. Both OCR and visual reading\n"
                     "  can make errors on similar-looking characters. Use BOTH sources together:\n\n"
@@ -2372,8 +2374,9 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         col_structure_section = (
             f"FIELD MAPPING (map each column header you see to these fields):\n"
             f"{mapping_info}\n\n"
-            "Read the HEADER ROW of the BOM table in the image to determine the actual\n"
-            "column order. Do NOT assume column positions — read them from the image.\n\n"
+            "Read the HEADER ROW of each BOM table in the image to determine the actual\n"
+            "column order. Do NOT assume column positions — read them from the image.\n"
+            "Each BOM table has its own header row — match columns for each table independently.\n\n"
         )
     else:
         col_structure_section = (
@@ -2382,7 +2385,10 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         )
 
     prompt = (
-        "You are transcribing the BOM (Bill of Materials) table from an electrical panel drawing.\n\n"
+        "You are transcribing ALL BOM (Bill of Materials) tables from an electrical panel drawing.\n"
+        "CRITICAL: A single page may contain MULTIPLE separate BOM tables (e.g. sub-assembly\n"
+        "BOMs like 'BILL OF MATERIALS - SUBASSEMBLY #1' and 'BILL OF MATERIALS - SUBASSEMBLY #2').\n"
+        "You MUST extract rows from EVERY BOM table on the page, not just the first one.\n\n"
         f"{page_instruction}"
         f"{text_section}"
         f"{col_structure_section}"
@@ -2392,7 +2398,8 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         f"un-numbered sub-item or accessory rows (they appear without an item number "
         f"directly below their parent item). The total may exceed {total_rows}.\n\n"
 
-        "YOUR TASK: Read EVERY row of the BOM table. Copy each cell value EXACTLY as printed.\n\n"
+        "YOUR TASK: Read EVERY row from EVERY BOM table on this page. Copy each cell value EXACTLY as printed.\n"
+        "If there are multiple BOM tables (e.g. sub-assemblies), read ALL of them top-to-bottom.\n\n"
 
         "=== CRITICAL RULES ===\n\n"
 
@@ -2545,7 +2552,8 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         "  alignment error. Re-read that row and the adjacent rows carefully.\n\n"
 
         "RULE 5 — COMPLETENESS:\n"
-        "  Do NOT skip ANY rows. Every physical row in the table = one item in your output.\n"
+        "  Do NOT skip ANY rows from ANY BOM table. Every physical row = one item in your output.\n"
+        "  If there are MULTIPLE BOM tables on this page, include rows from ALL of them.\n"
         '  For qty values like "A/R", "AR", "REF", keep the EXACT text as the qty value (e.g. qty:"A/R").\n'
         '  Do NOT convert these to 1 — preserve the original text exactly.\n\n'
 
