@@ -3732,6 +3732,18 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
             confidence -= 0.15
         confidence = max(0.1, min(1.0, confidence))
 
+        # Filter out items with no part number — these are assembly reference
+        # rows, notes, or other non-BOM content (e.g. the SUBASSEMBLIES table
+        # on page 1 of PS410-style drawings).
+        pre_filter = len(bom_items)
+        bom_items = [
+            itm for itm in bom_items
+            if (itm.get("part_number") or "").strip()
+        ]
+        if len(bom_items) < pre_filter:
+            print(f"SCAN [{filename}]: Filtered {pre_filter - len(bom_items)} "
+                  f"empty-PN rows ({pre_filter} → {len(bom_items)})", flush=True)
+
         total_elapsed = time.time() - pipeline_start
         result = {
             "column_mapping": column_mapping,
