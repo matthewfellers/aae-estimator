@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAE Automation — ERP Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #F8F9FA;
+  --card-bg: #FFFFFF;
+  --primary: #9B1B1B;
+  --primary-dark: #7A1010;
+  --text: #333333;
+  --text-muted: #666666;
+  --border: #E0E0E0;
+  --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --shadow-hover: 0 6px 24px rgba(0,0,0,0.12);
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ── */
+.header {
+  background: #FFFFFF;
+  border-bottom: 3px solid var(--primary);
+  padding: 0 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 68px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.header-logo {
+  height: 40px;
+  border-radius: 4px;
+}
+.header-brand {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.8rem;
+  letter-spacing: 2px;
+  color: var(--text);
+}
+.header-brand span { color: var(--primary); }
+.header-cert {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 300;
+  letter-spacing: 1px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.user-pill {
+  background: #F5F0F0;
+  color: var(--text);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.logout-btn {
+  background: none;
+  border: 1.5px solid var(--primary);
+  color: var(--primary);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.logout-btn:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ── Main Content ── */
+.main {
+  flex: 1;
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 3rem 2rem;
+}
+.page-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.6rem;
+  letter-spacing: 2px;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+.page-subtitle {
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  margin-bottom: 2.5rem;
+}
+
+/* ── Module Grid ── */
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+.module-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem 1.75rem;
+  box-shadow: var(--shadow);
+  transition: all 0.25s ease;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.module-card:hover {
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+.module-card.coming-soon {
+  opacity: 0.55;
+  cursor: default;
+}
+.module-card.coming-soon:hover {
+  box-shadow: var(--shadow);
+  transform: none;
+  border-color: var(--border);
+}
+.module-icon {
+  font-size: 2.2rem;
+  margin-bottom: 1rem;
+}
+.module-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.3rem;
+  letter-spacing: 1.5px;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+.module-desc {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  flex: 1;
+}
+.module-badge {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+.badge-active {
+  background: #E8F5E9;
+  color: #2E7D32;
+}
+.badge-soon {
+  background: #F5F5F5;
+  color: #999;
+}
+
+/* ── Footer ── */
+.footer {
+  background: #FFFFFF;
+  border-top: 1px solid var(--border);
+  padding: 1.25rem 2rem;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.footer a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+/* ── Login Overlay ── */
+#login-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 9999;
+  justify-content: center;
+  align-items: center;
+}
+#login-overlay.visible { display: flex; }
+.login-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 40px 36px;
+  width: 380px;
+  max-width: calc(100vw - 2rem);
+  text-align: center;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.18);
+}
+.login-card img { width: 140px; margin-bottom: 6px; border-radius: 4px; }
+.login-logo-name {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px;
+  letter-spacing: 3px;
+  color: #333;
+  margin-bottom: 2px;
+}
+.login-tagline {
+  font-size: 11px;
+  color: #888;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+.login-card h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px;
+  color: #2C2C2C;
+  margin-bottom: 20px;
+}
+.login-field {
+  text-align: left;
+  margin-bottom: 14px;
+}
+.login-field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #666;
+  margin-bottom: 5px;
+}
+.login-field input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1.5px solid #DDD;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #333;
+  transition: border-color 0.2s;
+}
+.login-field input:focus { outline: none; border-color: #9B1B1B; }
+.login-submit {
+  width: 100%;
+  padding: 12px;
+  background: #9B1B1B;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: background 0.2s;
+}
+.login-submit:hover { background: #7A1010; }
+.login-err {
+  color: #9B1B1B;
+  font-size: 12px;
+  margin-top: 8px;
+  display: none;
+}
+
+/* ── MFA row ── */
+#mfa-section { display: none; }
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .module-grid { grid-template-columns: 1fr; }
+  .header { padding: 0 1rem; height: 56px; }
+  .header-cert { display: none; }
+  .header-brand { font-size: 1.4rem; }
+  .main { padding: 2rem 1rem; }
+  .login-card { padding: 28px 20px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Redirect invite/recovery links to /estimator where the set-password flow lives -->
+<script>
+(function() {
+  try {
+    var h = window.location.hash;
+    if (h && (h.indexOf('type=invite') !== -1 || h.indexOf('type=recovery') !== -1)) {
+      window.location.replace('/estimator' + h);
+      return;
+    }
+  } catch(e) {}
+})();
+</script>
+
+<!-- Supabase JS client for authentication -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<!-- LOGIN OVERLAY -->
+<div id="login-overlay" class="visible">
+  <div class="login-card">
+    <img src="/static/aae_logo.jpg" alt="AAE Automation" onerror="this.style.display='none'">
+    <div class="login-logo-name">AAE AUTOMATION</div>
+    <div class="login-tagline">Enterprise Resource Planning</div>
+    <div id="signin-form">
+      <h2>Sign In</h2>
+      <div class="login-field"><label>Email</label><input type="email" id="login_email" placeholder="you@aaeautomation.com" autocomplete="username"></div>
+      <div class="login-field"><label>Password</label><input type="password" id="login_pass" placeholder="password" autocomplete="current-password"></div>
+      <div id="mfa-section">
+        <div class="login-field"><label>MFA Code</label><input type="text" id="login_mfa" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" inputmode="numeric"></div>
+      </div>
+      <button class="login-submit" onclick="doLogin()">SIGN IN</button>
+      <div class="login-err" id="login_err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header class="header" id="app-header" style="display:none">
+  <div class="header-left">
+    <img src="/static/aae_logo.jpg" alt="AAE" class="header-logo" onerror="this.style.display='none'">
+    <div>
+      <div class="header-brand">AAE <span>AUTO</span>MATION</div>
+      <div class="header-cert">UL-508A CERTIFIED PANEL SHOP</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="user-pill" id="user_pill"></span>
+    <button class="logout-btn" onclick="doLogout()">Sign Out</button>
+  </div>
+</header>
+
+<!-- MAIN CONTENT -->
+<main class="main" id="app-main" style="display:none">
+  <div class="page-title">MODULES</div>
+  <div class="page-subtitle">Select a module to get started.</div>
+
+  <div class="module-grid">
+    <!-- Estimator -->
+    <a href="/estimator" class="module-card">
+      <div class="module-icon">📐</div>
+      <div class="module-title">ESTIMATOR</div>
+      <div class="module-desc">AI-powered panel estimation. Upload drawings, scan BOMs, and generate quotes with labor calculations.</div>
+      <div class="module-badge badge-active">Active</div>
+    </a>
+
+    <!-- BOM Scanner -->
+    <a href="/estimator?tab=scanner" class="module-card">
+      <div class="module-icon">🔄</div>
+      <div class="module-title">BOM SCANNER</div>
+      <div class="module-desc">Convert QuickBooks BOMs and vendor quotes into formatted AAE master BOMs with vendor routing.</div>
+      <div class="module-badge badge-active">Active</div>
+    </a>
+
+    <!-- Packing Slips -->
+    <div class="module-card coming-soon">
+      <div class="module-icon">📦</div>
+      <div class="module-title">PACKING SLIPS</div>
+      <div class="module-desc">Generate and manage packing slips for outgoing shipments with barcode tracking.</div>
+      <div class="module-badge badge-soon">Coming Soon</div>
+    </div>
+
+    <!-- Shipping Docs -->
+    <div class="module-card coming-soon">
+      <div class="module-icon">🚚</div>
+      <div class="module-title">SHIPPING DOCS</div>
+      <div class="module-desc">Create bills of lading, shipping labels, and freight documentation for panel shipments.</div>
+      <div class="module-badge badge-soon">Coming Soon</div>
+    </div>
+  </div>
+</main>
+
+<!-- FOOTER -->
+<footer class="footer" id="app-footer" style="display:none">
+  AAE Automation Inc. &middot; 8528 SW 2nd St, OKC, OK 73128 &middot;
+  <a href="tel:4052101567">405-210-1567</a> &middot;
+  <a href="https://aaeok.com" target="_blank">aaeok.com</a><br>
+  UL-508A Certified Industrial Control Panel Shop
+</footer>
+
+<script>
+// ── Supabase Auth ──────────────────────────────────────────────────────────
+const SUPABASE_URL  = "{{ supabase_url }}";
+const SUPABASE_ANON = "{{ supabase_anon_key }}";
+
+let _sbClient = null;
+let _accessToken = null;
+let _pendingMfaFactorId = null;
+
+// ── 24-hour session lifetime ───────────────────────────────────────────────
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+function stampSessionLogin() {
+  localStorage.setItem("aae_session_start", Date.now().toString());
+}
+function isSessionExpiredByAge() {
+  const start = parseInt(localStorage.getItem("aae_session_start") || "0", 10);
+  if (!start) return true;
+  return (Date.now() - start) > SESSION_MAX_AGE_MS;
+}
+function clearSessionStamp() {
+  localStorage.removeItem("aae_session_start");
+}
+
+if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undefined") {
+  _sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { persistSession: true, detectSessionInUrl: false }
+  });
+
+  // Auto-restore session on page load
+  (async () => {
+    try {
+      // Enforce 24-hour max session lifetime
+      if (isSessionExpiredByAge()) {
+        console.log("[auth] Session older than 24 hours — requiring re-login");
+        clearSessionStamp();
+        try { await _sbClient.auth.signOut(); } catch(e) {}
+        _accessToken = null;
+        document.getElementById("login-overlay").classList.add("visible");
+        return;
+      }
+
+      const { data: { session } } = await _sbClient.auth.getSession();
+      if (session?.access_token) {
+        _accessToken = session.access_token;
+        // Verify token is still valid against server
+        const resp = await fetch("/api/me", { headers: { "Authorization": "Bearer " + _accessToken } });
+        if (resp.ok) {
+          const profile = await resp.json();
+          onLoginSuccess(profile);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("[auth] Session restore failed:", e.message);
+    }
+    // No valid session — show login
+    document.getElementById("login-overlay").classList.add("visible");
+  })();
+
+  // Keep token in sync on auto-refresh
+  _sbClient.auth.onAuthStateChange((event, session) => {
+    if (session?.access_token) {
+      _accessToken = session.access_token;
+    }
+  });
+}
+
+function showLoginErr(msg) {
+  const el = document.getElementById("login_err");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+async function doLogin() {
+  const email = document.getElementById("login_email").value.trim();
+  const pass  = document.getElementById("login_pass").value;
+  const mfaCode = document.getElementById("login_mfa").value.trim();
+  const btn   = document.querySelector("#signin-form .login-submit");
+
+  document.getElementById("login_err").style.display = "none";
+
+  if (!_sbClient) {
+    showLoginErr("Auth service not available. Contact your administrator.");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "SIGNING IN...";
+
+  try {
+    // If MFA challenge is pending, verify
+    if (_pendingMfaFactorId) {
+      if (!mfaCode) { showLoginErr("Enter your 6-digit MFA code."); return; }
+      const { data: chalData, error: chalErr } = await _sbClient.auth.mfa.challengeAndVerify({
+        factorId: _pendingMfaFactorId,
+        code: mfaCode
+      });
+      if (chalErr) throw chalErr;
+      _pendingMfaFactorId = null;
+      const { data: sessionData } = await _sbClient.auth.getSession();
+      _accessToken = sessionData?.session?.access_token;
+    } else {
+      // Standard email/password sign-in
+      const { data, error } = await _sbClient.auth.signInWithPassword({ email, password: pass });
+      if (error) throw error;
+
+      // Check if MFA is required
+      const { data: factorsData } = await _sbClient.auth.mfa.listFactors();
+      const verifiedFactors = (factorsData?.totp || []).filter(f => f.status === 'verified');
+      if (verifiedFactors.length > 0) {
+        _pendingMfaFactorId = verifiedFactors[0].id;
+        document.getElementById("mfa-section").style.display = "block";
+        btn.textContent = "VERIFY MFA";
+        btn.disabled = false;
+        document.getElementById("login_mfa").focus();
+        return;
+      }
+
+      _accessToken = data.session?.access_token;
+    }
+
+    // Fetch user profile
+    const resp = await fetch("/api/me", { headers: { "Authorization": "Bearer " + _accessToken } });
+    if (!resp.ok) throw new Error("Failed to load profile");
+    const profile = await resp.json();
+    stampSessionLogin(); // start 24-hour session clock
+    onLoginSuccess(profile);
+
+  } catch (err) {
+    _pendingMfaFactorId = null;
+    document.getElementById("mfa-section").style.display = "none";
+    showLoginErr(err.message || "Sign-in failed. Check your credentials.");
+  } finally {
+    btn.disabled = false;
+    if (!_pendingMfaFactorId) btn.textContent = "SIGN IN";
+  }
+}
+
+function onLoginSuccess(profile) {
+  document.getElementById("login-overlay").classList.remove("visible");
+  document.getElementById("app-header").style.display = "flex";
+  document.getElementById("app-main").style.display = "block";
+  document.getElementById("app-footer").style.display = "block";
+  const name = profile.display_name || profile.email || "User";
+  document.getElementById("user_pill").textContent = name;
+}
+
+async function doLogout() {
+  if (_sbClient) { try { await _sbClient.auth.signOut(); } catch(e) {} }
+  _accessToken = null;
+  clearSessionStamp();
+  document.getElementById("app-header").style.display = "none";
+  document.getElementById("app-main").style.display = "none";
+  document.getElementById("app-footer").style.display = "none";
+  document.getElementById("login-overlay").classList.add("visible");
+  document.getElementById("login_pass").value = "";
+  document.getElementById("login_mfa").value = "";
+  document.getElementById("login_err").style.display = "none";
+  document.getElementById("mfa-section").style.display = "none";
+  _pendingMfaFactorId = null;
+}
+
+// Enter key submits login
+["login_email", "login_pass", "login_mfa"].forEach(id => {
+  document.getElementById(id)?.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+});
+</script>
+</body>
+</html>
