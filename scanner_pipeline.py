@@ -75,16 +75,35 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
             page = doc[pg_idx]
             found = False
 
-            # --- Strategy 1: find_tables() ---
+            # --- Strategy 1: find_tables() + BOM column header check ---
+            # Engineering drawings have many tables (wire schedules, terminal
+            # schedules, I/O tables) that have 8+ rows but are NOT BOMs.
+            # Require the page to also have BOM-like column headers in the
+            # text layer to distinguish real BOMs from other tabular content.
+            BOM_COL_HEADERS = {"PART", "DESCRIPTION", "QTY", "QUANTITY",
+                               "ITEM", "CATALOG", "MANUFACTURER", "MFG"}
             try:
                 tabs = page.find_tables()
                 if tabs.tables:
                     best = max(tabs.tables, key=lambda t: len(t.rows))
                     if len(best.rows) >= MIN_BOM_ROWS:
-                        bom_pages.append(pg_num)
-                        print(f"  [BOM-detect] Page {pg_num}: table with "
-                              f"{len(best.rows)} rows (find_tables)", flush=True)
-                        found = True
+                        # Check if page text has BOM-like column headers
+                        page_words = page.get_text("words")
+                        page_text = " ".join(
+                            w[4] for w in page_words).upper() if page_words else ""
+                        col_hits = sum(1 for ch in BOM_COL_HEADERS
+                                       if ch in page_text)
+                        if col_hits >= 2:
+                            bom_pages.append(pg_num)
+                            print(f"  [BOM-detect] Page {pg_num}: table with "
+                                  f"{len(best.rows)} rows + {col_hits} BOM "
+                                  f"column headers (find_tables)", flush=True)
+                            found = True
+                        else:
+                            print(f"  [BOM-detect] Page {pg_num}: table with "
+                                  f"{len(best.rows)} rows but only {col_hits} "
+                                  f"BOM headers — skipping (not a BOM)",
+                                  flush=True)
             except (AttributeError, Exception):
                 pass
 
@@ -2106,9 +2125,11 @@ def _stage1_detect_structure(claude_client, pdf_b64, thinking_budget=10000):
         "- QTY column: small integers (1, 2, 5, 32)\n"
         "- ITEM column: sequential row numbers (1, 2, 3...)\n"
         "- If a column header is ambiguous, read 2-3 cells below it to determine what data type it holds\n\n"
-        "Count total_bom_rows by counting every data row in the table (not headers, not blank rows).\n"
+        "Count total_bom_rows by counting every data row across ALL BOM tables (not headers, not blank rows).\n"
         "Count CAREFULLY -- go row by row and count each one.\n"
         "If the BOM spans MULTIPLE pages, add up ALL rows from ALL BOM pages.\n"
+        "A SINGLE PAGE may have MULTIPLE separate BOM tables (e.g. sub-assembly BOMs).\n"
+        "Count rows from ALL BOM tables on each page, not just the first one.\n"
         "CRITICAL: total_bom_rows MUST be >= 1 if bom_tables_found >= 1. "
         "Never return 0 if you found a BOM table — count carefully and report the real number.\n\n"
         "CRITICAL: Report the EXACT page number(s) where the BOM table appears in pages_with_bom.\n"
@@ -2124,8 +2145,11 @@ def _stage1_detect_structure(claude_client, pdf_b64, thinking_budget=10000):
         "- Terminal schedules (list terminal block assignments)\n"
         "- Nameplate schedules (list nameplates/labels)\n"
         "- Cable schedules\n"
+        "- Marker / label schedules (list marker positions and label text — NOT a BOM)\n"
         "- Pages with ONLY schematics and NO parts table are not BOM pages\n"
-        "- But a page with BOTH a schematic AND a parts/BOM table IS a BOM page — include it!"
+        "- But a page with BOTH a schematic AND a parts/BOM table IS a BOM page — include it!\n"
+        "- IMPORTANT: A page may have BOTH a BOM table AND a non-BOM schedule (like a marker\n"
+        "  schedule). Only extract data from the BOM table, NOT the schedule."
     )
 
     result = _call_claude(claude_client, pdf_b64, prompt,
@@ -2178,9 +2202,10 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
         if using_images and text_source == "image_only":
             # Direct BOM crop image — single image of the BOM area, not tiles
             page_instruction = (
-                "This is a HIGH-RESOLUTION image of the BILL OF MATERIALS table\n"
-                "cropped directly from an engineering drawing.\n"
-                "The image shows ONLY the BOM table area. Read EVERY row.\n\n"
+                "This is a HIGH-RESOLUTION image cropped from an engineering drawing.\n"
+                "The image may contain ONE or MULTIPLE BILL OF MATERIALS tables\n"
+                "(e.g. separate sub-assembly BOMs). Read EVERY row from ALL BOM tables.\n"
+                "Do NOT stop after the first table — look for additional BOMs below it.\n\n"
                 "This drawing uses SHX vector fonts (CAD line-art text).\n"
                 "The text IS readable — read each character carefully from the image.\n\n"
                 "=== CRITICAL: READ THE IMAGE — DO NOT INVENT ===\n"
@@ -2202,9 +2227,14 @@ def _stage2_extract_bom(claude_client, pdf_b64, structure, bom_images=None):
                 "extract each row ONCE.\n"
                 "The BILL OF MATERIALS table may occupy only PART of the image — the rest\n"
                 "may show panel layouts, schematics, or other diagrams.\n"
-                "FIND the BILL OF MATERIALS table (look for a grid with headers like\n"
+                "FIND ALL BILL OF MATERIALS tables (look for grids with headers like\n"
                 "NO./ITEM, DESCRIPTION, MANUFACTURER, PART NUMBER, QTY).\n"
-                "Read EVERY row of that table. IGNORE everything outside the table.\n\n"
+                "A single page may contain MULTIPLE separate BOM tables (e.g. sub-assembly\n"
+                "BOMs). Each will have its own 'BILL OF MATERIALS' heading. Read EVERY row\n"
+                "from EVERY BOM table you find. Do NOT stop after the first table.\n"
+                "IGNORE non-BOM tables like MARKER SCHEDULES, LABEL SCHEDULES, TERMINAL\n"
+                "BLOCK SCHEDULES, and WIRE SCHEDULES — only read tables with PART NUMBER\n"
+                "and QTY columns.\n\n"
                 "=== CRITICAL: READ THE IMAGE — DO NOT INVENT, DO NOT REFUSE ===\n"
                 "RULE 1 — Never skip rows: Return a JSON entry for EVERY numbered row in\n"
                 "the BOM table. Returning 0 items when a table is visible is always wrong.\n"
@@ -3128,34 +3158,30 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
             }
 
         # == PROGRAMMATIC BOM PAGE DETECTION (v2.7) ============================
-        # Stage 1 (Claude) may miss continuation BOM pages. Run a fast
-        # programmatic scan with fitz to catch any pages Claude missed.
+        # Only run programmatic detection as a FALLBACK when Stage 1 (Claude
+        # Vision) found zero BOM pages.  When Stage 1 already found pages,
+        # trust it — programmatic detection produces false positives on
+        # engineering drawings (wire schedules, terminal tables, cover-page
+        # TOC entries containing "BILL OF MATERIALS", etc.).
         bom_pages = structure.get("pages_with_bom", [])
         orig_bom_pages = list(bom_pages)  # save original for comparison
-        try:
-            prog_pages = _detect_bom_pages_programmatic(
-                pdf_b64, hint_pages=bom_pages)
-            if prog_pages:
-                merged = sorted(set(bom_pages) | set(prog_pages))
-                if merged != sorted(bom_pages):
-                    print(f"SCAN [{filename}]: Programmatic BOM detection found "
-                          f"additional pages: Stage1={bom_pages} + "
-                          f"programmatic={prog_pages} → merged={merged}", flush=True)
-                    bom_pages = merged
-                    structure["pages_with_bom"] = merged
-                    # Update row count estimate if we gained pages
-                    if len(merged) > len(orig_bom_pages):
-                        # Rough estimate: ~40 rows per BOM page
-                        new_estimate = max(row_count, len(merged) * 40)
-                        if new_estimate > row_count:
-                            print(f"SCAN [{filename}]: Adjusting row estimate "
-                                  f"{row_count} → {new_estimate} for "
-                                  f"{len(merged)} BOM pages", flush=True)
-                            structure["total_bom_rows"] = new_estimate
-                            row_count = new_estimate
-        except Exception as _prog_err:
-            print(f"SCAN [{filename}]: Programmatic BOM detection failed: "
-                  f"{_prog_err}", flush=True)
+        if not bom_pages:
+            # Stage 1 found nothing — try programmatic fallback
+            try:
+                prog_pages = _detect_bom_pages_programmatic(
+                    pdf_b64, hint_pages=[])
+                if prog_pages:
+                    print(f"SCAN [{filename}]: Programmatic fallback found "
+                          f"BOM on pages {prog_pages} (Stage 1 found none)",
+                          flush=True)
+                    bom_pages = prog_pages
+                    structure["pages_with_bom"] = prog_pages
+            except Exception as _prog_err:
+                print(f"SCAN [{filename}]: Programmatic BOM detection failed: "
+                      f"{_prog_err}", flush=True)
+        else:
+            print(f"SCAN [{filename}]: Stage 1 found BOM on pages "
+                  f"{bom_pages} — skipping programmatic detection", flush=True)
 
         # == EXTRACT BOM PAGES (THE KEY FIX) ==================================
         # Instead of sending the full 35-page drawing to Stage 2 & 5, extract
@@ -3397,15 +3423,46 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 tile_offset += n_tiles
 
                 page_structure = dict(structure)
-                page_row_est = max(5, row_count // n_pages)
+                # Generous minimum — a page can have MULTIPLE BOM tables
+                # (e.g. two sub-assembly BOMs with 7-10 rows each = 20+)
+                page_row_est = max(20, row_count // n_pages)
                 page_structure["total_bom_rows"] = page_row_est
                 page_structure["_bom_extracted"] = True
                 page_structure["pages_with_bom"] = [1]
-                page_structure["_bom_raw_text"] = ""
-                page_structure["_bom_text_source"] = "image_only"
 
-                print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
-                      f"{n_tiles} tile(s), ~{page_row_est} rows est", flush=True)
+                # OCR each page's tiles so Claude gets text guidance
+                # even for SHX drawings (no extractable text layer).
+                # This is what makes Continental work — real text.
+                page_ocr = ""
+                try:
+                    import pytesseract
+                    from PIL import Image
+                    import io
+                    ocr_parts = []
+                    for t_idx, tile_b64 in enumerate(page_tiles):
+                        tile_bytes = base64.b64decode(tile_b64)
+                        tile_img = Image.open(io.BytesIO(tile_bytes))
+                        tile_text = pytesseract.image_to_string(
+                            tile_img, config="--psm 6 --oem 3").strip()
+                        if tile_text:
+                            ocr_parts.append(tile_text)
+                    page_ocr = "\n".join(ocr_parts)
+                except Exception as _ocr_err:
+                    print(f"SCAN [{filename}]: Page {pg_idx+1} OCR failed: "
+                          f"{_ocr_err}", flush=True)
+
+                if page_ocr:
+                    page_structure["_bom_raw_text"] = page_ocr
+                    page_structure["_bom_text_source"] = "ocr"
+                    print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
+                          f"{n_tiles} tile(s), ~{page_row_est} rows est, "
+                          f"OCR {len(page_ocr)} chars", flush=True)
+                else:
+                    page_structure["_bom_raw_text"] = ""
+                    page_structure["_bom_text_source"] = "image_only"
+                    print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
+                          f"{n_tiles} tile(s), ~{page_row_est} rows est, "
+                          f"no OCR text", flush=True)
 
                 try:
                     page_result = _stage2_extract_bom(
@@ -3447,7 +3504,8 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                     pdf_b64, [pg_num])
 
                 page_structure = dict(structure)
-                page_row_est = max(5, row_count // n_pages)
+                # Generous minimum — pages can have multiple sub-assembly BOMs
+                page_row_est = max(20, row_count // n_pages)
                 page_structure["total_bom_rows"] = page_row_est
                 page_structure["_bom_extracted"] = True
                 page_structure["pages_with_bom"] = [1]  # single page
