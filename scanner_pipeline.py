@@ -75,16 +75,35 @@ def _detect_bom_pages_programmatic(pdf_b64, hint_pages=None):
             page = doc[pg_idx]
             found = False
 
-            # --- Strategy 1: find_tables() ---
+            # --- Strategy 1: find_tables() + BOM column header check ---
+            # Engineering drawings have many tables (wire schedules, terminal
+            # schedules, I/O tables) that have 8+ rows but are NOT BOMs.
+            # Require the page to also have BOM-like column headers in the
+            # text layer to distinguish real BOMs from other tabular content.
+            BOM_COL_HEADERS = {"PART", "DESCRIPTION", "QTY", "QUANTITY",
+                               "ITEM", "CATALOG", "MANUFACTURER", "MFG"}
             try:
                 tabs = page.find_tables()
                 if tabs.tables:
                     best = max(tabs.tables, key=lambda t: len(t.rows))
                     if len(best.rows) >= MIN_BOM_ROWS:
-                        bom_pages.append(pg_num)
-                        print(f"  [BOM-detect] Page {pg_num}: table with "
-                              f"{len(best.rows)} rows (find_tables)", flush=True)
-                        found = True
+                        # Check if page text has BOM-like column headers
+                        page_words = page.get_text("words")
+                        page_text = " ".join(
+                            w[4] for w in page_words).upper() if page_words else ""
+                        col_hits = sum(1 for ch in BOM_COL_HEADERS
+                                       if ch in page_text)
+                        if col_hits >= 2:
+                            bom_pages.append(pg_num)
+                            print(f"  [BOM-detect] Page {pg_num}: table with "
+                                  f"{len(best.rows)} rows + {col_hits} BOM "
+                                  f"column headers (find_tables)", flush=True)
+                            found = True
+                        else:
+                            print(f"  [BOM-detect] Page {pg_num}: table with "
+                                  f"{len(best.rows)} rows but only {col_hits} "
+                                  f"BOM headers — skipping (not a BOM)",
+                                  flush=True)
             except (AttributeError, Exception):
                 pass
 
@@ -3143,16 +3162,10 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                           f"programmatic={prog_pages} → merged={merged}", flush=True)
                     bom_pages = merged
                     structure["pages_with_bom"] = merged
-                    # Update row count estimate if we gained pages
-                    if len(merged) > len(orig_bom_pages):
-                        # Rough estimate: ~40 rows per BOM page
-                        new_estimate = max(row_count, len(merged) * 40)
-                        if new_estimate > row_count:
-                            print(f"SCAN [{filename}]: Adjusting row estimate "
-                                  f"{row_count} → {new_estimate} for "
-                                  f"{len(merged)} BOM pages", flush=True)
-                            structure["total_bom_rows"] = new_estimate
-                            row_count = new_estimate
+                    # Trust Stage 1's row count — don't inflate based on
+                    # page count.  The old "pages * 40" heuristic caused
+                    # massive overestimates (e.g. 280 vs 51 actual) when
+                    # programmatic detection added non-BOM pages.
         except Exception as _prog_err:
             print(f"SCAN [{filename}]: Programmatic BOM detection failed: "
                   f"{_prog_err}", flush=True)
