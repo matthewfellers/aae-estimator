@@ -2292,7 +2292,12 @@ def bom_from_scan():
     # ── Preserve every line item as-is from the scanner ──
     # Each BOM row is a distinct line item, even if the same part number
     # appears multiple times (different assemblies, locations, etc.).
-    line_items_out = list(line_items)
+    # Filter out rows with no part number — these are assembly references,
+    # notes, or other non-BOM content that slipped through.
+    line_items_out = [
+        itm for itm in line_items
+        if (itm.get("part_number") or "").strip()
+    ]
 
     row = 7; item_counter = 0
     even_fill = PatternFill("solid", fgColor="FDF8F8")
