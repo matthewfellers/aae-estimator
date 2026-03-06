@@ -605,6 +605,7 @@ body {
 
 <nav class="topnav">
   <div style="display:flex;align-items:center;gap:10px">
+    <a href="/" style="text-decoration:none;color:var(--lightblue);font-size:0.82rem;font-weight:500;padding:4px 10px;border:1px solid rgba(244,169,168,0.3);border-radius:5px;transition:all 0.2s;white-space:nowrap;" onmouseover="this.style.background='rgba(255,255,255,0.08)';this.style.borderColor='rgba(244,169,168,0.5)'" onmouseout="this.style.background='transparent';this.style.borderColor='rgba(244,169,168,0.3)'">&larr; Home</a>
     <img src="/static/aae_logo.jpg" alt="AAE" class="topnav-logo" onerror="this.style.display='none'">
     <div>
       <div class="topnav-brand">AAE <span>AUTO</span>MATION</div>
@@ -1776,6 +1777,20 @@ function clearForm() {
 let currentUser = null;   // { id, email, role, display_name, aal }
 let _accessToken = null;  // In-memory only — never written to localStorage/sessionStorage
 
+// ── 24-hour session lifetime ───────────────────────────────────────────────
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+function stampSessionLogin() {
+  localStorage.setItem("aae_session_start", Date.now().toString());
+}
+function isSessionExpiredByAge() {
+  const start = parseInt(localStorage.getItem("aae_session_start") || "0", 10);
+  if (!start) return true; // no stamp = treat as expired
+  return (Date.now() - start) > SESSION_MAX_AGE_MS;
+}
+function clearSessionStamp() {
+  localStorage.removeItem("aae_session_start");
+}
+
 // Supabase client used only for Auth flows (not direct data access)
 const SUPABASE_URL  = "{{ supabase_url }}";
 const SUPABASE_ANON = "{{ supabase_anon_key }}";
@@ -1830,6 +1845,15 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
       return;
     }
     try {
+      // Enforce 24-hour max session lifetime
+      if (isSessionExpiredByAge()) {
+        console.log("[auth] Session older than 24 hours — requiring re-login");
+        clearSessionStamp();
+        try { await _sbClient.auth.signOut(); } catch(e) {}
+        _accessToken = null;
+        return; // fall through to login screen
+      }
+
       const { data: { session } } = await _sbClient.auth.getSession();
       if (session && session.access_token) {
         _accessToken = session.access_token;
@@ -1924,6 +1948,7 @@ async function doLogin() {
       const profileBody = await profileResp.json().catch(() => ({}));
       if (!profileResp.ok) throw new Error(profileBody.error || "Profile load failed");
       currentUser = profileBody;
+      stampSessionLogin(); // start 24-hour session clock
       onLoginSuccess();
       return;
     }
@@ -1958,6 +1983,7 @@ async function doLogin() {
     const profileBody = await profileResp.json().catch(() => ({}));
     if (!profileResp.ok) throw new Error(profileBody.error || "Profile load failed (" + profileResp.status + ")");
     currentUser = profileBody;
+    stampSessionLogin(); // start 24-hour session clock
     onLoginSuccess();
   } catch (err) {
     _accessToken = null;
@@ -1978,17 +2004,23 @@ function onLoginSuccess() {
   if (adminBtn) adminBtn.style.display = (currentUser.role === "admin") ? "inline-flex" : "none";
   loadHistory();
   loadCalibration();
+  // Auto-switch tab if ?tab= query param is present (e.g. ?tab=scanner → BOM Converter)
+  const urlTab = new URLSearchParams(window.location.search).get("tab");
+  if (urlTab === "scanner") {
+    showTab("bom-converter");
+    // Highlight correct tab button
+    document.querySelectorAll(".tab-btn").forEach(b => {
+      b.classList.toggle("active", b.textContent.includes("BOM"));
+    });
+  }
 }
 
 async function doLogout() {
   if (_sbClient) { try { await _sbClient.auth.signOut(); } catch(e) {} }
   _accessToken = null;
   currentUser  = null;
-  document.getElementById("login-overlay").classList.add("visible");
-  document.getElementById("login_pass").value = "";
-  document.getElementById("login_err").style.display = "none";
-  const adminBtn = document.getElementById("adminTabBtn");
-  if (adminBtn) adminBtn.style.display = "none";
+  clearSessionStamp();
+  window.location.href = "/";
 }
 
 ["login_email","login_pass","login_mfa"].forEach(id => {
