@@ -3438,39 +3438,16 @@ def scan_drawing(claude_client, pdf_b64, filename="drawing.pdf"):
                 page_structure["_bom_extracted"] = True
                 page_structure["pages_with_bom"] = [1]
 
-                # OCR each page's tiles so Claude gets text guidance
-                # even for SHX drawings (no extractable text layer).
-                # This is what makes Continental work — real text.
-                page_ocr = ""
-                try:
-                    import pytesseract
-                    from PIL import Image
-                    import io
-                    ocr_parts = []
-                    for t_idx, tile_b64 in enumerate(page_tiles):
-                        tile_bytes = base64.b64decode(tile_b64)
-                        tile_img = Image.open(io.BytesIO(tile_bytes))
-                        tile_text = pytesseract.image_to_string(
-                            tile_img, config="--psm 6 --oem 3").strip()
-                        if tile_text:
-                            ocr_parts.append(tile_text)
-                    page_ocr = "\n".join(ocr_parts)
-                except Exception as _ocr_err:
-                    print(f"SCAN [{filename}]: Page {pg_idx+1} OCR failed: "
-                          f"{_ocr_err}", flush=True)
+                # SHX per-page: image-only mode. OCR on SHX fonts
+                # introduces character errors (G→C, etc.) that override
+                # Claude's correct visual reading. The trim fix ensures
+                # both BOMs are visible in the tiles — Claude reads them
+                # from the images directly.
+                page_structure["_bom_raw_text"] = ""
+                page_structure["_bom_text_source"] = "image_only"
 
-                if page_ocr:
-                    page_structure["_bom_raw_text"] = page_ocr
-                    page_structure["_bom_text_source"] = "ocr"
-                    print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
-                          f"{n_tiles} tile(s), ~{page_row_est} rows est, "
-                          f"OCR {len(page_ocr)} chars", flush=True)
-                else:
-                    page_structure["_bom_raw_text"] = ""
-                    page_structure["_bom_text_source"] = "image_only"
-                    print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
-                          f"{n_tiles} tile(s), ~{page_row_est} rows est, "
-                          f"no OCR text", flush=True)
+                print(f"SCAN [{filename}]: Stage 2 page {pg_idx+1}/{n_pages}: "
+                      f"{n_tiles} tile(s), ~{page_row_est} rows est", flush=True)
 
                 try:
                     page_result = _stage2_extract_bom(
