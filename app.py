@@ -2392,6 +2392,147 @@ def bom_from_scan():
     ws.page_setup.fitToPage = True; ws.page_setup.fitToWidth = 1
     ws.print_title_rows = "1:6"
 
+    # ── Consolidated BOM sheet — group like parts, sum quantities ─────────────
+    from collections import OrderedDict as _OD
+    _consolidated = _OD()  # keyed by part_number (uppercase)
+    for itm in line_items_out:
+        pn = (itm.get("part_number") or "").strip()
+        if not pn:
+            continue
+        key = pn.lstrip("'").upper()  # strip leading apostrophe for grouping
+        qty_raw = itm.get("qty", 0) if itm.get("qty") is not None else 1
+        try:
+            qty_val = int(qty_raw)
+        except (ValueError, TypeError):
+            qty_val = 0
+        if key in _consolidated:
+            _consolidated[key]["qty"] += qty_val
+            _consolidated[key]["count"] += 1
+        else:
+            _consolidated[key] = {
+                "part_number": pn.lstrip("'"),
+                "description": itm.get("description", ""),
+                "manufacturer": itm.get("manufacturer", ""),
+                "vendor": itm.get("_resolved_vendor", ""),
+                "unit": itm.get("unit", "ea"),
+                "qty": qty_val,
+                "count": 1,
+            }
+
+    ws2 = wb.create_sheet("Consolidated BOM")
+    for col, w in [("A",8),("B",22),("C",48),("D",8),("E",6),("F",22),("G",14),("H",12),("I",14)]:
+        ws2.column_dimensions[col].width = w
+
+    # Row 1: Banner
+    ws2.merge_cells("A1:I1"); ws2.row_dimensions[1].height = 14
+    ws2["A1"] = "AAE AUTOMATION, INC.  |  UL-NNNY  |  UL-508A Certified Industrial Control Panel Specialists"
+    s(ws2["A1"], bold=True, bg=RED, sz=11, ha="center")
+
+    # Row 2: Title
+    ws2.merge_cells("A2:E2"); ws2.row_dimensions[2].height = 34
+    ws2["A2"] = "CONSOLIDATED BOM"
+    ws2["A2"].font = Font(name="Arial", bold=True, color=WHITE, size=18)
+    ws2["A2"].fill = PatternFill("solid", fgColor=DARK_RED)
+    ws2["A2"].alignment = Alignment(horizontal="left", vertical="center")
+    ws2.merge_cells("F2:I2")
+    ws2["F2"] = job_num
+    ws2["F2"].font = Font(name="Arial", bold=True, color=WHITE, size=14)
+    ws2["F2"].fill = PatternFill("solid", fgColor=DARK_RED)
+    ws2["F2"].alignment = Alignment(horizontal="right", vertical="center")
+
+    # Row 3-4: Customer/Project + Date/Estimator
+    ws2.merge_cells("A3:B3"); ws2["A3"] = "Customer:"; s(ws2["A3"], bold=True, bg=None, fg=DARK, sz=9)
+    ws2.merge_cells("C3:E3"); ws2["C3"] = customer; s(ws2["C3"], bg=None, fg=DARK, sz=9)
+    ws2.merge_cells("F3:G3"); ws2["F3"] = "Project:"; s(ws2["F3"], bold=True, bg=None, fg=DARK, sz=9)
+    ws2.merge_cells("H3:I3"); ws2["H3"] = project; s(ws2["H3"], bg=None, fg=DARK, sz=9)
+
+    ws2.merge_cells("A4:B4"); ws2["A4"] = "Date:"; s(ws2["A4"], bold=True, bg=None, fg=DARK, sz=9)
+    ws2["C4"] = datetime.now().strftime("%m/%d/%Y"); s(ws2["C4"], bg=None, fg=DARK, sz=9)
+    ws2.merge_cells("F4:G4"); ws2["F4"] = "Estimator:"; s(ws2["F4"], bold=True, bg=None, fg=DARK, sz=9)
+    ws2["H4"] = "AAE Automation"; s(ws2["H4"], bg=None, fg=DARK, sz=9)
+
+    # Row 5: Note
+    ws2.merge_cells("A5:I5"); ws2.row_dimensions[5].height = 14
+    ws2["A5"] = "Like parts combined \u2014 quantities summed across all sub-assemblies"
+    ws2["A5"].font = Font(name="Arial", size=9, color="888080", italic=True)
+
+    # Row 6: Headers
+    c_hdrs = ["ITEM", "PART NUMBER", "DESCRIPTION", "TOTAL QTY", "U/M",
+              "MANUFACTURER", "VENDOR", "UNIT COST", "TOTAL COST"]
+    for ci, hdr in enumerate(c_hdrs, 1):
+        c = ws2.cell(row=6, column=ci, value=hdr)
+        s(c, bold=True, bg=DARK, sz=9, ha="center")
+        c.border = Border(bottom=Side(style="medium", color=RED))
+
+    # Data rows
+    c_row = 7; c_counter = 0
+    for _cdata in _consolidated.values():
+        c_counter += 1
+        fill = even_fill if c_counter % 2 == 0 else odd_fill
+        ws2.row_dimensions[c_row].height = 15
+        unit_cost = 0
+        c_vals = [
+            c_counter,
+            _cdata["part_number"],
+            _cdata["description"],
+            _cdata["qty"],
+            _cdata["unit"],
+            _cdata["manufacturer"],
+            _cdata["vendor"],
+            unit_cost,
+            unit_cost * _cdata["qty"],
+        ]
+        for ci, val in enumerate(c_vals, 1):
+            c = ws2.cell(row=c_row, column=ci, value=val)
+            c.fill = fill; c.border = bdr
+            c.font = Font(name="Arial", size=9, color=DARK)
+            if ci in (1, 4):
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif ci == 7:
+                c.font = Font(name="Arial", size=9, color=TEAL, bold=bool(val))
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif ci in (8, 9):
+                c.alignment = Alignment(horizontal="right", vertical="center")
+                c.number_format = '"$"#,##0.00'
+                c.font = Font(name="Arial", size=9, color="AAAAAA", italic=True)
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=(ci==3))
+        c_row += 1
+
+    # Total row
+    ws2.merge_cells(f"A{c_row}:H{c_row}")
+    tl2 = ws2.cell(row=c_row, column=1, value="TOTAL MATERIAL COST (pricing TBD from QuickBooks):")
+    tl2.font = Font(name="Arial", bold=True, color=DARK_RED, size=10)
+    tl2.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tl2.alignment = Alignment(horizontal="right", vertical="center")
+    tv2 = ws2.cell(row=c_row, column=9, value=f"=SUM(I7:I{c_row-1})")
+    tv2.font = Font(name="Arial", bold=True, color="AAAAAA", size=11, italic=True)
+    tv2.number_format = '"$"#,##0.00'
+    tv2.fill = PatternFill("solid", fgColor=LIGHT_RED)
+    tv2.alignment = Alignment(horizontal="right", vertical="center")
+    ws2.cell(row=c_row, column=8).fill = PatternFill("solid", fgColor=LIGHT_RED)
+    c_row += 1
+
+    # Summary line
+    ws2.merge_cells(f"A{c_row}:I{c_row}")
+    ws2.cell(row=c_row, column=1,
+        value=f"Consolidated from {len(line_items_out)} line items into {len(_consolidated)} unique parts"
+    ).font = Font(name="Arial", size=8, color="888080", italic=True)
+    c_row += 2
+
+    # Footer
+    ws2.merge_cells(f"A{c_row}:I{c_row}")
+    ft2 = ws2.cell(row=c_row, column=1,
+        value="AAE Automation, Inc.  |  8528 SW 2nd St, Oklahoma City, OK 73128  |  405-210-1567  |  mfellers@aaeok.com")
+    ft2.font = Font(name="Arial", size=8, color="888080", italic=True)
+    ft2.alignment = Alignment(horizontal="center")
+
+    ws2.freeze_panes = "A7"
+    ws2.auto_filter.ref = f"A6:I{c_row-3}"
+    ws2.page_setup.orientation = "landscape"
+    ws2.page_setup.fitToPage = True; ws2.page_setup.fitToWidth = 1
+    ws2.print_title_rows = "1:6"
+
     # ── Build ZIP: Master BOM + one simple Excel file per vendor ───────────────
     import zipfile
     from collections import defaultdict as _vdd2
