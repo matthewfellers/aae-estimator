@@ -571,8 +571,8 @@ function onLoginSuccess(profile) {
 
   // Role-gated module cards
   const role = profile.role || "viewer";
-  const schedulingRoles = ["admin", "supervisor", "shop_lead"];
-  const portalRoles = ["admin", "supervisor", "shop_lead", "shop_employee"];
+  const schedulingRoles = ["admin", "supervisor", "shop_lead", "accounting"];
+  const portalRoles = ["admin", "supervisor", "shop_lead", "shop_employee", "accounting"];
   if (schedulingRoles.includes(role)) {
     document.getElementById("card-scheduling").style.display = "";
   }

@@ -5509,7 +5509,7 @@ def sched_list_profiles():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/scheduling/employees", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_list_employees():
     try:
         sb = get_user_sb()
@@ -5591,7 +5591,7 @@ def sched_delete_employee(eid):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/scheduling/jobs", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_list_jobs():
     try:
         sb = get_user_sb()
@@ -5669,7 +5669,7 @@ def sched_delete_job(jid):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/scheduling/jobs/<jid>/panels", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_list_panels(jid):
     try:
         sb = get_user_sb()
@@ -5738,7 +5738,7 @@ def sched_delete_panel(pid):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/scheduling/assignments", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_list_assignments():
     try:
         sb = get_user_sb()
@@ -5950,7 +5950,7 @@ def sched_suggest():
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/scheduling/capacity", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_capacity():
     """Per-employee capacity: available vs committed hours for a date range."""
     start = request.args.get("start")
@@ -6006,7 +6006,7 @@ def sched_capacity():
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/scheduling/experience", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_experience():
     try:
         sb = get_user_sb()
@@ -6180,7 +6180,7 @@ def sched_review_pto(pid):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/scheduling/reports/hours-by-job", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_report_hours_by_job():
     """Hours logged per job (from timesheets)."""
     try:
@@ -6206,7 +6206,7 @@ def sched_report_hours_by_job():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/scheduling/reports/hours-by-employee", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_report_hours_by_employee():
     """Hours logged per employee (from timesheets)."""
     try:
@@ -6236,7 +6236,7 @@ def sched_report_hours_by_employee():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/scheduling/reports/weekly-totals", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_report_weekly_totals():
     """Timesheet week totals with approval status."""
     try:
@@ -6257,7 +6257,7 @@ def sched_report_weekly_totals():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/scheduling/reports/estimated-vs-actual", methods=["GET"])
-@require_role("admin", "supervisor", "shop_lead")
+@require_role("admin", "supervisor", "shop_lead", "accounting")
 def sched_report_est_vs_actual():
     """Compare estimated panel hours vs actual timesheet hours."""
     try:
