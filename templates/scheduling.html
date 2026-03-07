@@ -353,6 +353,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="form-row"><div class="form-group"><label>Hire Date</label><input type="date" id="emp-hire-date"></div><div class="form-group"><label>Default Hours/Week</label><input type="number" id="emp-default-hours" step="0.5" min="0" value="40"></div></div>
   <div class="form-row"><div class="form-group"><label>Vacation Balance (hrs)</label><input type="number" id="emp-vacation" step="0.5" min="0" value="0"></div><div class="form-group"><label>Sick Balance (hrs)</label><input type="number" id="emp-sick" step="0.5" min="0" value="0"></div></div>
   <div class="form-group"><label>Holiday Balance (hrs)</label><input type="number" id="emp-holiday" step="0.5" min="0" value="0" style="max-width:200px;"></div>
+  <div class="form-group"><label>Link to Login Account (User ID)</label><select id="emp-user-id"><option value="">— Not linked —</option></select><div style="font-size:.72rem;color:#999;margin-top:3px;">Links this employee to a login account so they can use the Employee Portal.</div></div>
   <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-employee')">Cancel</button><button class="btn btn-primary" onclick="saveEmployee()">Save Employee</button></div>
 </div></div>
 
@@ -1027,7 +1028,7 @@ async function loadEmployees(){
   }catch(e){ toast("Failed to load employees: "+e.message,"error"); tbody.innerHTML='<tr><td colspan="9" class="loading-row">Failed</td></tr>'; }
 }
 
-function openEmployeeModal(editId, data){
+async function openEmployeeModal(editId, data){
   const e=data||null;
   document.getElementById("modal-employee-title").textContent=e?"EDIT EMPLOYEE":"ADD EMPLOYEE";
   document.getElementById("emp-edit-id").value=editId||"";
@@ -1042,11 +1043,23 @@ function openEmployeeModal(editId, data){
   document.getElementById("emp-vacation").value=e?e.vacation_balance_hrs:0;
   document.getElementById("emp-sick").value=e?e.sick_balance_hrs:0;
   document.getElementById("emp-holiday").value=e?e.holiday_balance_hrs:0;
+  // Populate user account dropdown
+  const sel=document.getElementById("emp-user-id");
+  sel.innerHTML='<option value="">— Not linked —</option>';
+  try{
+    const profiles=await api("GET","/api/scheduling/profiles")||[];
+    profiles.forEach(p=>{
+      const label=(p.display_name||p.email||p.user_id)+(p.email?' ('+p.email+')':'');
+      sel.innerHTML+='<option value="'+p.user_id+'">'+label+'</option>';
+    });
+  }catch(ex){ /* profiles load failed — dropdown stays as "not linked" */ }
+  sel.value=e&&e.user_id?e.user_id:"";
   openModal("modal-employee");
 }
 
 async function saveEmployee(){
   const id=document.getElementById("emp-edit-id").value;
+  const userId=document.getElementById("emp-user-id").value;
   const body={
     employee_number:document.getElementById("emp-number").value,
     first_name:document.getElementById("emp-first-name").value,
@@ -1060,6 +1073,7 @@ async function saveEmployee(){
     sick_balance_hrs:parseFloat(document.getElementById("emp-sick").value)||0,
     holiday_balance_hrs:parseFloat(document.getElementById("emp-holiday").value)||0
   };
+  if(userId) body.user_id=userId;
   try{
     if(id) await api("PUT","/api/scheduling/employees/"+id,body);
     else await api("POST","/api/scheduling/employees",body);

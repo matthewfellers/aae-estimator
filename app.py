@@ -5491,6 +5491,21 @@ def _get_my_employee(sb, org_id):
 # SCHEDULING API — Employees
 # ══════════════════════════════════════════════════════════════════════════════
 
+@app.route("/api/scheduling/profiles", methods=["GET"])
+@require_role("admin")
+def sched_list_profiles():
+    """List user profiles for linking employees to login accounts."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        result = sb.table("profiles")\
+            .select("user_id,email,display_name,role")\
+            .eq("org_id", org_id)\
+            .order("email").execute()
+        return jsonify(result.data or [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/scheduling/employees", methods=["GET"])
 @require_role("admin", "supervisor", "shop_lead")
 def sched_list_employees():
