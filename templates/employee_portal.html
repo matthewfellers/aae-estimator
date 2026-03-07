@@ -1046,16 +1046,26 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
       if (session?.access_token) {
         _accessToken = session.access_token;
         // Verify token is still valid against server
+        // Verify session is valid — try /api/me first (works for all roles)
+        const meResp = await fetch("/api/me", { headers: { "Authorization": "Bearer " + _accessToken } });
+        if (!meResp.ok) {
+          // Token invalid — force re-login
+          _accessToken = null;
+          document.getElementById("login-overlay").classList.add("visible");
+          return;
+        }
+        // Token is valid — now try portal endpoint
         const resp = await fetch("/api/portal/me", { headers: { "Authorization": "Bearer " + _accessToken } });
         if (resp.ok) {
           const data = await resp.json();
-          onLoginSuccess(data);
-          return;
-        } else if (resp.status === 404) {
-          // User authenticated but no employee record
-          onLoginNoEmployee(session);
-          return;
+          if (data.employee) {
+            onLoginSuccess(data);
+            return;
+          }
         }
+        // Authenticated but no employee record (404, 500, or missing employee)
+        onLoginNoEmployee();
+        return;
       }
     } catch (e) {
       console.warn("[auth] Session restore failed:", e.message);
@@ -1126,15 +1136,25 @@ async function doLogin() {
       _accessToken = data.session?.access_token;
     }
 
-    // Fetch employee profile
+    // Fetch employee profile — try portal endpoint first, fall back gracefully
     const resp = await fetch("/api/portal/me", { headers: { "Authorization": "Bearer " + _accessToken } });
     if (resp.status === 404) {
       stampSessionLogin();
       onLoginNoEmployee();
       return;
     }
-    if (!resp.ok) throw new Error("Failed to load profile");
+    if (!resp.ok) {
+      // Non-shop roles (admin etc.) may not have an employee record — show notice
+      stampSessionLogin();
+      onLoginNoEmployee();
+      return;
+    }
     const profileData = await resp.json();
+    if (!profileData.employee) {
+      stampSessionLogin();
+      onLoginNoEmployee();
+      return;
+    }
     stampSessionLogin();
     onLoginSuccess(profileData);
 
