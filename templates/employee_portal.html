@@ -729,6 +729,7 @@ body {
     </div>
   </div>
   <div class="header-right">
+    <a href="/" class="logout-btn" style="text-decoration:none; margin-right:4px;">Home</a>
     <span class="user-pill" id="user_pill"></span>
     <button class="logout-btn" onclick="doLogout()">Sign Out</button>
   </div>
@@ -1256,20 +1257,7 @@ async function doLogout() {
   if (_sbClient) { try { await _sbClient.auth.signOut(); } catch(e) {} }
   _accessToken = null;
   clearSessionStamp();
-  _employee = null;
-  _balances = null;
-  _weekSummary = null;
-  document.getElementById("app-header").style.display = "none";
-  document.getElementById("app-tabs").style.display = "none";
-  document.getElementById("app-main").style.display = "none";
-  document.getElementById("app-footer").style.display = "none";
-  document.getElementById("no-employee-notice").style.display = "none";
-  document.getElementById("login-overlay").classList.add("visible");
-  document.getElementById("login_pass").value = "";
-  document.getElementById("login_mfa").value = "";
-  document.getElementById("login_err").style.display = "none";
-  document.getElementById("mfa-section").style.display = "none";
-  _pendingMfaFactorId = null;
+  window.location.href = "/";
 }
 
 // Enter key submits login
