@@ -552,17 +552,30 @@ a { color: var(--primary); text-decoration: none; }
     </div>
   </div>
 
-  <!-- Project / WBS (optional) -->
+  <!-- Approver / Project / WBS (optional) -->
   <div class="card" id="proj-wbs-card" style="display:none">
-    <div class="card-title">PROJECT / WBS</div>
-    <div class="form-grid">
+    <div class="card-title">APPROVER / PROJECT / WBS</div>
+    <div class="form-grid-3">
+      <div class="field">
+        <label>Approver</label>
+        <div class="dropdown-wrap">
+          <input type="text" id="ps_approver" placeholder="Approver name">
+          <button class="dropdown-btn" onclick="showFieldDropdown('approver','ps_approver',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_approver"></div>
+        </div>
+      </div>
       <div class="field">
         <label>Project Name</label>
         <input type="text" id="ps_project_name" placeholder="Project name">
       </div>
       <div class="field">
-        <label>WBS</label>
-        <input type="text" id="ps_wbs" placeholder="Work breakdown structure">
+        <label>Tracking Type</label>
+        <div class="dropdown-wrap">
+          <input type="text" id="ps_wbs_label" value="WBS #" placeholder="WBS #, AFE #, Cost Center...">
+          <button class="dropdown-btn" onclick="showFieldDropdown('wbs_label','ps_wbs_label',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_wbs_label"></div>
+        </div>
+        <input type="text" id="ps_wbs" placeholder="Value" style="margin-top:6px">
       </div>
     </div>
   </div>
@@ -624,6 +637,29 @@ a { color: var(--primary); text-decoration: none; }
         <div class="field">
           <label>Ship Date</label>
           <input type="date" id="qs_ship_date">
+        </div>
+      </div>
+      <div class="form-grid-3" style="margin-top:0.75rem">
+        <div class="field">
+          <label>Approver</label>
+          <div class="dropdown-wrap">
+            <input type="text" id="qs_approver" placeholder="Approver name">
+            <button class="dropdown-btn" onclick="showFieldDropdown('qs_approver','qs_approver',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_qs_approver"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Tracking Type</label>
+          <div class="dropdown-wrap">
+            <input type="text" id="qs_wbs_label" value="WBS #" placeholder="WBS #, AFE #, Cost Center...">
+            <button class="dropdown-btn" onclick="showFieldDropdown('qs_wbs_label','qs_wbs_label',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_qs_wbs_label"></div>
+          </div>
+          <input type="text" id="qs_wbs" placeholder="Value" style="margin-top:6px">
+        </div>
+        <div class="field">
+          <label>Project Name</label>
+          <input type="text" id="qs_project_name" placeholder="Project name">
         </div>
       </div>
       <div class="btn-row">
@@ -921,18 +957,24 @@ const _ddCache = {};
 const _ddFieldMap = {
   sold_to: "ps_sold_to", ship_to: "ps_ship_to", attn: "ps_attn",
   sales_order: "ps_sales_order", customer_order: "ps_customer_order",
-  fob: "ps_fob", terms: "ps_terms"
+  fob: "ps_fob", terms: "ps_terms", approver: "ps_approver",
+  wbs_label: "ps_wbs_label"
 };
 
+// Map aliased field names (for quick-ship form) to their DB field names
+const _ddFieldAlias = { qs_approver: "approver", qs_wbs_label: "wbs_label" };
+function _dbFieldName(fieldName) { return _ddFieldAlias[fieldName] || fieldName; }
+
 async function _ensureCache(fieldName) {
-  if (!_ddCache[fieldName]) {
+  const dbField = _dbFieldName(fieldName);
+  if (!_ddCache[dbField]) {
     try {
-      const resp = await fetch(`/api/packing-slips/field-history?field=${fieldName}`, { headers: authHeadersNoBody() });
+      const resp = await fetch(`/api/packing-slips/field-history?field=${dbField}`, { headers: authHeadersNoBody() });
       const data = await resp.json();
-      _ddCache[fieldName] = data.values || [];
-    } catch(e) { _ddCache[fieldName] = []; }
+      _ddCache[dbField] = data.values || [];
+    } catch(e) { _ddCache[dbField] = []; }
   }
-  return _ddCache[fieldName];
+  return _ddCache[dbField];
 }
 
 function _renderDropdown(fieldName, inputId, values, filter) {
@@ -1049,18 +1091,17 @@ function initTypeToFilter() {
 
 async function deleteFieldValue(fieldName, value, itemEl) {
   if (!confirm("Remove this from the saved list?")) return;
+  const dbField = _dbFieldName(fieldName);
   try {
     const resp = await fetch("/api/packing-slips/field-history", {
       method: "DELETE",
       headers: authHeaders(),
-      body: JSON.stringify({ field: fieldName, value: value })
+      body: JSON.stringify({ field: dbField, value: value })
     });
     if (resp.ok) {
-      // Remove from cache
-      if (_ddCache[fieldName]) {
-        _ddCache[fieldName] = _ddCache[fieldName].filter(v => v !== value);
+      if (_ddCache[dbField]) {
+        _ddCache[dbField] = _ddCache[dbField].filter(v => v !== value);
       }
-      // Remove the item from the menu visually
       itemEl.remove();
       showToast("Removed from dropdown", "success");
     } else {
@@ -1073,15 +1114,16 @@ async function saveNewFieldValue(fieldName, inputId) {
   const input = document.getElementById(`dd_add_input_${fieldName}`);
   const val = (input.value || "").trim();
   if (!val) { input.focus(); return; }
+  const dbField = _dbFieldName(fieldName);
   try {
     const resp = await fetch("/api/packing-slips/field-history", {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ field: fieldName, value: val })
+      body: JSON.stringify({ field: dbField, value: val })
     });
     if (resp.ok) {
       document.getElementById(inputId).value = val;
-      delete _ddCache[fieldName];
+      delete _ddCache[dbField];
       document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
       showToast("Saved to dropdown", "success");
     } else {
@@ -1174,7 +1216,9 @@ function getCustomFormData() {
     ship_date: document.getElementById("ps_ship_date").value || null,
     fob: document.getElementById("ps_fob").value,
     terms: document.getElementById("ps_terms").value,
+    approver: document.getElementById("ps_approver")?.value || "",
     project_name: document.getElementById("ps_project_name")?.value || "",
+    wbs_label: document.getElementById("ps_wbs_label")?.value || "WBS #",
     wbs: document.getElementById("ps_wbs")?.value || "",
     notes: document.getElementById("ps_notes").value,
     items: items,
@@ -1183,12 +1227,13 @@ function getCustomFormData() {
 
 function clearCustomForm() {
   ["ps_sold_to","ps_ship_to","ps_attn","ps_sales_order","ps_customer_order",
-   "ps_fob","ps_terms","ps_notes","ps_project_name","ps_wbs"].forEach(id => {
+   "ps_fob","ps_terms","ps_notes","ps_approver","ps_project_name","ps_wbs"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = "";
   });
   document.getElementById("ps_order_date").value = "";
   document.getElementById("ps_ship_date").value = "";
+  document.getElementById("ps_wbs_label").value = "WBS #";
   document.getElementById("items-body").innerHTML = "";
   document.getElementById("ps_editing_id").value = "";
   _nextItemNum = 0;
@@ -1344,6 +1389,10 @@ async function quickShipDownload() {
     customer_order: document.getElementById("qs_customer_order").value,
     order_date: document.getElementById("qs_order_date").value || null,
     ship_date: document.getElementById("qs_ship_date").value || null,
+    approver: document.getElementById("qs_approver").value || "",
+    wbs_label: document.getElementById("qs_wbs_label").value || "WBS #",
+    wbs: document.getElementById("qs_wbs").value || "",
+    project_name: document.getElementById("qs_project_name").value || "",
   };
 
   try {
@@ -1609,7 +1658,9 @@ async function editSlip(id) {
     document.getElementById("ps_ship_date").value = s.ship_date || "";
     document.getElementById("ps_fob").value = s.fob || "";
     document.getElementById("ps_terms").value = s.terms || "";
+    document.getElementById("ps_approver").value = s.approver || "";
     document.getElementById("ps_project_name").value = s.project_name || "";
+    if (s.wbs_label) document.getElementById("ps_wbs_label").value = s.wbs_label;
     document.getElementById("ps_wbs").value = s.wbs || "";
     document.getElementById("ps_notes").value = s.notes || "";
     document.getElementById("ps_editing_id").value = id;
