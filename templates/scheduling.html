@@ -382,7 +382,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="modal-title">ADD EXPERIENCE RECORD</div>
   <input type="hidden" id="exp-edit-id">
   <div class="form-group"><label>Employee</label><select id="exp-employee"></select></div>
-  <div class="form-group" style="position:relative"><label>Panel Type</label><input type="text" id="exp-panel-type" placeholder="Type to search or add new..." autocomplete="off" oninput="filterPanelTypes()" onfocus="filterPanelTypes()"><div id="exp-panel-type-list" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border);border-top:none;border-radius:0 0 8px 8px;max-height:200px;overflow-y:auto;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div></div>
+  <div class="form-group" style="position:relative"><label>Panel Type</label><input type="text" id="exp-panel-type" placeholder="Type to search or add new..." autocomplete="off" oninput="filterPanelTypes()" onclick="filterPanelTypes()" onfocus="filterPanelTypes()"><div id="exp-panel-type-list" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border);border-top:none;border-radius:0 0 8px 8px;max-height:200px;overflow-y:auto;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,0.15)"></div></div>
   <div class="form-row"><div class="form-group"><label>Build Count</label><input type="number" id="exp-build-count" min="0" value="0"></div><div class="form-group"><label>Avg Hours</label><input type="number" id="exp-avg-hours" step="0.5" min="0" value="0"></div></div>
   <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-experience')">Cancel</button><button class="btn btn-primary" onclick="saveExperience()">Save</button></div>
 </div></div>
@@ -1134,19 +1134,16 @@ function filterPanelTypes(){
 }
 
 function selectPanelType(val){
-  document.getElementById("exp-panel-type").value=val;
+  const input=document.getElementById("exp-panel-type");
+  input.value=val;
   document.getElementById("exp-panel-type-list").style.display='none';
   // Add to known types if new
   if(!_allPanelTypes.includes(val)) _allPanelTypes.push(val);
 }
 
-// Close dropdown when clicking outside
-document.addEventListener("click",function(e){
-  const list=document.getElementById("exp-panel-type-list");
-  const input=document.getElementById("exp-panel-type");
-  if(list && input && !input.contains(e.target) && !list.contains(e.target)){
-    list.style.display='none';
-  }
+// Close dropdown on blur (slight delay so mousedown on list items fires first)
+document.getElementById("exp-panel-type").addEventListener("blur",function(){
+  setTimeout(function(){ document.getElementById("exp-panel-type-list").style.display='none'; }, 150);
 });
 
 function openExperienceModal(editId, data){
