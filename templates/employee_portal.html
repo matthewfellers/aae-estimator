@@ -1072,8 +1072,12 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
             return;
           }
         }
+        // Show actual error details for debugging
+        let errDetail = `Status: ${resp.status}`;
+        try { const errJson = await resp.json(); errDetail += ` — ${errJson.error || JSON.stringify(errJson)}`; } catch(e) {}
+        console.error("[portal] /api/portal/me failed:", errDetail);
         // Authenticated but no employee record (404, 500, or missing employee)
-        onLoginNoEmployee();
+        onLoginNoEmployee(errDetail);
         return;
       }
     } catch (e) {
@@ -1153,9 +1157,11 @@ async function doLogin() {
       return;
     }
     if (!resp.ok) {
-      // Non-shop roles (admin etc.) may not have an employee record — show notice
+      let errDetail = `Status: ${resp.status}`;
+      try { const errJson = await resp.json(); errDetail += ` — ${errJson.error || JSON.stringify(errJson)}`; } catch(e) {}
+      console.error("[portal] login portal/me failed:", errDetail);
       stampSessionLogin();
-      onLoginNoEmployee();
+      onLoginNoEmployee(errDetail);
       return;
     }
     const profileData = await resp.json();
@@ -1220,11 +1226,15 @@ function parseDateLocal(s) {
   return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
 }
 
-function onLoginNoEmployee() {
+function onLoginNoEmployee(errDetail) {
   document.getElementById("login-overlay").classList.remove("visible");
   document.getElementById("app-header").style.display = "flex";
   document.getElementById("app-footer").style.display = "block";
-  document.getElementById("no-employee-notice").style.display = "block";
+  const notice = document.getElementById("no-employee-notice");
+  notice.style.display = "block";
+  if (errDetail) {
+    notice.innerHTML = '<h2>PORTAL ERROR</h2><p>' + errDetail.replace(/</g,'&lt;') + '</p><p style="margin-top:12px;font-size:13px;color:#888;">Please share this error with your administrator or IT support.</p>';
+  }
   document.getElementById("user_pill").textContent = "User";
 }
 

@@ -6301,9 +6301,11 @@ def sched_report_est_vs_actual():
 def portal_me():
     """Employee's own profile, balances, and current week summary."""
     try:
+        print(f"[PORTAL_ME] user_id={g.user['id']} org_id={g.user['org_id']} role={g.user['role']}", flush=True)
         sb = get_user_sb()
         org_id = g.user["org_id"]
         emp = _get_my_employee(sb, org_id)
+        print(f"[PORTAL_ME] employee found: {emp is not None}", flush=True)
         if not emp:
             return jsonify({"error": "No employee record linked to your account"}), 404
         # Get current week info
@@ -6350,6 +6352,9 @@ def portal_me():
             "pending_pto_count": len(pto.data or []),
         })
     except Exception as e:
+        import traceback
+        print(f"[PORTAL_ME] ERROR: {e}", flush=True)
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 # ── Portal Timesheets ────────────────────────────────────────────────────────
