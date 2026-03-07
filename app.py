@@ -5452,6 +5452,1109 @@ def delete_shipping_field_history():
         return jsonify({"error": str(e)}), 500
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING MODULE + EMPLOYEE PORTAL — Page Routes + API Endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Page routes ──────────────────────────────────────────────────────────────
+
+@app.route("/scheduling")
+def scheduling_page():
+    return render_template(
+        "scheduling.html",
+        supabase_url=os.environ.get("SUPABASE_URL", ""),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", ""),
+    )
+
+@app.route("/employee-portal")
+def employee_portal_page():
+    return render_template(
+        "employee_portal.html",
+        supabase_url=os.environ.get("SUPABASE_URL", ""),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", ""),
+    )
+
+# ── Helper: get employee record for current user ─────────────────────────────
+
+def _get_my_employee(sb, org_id):
+    """Return the employees row linked to the current user, or None."""
+    from flask import g
+    result = sb.table("employees")\
+        .select("*")\
+        .eq("org_id", org_id)\
+        .eq("user_id", g.user["id"])\
+        .eq("is_active", True)\
+        .maybe_single().execute()
+    return result.data if result.data else None
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Employees
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/employees", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_list_employees():
+    try:
+        sb = get_user_sb()
+        q = sb.table("employees").select("*").eq("org_id", g.user["org_id"])
+        if request.args.get("active_only", "true") == "true":
+            q = q.eq("is_active", True)
+        result = q.order("last_name").execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/employees", methods=["POST"])
+@require_role("admin")
+def sched_create_employee():
+    data = request.get_json() or {}
+    required = ["employee_number", "first_name", "last_name"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+    try:
+        sb = get_user_sb()
+        row = {
+            "org_id": g.user["org_id"],
+            "employee_number": data["employee_number"].strip(),
+            "first_name": data["first_name"].strip(),
+            "last_name": data["last_name"].strip(),
+            "email": data.get("email", "").strip() or None,
+            "phone": data.get("phone", "").strip() or None,
+            "role": data.get("role", "shop_employee"),
+            "hire_date": data.get("hire_date"),
+            "default_hours": data.get("default_hours", 40),
+            "vacation_balance_hrs": data.get("vacation_balance_hrs", 0),
+            "sick_balance_hrs": data.get("sick_balance_hrs", 0),
+            "holiday_balance_hrs": data.get("holiday_balance_hrs", 0),
+            "notes": data.get("notes"),
+        }
+        if data.get("user_id"):
+            row["user_id"] = data["user_id"]
+        result = sb.table("employees").insert(row).execute()
+        audit_log("create_employee", "employee", result.data[0]["id"],
+                  {"name": f"{row['first_name']} {row['last_name']}"})
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/employees/<eid>", methods=["PUT"])
+@require_role("admin")
+def sched_update_employee(eid):
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        data["updated_at"] = datetime.now().isoformat()
+        result = sb.table("employees").update(data)\
+            .eq("id", eid).eq("org_id", g.user["org_id"]).execute()
+        if not result.data:
+            return jsonify({"error": "Employee not found"}), 404
+        audit_log("update_employee", "employee", eid)
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/employees/<eid>", methods=["DELETE"])
+@require_role("admin")
+def sched_delete_employee(eid):
+    try:
+        sb = get_user_sb()
+        # Soft delete — set is_active to false
+        result = sb.table("employees").update({"is_active": False, "updated_at": datetime.now().isoformat()})\
+            .eq("id", eid).eq("org_id", g.user["org_id"]).execute()
+        if not result.data:
+            return jsonify({"error": "Employee not found"}), 404
+        audit_log("deactivate_employee", "employee", eid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Jobs
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/jobs", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_list_jobs():
+    try:
+        sb = get_user_sb()
+        q = sb.table("jobs").select("*, panels(*)").eq("org_id", g.user["org_id"]).eq("is_deleted", False)
+        status = request.args.get("status")
+        if status:
+            q = q.eq("status", status)
+        result = q.order("priority").order("due_date").execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/jobs", methods=["POST"])
+@require_role("admin", "supervisor")
+def sched_create_job():
+    data = request.get_json() or {}
+    if not data.get("job_number"):
+        return jsonify({"error": "job_number is required"}), 400
+    try:
+        sb = get_user_sb()
+        row = {
+            "org_id": g.user["org_id"],
+            "job_number": data["job_number"].strip(),
+            "customer": data.get("customer", "").strip() or None,
+            "description": data.get("description", "").strip() or None,
+            "estimated_hours": data.get("estimated_hours", 0),
+            "due_date": data.get("due_date"),
+            "priority": data.get("priority", 3),
+            "status": data.get("status", "queued"),
+            "bid_id": data.get("bid_id"),
+            "color": data.get("color", "#3B82F6"),
+            "notes": data.get("notes"),
+        }
+        result = sb.table("jobs").insert(row).execute()
+        audit_log("create_job", "job", result.data[0]["id"],
+                  {"job_number": row["job_number"], "customer": row["customer"]})
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/jobs/<jid>", methods=["PUT"])
+@require_role("admin", "supervisor")
+def sched_update_job(jid):
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        data["updated_at"] = datetime.now().isoformat()
+        if data.get("status") == "complete" and not data.get("completed_at"):
+            data["completed_at"] = datetime.now().isoformat()
+        result = sb.table("jobs").update(data)\
+            .eq("id", jid).eq("org_id", g.user["org_id"]).execute()
+        if not result.data:
+            return jsonify({"error": "Job not found"}), 404
+        audit_log("update_job", "job", jid)
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/jobs/<jid>", methods=["DELETE"])
+@require_role("admin", "supervisor")
+def sched_delete_job(jid):
+    try:
+        sb = get_user_sb()
+        result = sb.table("jobs").update({"is_deleted": True, "updated_at": datetime.now().isoformat()})\
+            .eq("id", jid).eq("org_id", g.user["org_id"]).execute()
+        if not result.data:
+            return jsonify({"error": "Job not found"}), 404
+        audit_log("delete_job", "job", jid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Panels
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/jobs/<jid>/panels", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_list_panels(jid):
+    try:
+        sb = get_user_sb()
+        result = sb.table("panels").select("*")\
+            .eq("job_id", jid).eq("org_id", g.user["org_id"])\
+            .order("sort_order").execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/jobs/<jid>/panels", methods=["POST"])
+@require_role("admin", "supervisor")
+def sched_create_panel(jid):
+    data = request.get_json() or {}
+    if not data.get("panel_name"):
+        return jsonify({"error": "panel_name is required"}), 400
+    try:
+        sb = get_user_sb()
+        row = {
+            "org_id": g.user["org_id"],
+            "job_id": jid,
+            "panel_name": data["panel_name"].strip(),
+            "panel_type": data.get("panel_type", "PLC"),
+            "estimated_hours": data.get("estimated_hours", 0),
+            "sort_order": data.get("sort_order", 0),
+            "notes": data.get("notes"),
+        }
+        result = sb.table("panels").insert(row).execute()
+        audit_log("create_panel", "panel", result.data[0]["id"],
+                  {"panel_name": row["panel_name"], "job_id": jid})
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/panels/<pid>", methods=["PUT"])
+@require_role("admin", "supervisor")
+def sched_update_panel(pid):
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        data["updated_at"] = datetime.now().isoformat()
+        if data.get("status") == "complete" and not data.get("completed_at"):
+            data["completed_at"] = datetime.now().isoformat()
+        result = sb.table("panels").update(data)\
+            .eq("id", pid).eq("org_id", g.user["org_id"]).execute()
+        if not result.data:
+            return jsonify({"error": "Panel not found"}), 404
+        audit_log("update_panel", "panel", pid)
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/panels/<pid>", methods=["DELETE"])
+@require_role("admin", "supervisor")
+def sched_delete_panel(pid):
+    try:
+        sb = get_user_sb()
+        sb.table("panels").delete().eq("id", pid).eq("org_id", g.user["org_id"]).execute()
+        audit_log("delete_panel", "panel", pid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Assignments (Gantt blocks)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/assignments", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_list_assignments():
+    try:
+        sb = get_user_sb()
+        q = sb.table("schedule_assignments")\
+            .select("*, employees!inner(id, first_name, last_name, employee_number), panels!inner(id, panel_name, panel_type, job_id, estimated_hours, jobs!inner(id, job_number, customer, color))")\
+            .eq("org_id", g.user["org_id"])
+        start = request.args.get("start")
+        end = request.args.get("end")
+        if start:
+            q = q.gte("end_date", start)
+        if end:
+            q = q.lte("start_date", end)
+        employee_id = request.args.get("employee_id")
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        result = q.execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/assignments", methods=["POST"])
+@require_role("admin", "supervisor")
+def sched_create_assignment():
+    data = request.get_json() or {}
+    required = ["employee_id", "panel_id", "start_date", "end_date"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+    try:
+        sb = get_user_sb()
+        row = {
+            "org_id": g.user["org_id"],
+            "employee_id": data["employee_id"],
+            "panel_id": data["panel_id"],
+            "start_date": data["start_date"],
+            "end_date": data["end_date"],
+            "hours_per_day": data.get("hours_per_day", 8),
+            "notes": data.get("notes"),
+        }
+        result = sb.table("schedule_assignments").insert(row).execute()
+        # Log the change
+        sb.table("schedule_changes").insert({
+            "org_id": g.user["org_id"],
+            "changed_by": g.user["id"],
+            "assignment_id": result.data[0]["id"],
+            "change_type": "create",
+            "new_values": row,
+        }).execute()
+        audit_log("create_assignment", "schedule_assignment", result.data[0]["id"])
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/assignments/<aid>", methods=["PUT"])
+@require_role("admin", "supervisor")
+def sched_update_assignment(aid):
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        # Fetch old values for audit
+        old = sb.table("schedule_assignments").select("*")\
+            .eq("id", aid).eq("org_id", g.user["org_id"]).single().execute()
+        if not old.data:
+            return jsonify({"error": "Assignment not found"}), 404
+        old_data = old.data
+        # Determine change type
+        change_type = "move"
+        if data.get("employee_id") and data["employee_id"] != old_data["employee_id"]:
+            change_type = "reassign"
+        elif ("start_date" in data or "end_date" in data) and \
+             data.get("start_date", old_data["start_date"]) == old_data["start_date"]:
+            change_type = "resize"
+        data["updated_at"] = datetime.now().isoformat()
+        result = sb.table("schedule_assignments").update(data)\
+            .eq("id", aid).eq("org_id", g.user["org_id"]).execute()
+        if not result.data:
+            return jsonify({"error": "Assignment not found"}), 404
+        # Log change
+        sb.table("schedule_changes").insert({
+            "org_id": g.user["org_id"],
+            "changed_by": g.user["id"],
+            "assignment_id": aid,
+            "change_type": change_type,
+            "old_values": {k: old_data[k] for k in ["employee_id", "start_date", "end_date", "hours_per_day"]},
+            "new_values": {k: data[k] for k in data if k in ["employee_id", "start_date", "end_date", "hours_per_day"]},
+        }).execute()
+        audit_log("update_assignment", "schedule_assignment", aid, {"change_type": change_type})
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/assignments/<aid>", methods=["DELETE"])
+@require_role("admin", "supervisor")
+def sched_delete_assignment(aid):
+    try:
+        sb = get_user_sb()
+        old = sb.table("schedule_assignments").select("*")\
+            .eq("id", aid).eq("org_id", g.user["org_id"]).single().execute()
+        if not old.data:
+            return jsonify({"error": "Assignment not found"}), 404
+        sb.table("schedule_changes").insert({
+            "org_id": g.user["org_id"],
+            "changed_by": g.user["id"],
+            "assignment_id": aid,
+            "change_type": "delete",
+            "old_values": old.data,
+        }).execute()
+        sb.table("schedule_assignments").delete()\
+            .eq("id", aid).eq("org_id", g.user["org_id"]).execute()
+        audit_log("delete_assignment", "schedule_assignment", aid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Auto-Suggest
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/suggest", methods=["POST"])
+@require_role("admin", "supervisor")
+def sched_suggest():
+    """Auto-suggest best employee for a panel assignment.
+    Score = (experience * 0.6) + (capacity * 0.4)
+    """
+    data = request.get_json() or {}
+    panel_type = data.get("panel_type", "PLC")
+    start_date = data.get("start_date")
+    end_date = data.get("end_date")
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date required"}), 400
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        # Get all active employees
+        emps = sb.table("employees").select("id, first_name, last_name, default_hours")\
+            .eq("org_id", org_id).eq("is_active", True).execute()
+        if not emps.data:
+            return jsonify([])
+        # Get experience for this panel type
+        exp = sb.table("panel_experience").select("employee_id, build_count")\
+            .eq("org_id", org_id).eq("panel_type", panel_type).execute()
+        exp_map = {e["employee_id"]: e["build_count"] for e in (exp.data or [])}
+        max_builds = max(exp_map.values()) if exp_map else 1
+        # Get existing assignments in the date range
+        assignments = sb.table("schedule_assignments")\
+            .select("employee_id, hours_per_day, start_date, end_date")\
+            .eq("org_id", org_id)\
+            .gte("end_date", start_date)\
+            .lte("start_date", end_date)\
+            .execute()
+        # Calculate hours committed per employee in range
+        from datetime import date as dt_date
+        s_dt = dt_date.fromisoformat(start_date)
+        e_dt = dt_date.fromisoformat(end_date)
+        # Count business days in range
+        biz_days = sum(1 for i in range((e_dt - s_dt).days + 1)
+                       if (s_dt + __import__('datetime').timedelta(days=i)).weekday() < 5)
+        committed = {}
+        for a in (assignments.data or []):
+            eid = a["employee_id"]
+            a_start = max(dt_date.fromisoformat(a["start_date"]), s_dt)
+            a_end = min(dt_date.fromisoformat(a["end_date"]), e_dt)
+            days = sum(1 for i in range((a_end - a_start).days + 1)
+                       if (a_start + __import__('datetime').timedelta(days=i)).weekday() < 5)
+            committed[eid] = committed.get(eid, 0) + days * (a.get("hours_per_day", 8) or 8)
+        # Get PTO in date range
+        pto_list = sb.table("pto_requests")\
+            .select("employee_id, hours")\
+            .eq("org_id", org_id)\
+            .eq("status", "approved")\
+            .gte("end_date", start_date)\
+            .lte("start_date", end_date)\
+            .execute()
+        for p in (pto_list.data or []):
+            eid = p["employee_id"]
+            committed[eid] = committed.get(eid, 0) + (p.get("hours", 8) or 8)
+        # Score each employee
+        suggestions = []
+        for emp in emps.data:
+            eid = emp["id"]
+            weekly_hrs = emp.get("default_hours", 40) or 40
+            daily_hrs = weekly_hrs / 5
+            total_avail = biz_days * daily_hrs
+            used = committed.get(eid, 0)
+            remaining = max(0, total_avail - used)
+            # Normalize scores 0-1
+            exp_score = (exp_map.get(eid, 0) / max_builds) if max_builds > 0 else 0
+            cap_score = (remaining / total_avail) if total_avail > 0 else 0
+            score = (exp_score * 0.6) + (cap_score * 0.4)
+            suggestions.append({
+                "employee_id": eid,
+                "name": f"{emp['first_name']} {emp['last_name']}",
+                "score": round(score, 3),
+                "experience_score": round(exp_score, 3),
+                "capacity_score": round(cap_score, 3),
+                "build_count": exp_map.get(eid, 0),
+                "available_hours": round(remaining, 1),
+                "total_hours": round(total_avail, 1),
+                "committed_hours": round(used, 1),
+                "overloaded": remaining <= 0,
+            })
+        suggestions.sort(key=lambda x: x["score"], reverse=True)
+        return jsonify(suggestions)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Capacity
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/capacity", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_capacity():
+    """Per-employee capacity: available vs committed hours for a date range."""
+    start = request.args.get("start")
+    end = request.args.get("end")
+    if not start or not end:
+        return jsonify({"error": "start and end query params required"}), 400
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emps = sb.table("employees").select("id, first_name, last_name, default_hours")\
+            .eq("org_id", org_id).eq("is_active", True).execute()
+        assignments = sb.table("schedule_assignments")\
+            .select("employee_id, hours_per_day, start_date, end_date")\
+            .eq("org_id", org_id)\
+            .gte("end_date", start)\
+            .lte("start_date", end)\
+            .execute()
+        from datetime import date as dt_date
+        s_dt = dt_date.fromisoformat(start)
+        e_dt = dt_date.fromisoformat(end)
+        biz_days = sum(1 for i in range((e_dt - s_dt).days + 1)
+                       if (s_dt + __import__('datetime').timedelta(days=i)).weekday() < 5)
+        committed = {}
+        for a in (assignments.data or []):
+            eid = a["employee_id"]
+            a_start = max(dt_date.fromisoformat(a["start_date"]), s_dt)
+            a_end = min(dt_date.fromisoformat(a["end_date"]), e_dt)
+            days = sum(1 for i in range((a_end - a_start).days + 1)
+                       if (a_start + __import__('datetime').timedelta(days=i)).weekday() < 5)
+            committed[eid] = committed.get(eid, 0) + days * (a.get("hours_per_day", 8) or 8)
+        capacity = []
+        for emp in emps.data:
+            eid = emp["id"]
+            weekly = emp.get("default_hours", 40) or 40
+            total = biz_days * (weekly / 5)
+            used = committed.get(eid, 0)
+            pct = round((used / total * 100), 1) if total > 0 else 0
+            capacity.append({
+                "employee_id": eid,
+                "name": f"{emp['first_name']} {emp['last_name']}",
+                "total_hours": round(total, 1),
+                "committed_hours": round(used, 1),
+                "available_hours": round(max(0, total - used), 1),
+                "utilization_pct": pct,
+                "status": "overloaded" if pct > 100 else ("high" if pct > 85 else ("normal" if pct > 50 else "low")),
+            })
+        return jsonify(capacity)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Panel Experience (Builder Database)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/experience", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_experience():
+    try:
+        sb = get_user_sb()
+        result = sb.table("panel_experience")\
+            .select("*, employees!inner(first_name, last_name, employee_number)")\
+            .eq("org_id", g.user["org_id"])\
+            .order("panel_type").execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/experience", methods=["POST"])
+@require_role("admin", "supervisor")
+def sched_upsert_experience():
+    """Upsert panel experience record."""
+    data = request.get_json() or {}
+    if not data.get("employee_id") or not data.get("panel_type"):
+        return jsonify({"error": "employee_id and panel_type required"}), 400
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        # Check if exists
+        existing = sb.table("panel_experience")\
+            .select("id, build_count")\
+            .eq("org_id", org_id)\
+            .eq("employee_id", data["employee_id"])\
+            .eq("panel_type", data["panel_type"])\
+            .maybe_single().execute()
+        if existing.data:
+            result = sb.table("panel_experience").update({
+                "build_count": data.get("build_count", existing.data["build_count"] + 1),
+                "last_built_at": data.get("last_built_at", datetime.now().isoformat()),
+                "avg_hours": data.get("avg_hours"),
+                "updated_at": datetime.now().isoformat(),
+            }).eq("id", existing.data["id"]).execute()
+        else:
+            result = sb.table("panel_experience").insert({
+                "org_id": org_id,
+                "employee_id": data["employee_id"],
+                "panel_type": data["panel_type"],
+                "build_count": data.get("build_count", 1),
+                "last_built_at": data.get("last_built_at", datetime.now().isoformat()),
+                "avg_hours": data.get("avg_hours"),
+            }).execute()
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Timesheet & PTO Approvals (Admin/Supervisor)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/approvals/timesheets", methods=["GET"])
+@require_role("admin", "supervisor")
+def sched_pending_timesheets():
+    """List submitted timesheet weeks pending approval."""
+    try:
+        sb = get_user_sb()
+        status = request.args.get("status", "submitted")
+        result = sb.table("timesheet_weeks")\
+            .select("*, employees!inner(first_name, last_name, employee_number)")\
+            .eq("org_id", g.user["org_id"])\
+            .eq("status", status)\
+            .order("week_start", desc=True).execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/approvals/timesheets/<wid>", methods=["PUT"])
+@require_role("admin", "supervisor")
+def sched_review_timesheet(wid):
+    """Approve, reject, or return a timesheet week."""
+    data = request.get_json() or {}
+    action = data.get("action")  # approve, reject, return
+    if action not in ("approve", "reject", "return"):
+        return jsonify({"error": "action must be approve, reject, or return"}), 400
+    try:
+        sb = get_user_sb()
+        status_map = {"approve": "approved", "reject": "rejected", "return": "returned"}
+        update = {
+            "status": status_map[action],
+            "reviewed_by": g.user["id"],
+            "reviewed_at": datetime.now().isoformat(),
+            "reviewer_notes": data.get("notes", ""),
+            "updated_at": datetime.now().isoformat(),
+        }
+        result = sb.table("timesheet_weeks").update(update)\
+            .eq("id", wid).eq("org_id", g.user["org_id"]).execute()
+        if not result.data:
+            return jsonify({"error": "Week not found"}), 404
+        audit_log(f"timesheet_{action}", "timesheet_week", wid,
+                  {"employee_id": result.data[0].get("employee_id")})
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/approvals/pto", methods=["GET"])
+@require_role("admin", "supervisor")
+def sched_pending_pto():
+    """List pending PTO requests."""
+    try:
+        sb = get_user_sb()
+        status = request.args.get("status", "pending")
+        result = sb.table("pto_requests")\
+            .select("*, employees!inner(first_name, last_name, employee_number)")\
+            .eq("org_id", g.user["org_id"])\
+            .eq("status", status)\
+            .order("start_date").execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/approvals/pto/<pid>", methods=["PUT"])
+@require_role("admin", "supervisor")
+def sched_review_pto(pid):
+    """Approve or reject a PTO request."""
+    data = request.get_json() or {}
+    action = data.get("action")
+    if action not in ("approve", "reject"):
+        return jsonify({"error": "action must be approve or reject"}), 400
+    try:
+        sb = get_user_sb()
+        # Fetch the request first
+        pto = sb.table("pto_requests").select("*")\
+            .eq("id", pid).eq("org_id", g.user["org_id"]).single().execute()
+        if not pto.data:
+            return jsonify({"error": "PTO request not found"}), 404
+        update = {
+            "status": "approved" if action == "approve" else "rejected",
+            "reviewed_by": g.user["id"],
+            "reviewed_at": datetime.now().isoformat(),
+            "reviewer_notes": data.get("notes", ""),
+            "updated_at": datetime.now().isoformat(),
+        }
+        result = sb.table("pto_requests").update(update)\
+            .eq("id", pid).eq("org_id", g.user["org_id"]).execute()
+        # If approved, decrement employee balance
+        if action == "approve":
+            emp = sb.table("employees").select("vacation_balance_hrs, sick_balance_hrs, holiday_balance_hrs")\
+                .eq("id", pto.data["employee_id"]).single().execute()
+            if emp.data:
+                pto_type = pto.data["pto_type"]
+                hours = pto.data.get("hours", 8) or 8
+                balance_field = f"{pto_type}_balance_hrs"
+                if balance_field in emp.data:
+                    new_balance = max(0, (emp.data[balance_field] or 0) - hours)
+                    sb.table("employees").update({balance_field: new_balance})\
+                        .eq("id", pto.data["employee_id"]).execute()
+        audit_log(f"pto_{action}", "pto_request", pid,
+                  {"employee_id": pto.data["employee_id"], "type": pto.data["pto_type"]})
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULING API — Reports
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/scheduling/reports/hours-by-job", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_report_hours_by_job():
+    """Hours logged per job (from timesheets)."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        start = request.args.get("start")
+        end = request.args.get("end")
+        q = sb.table("timesheets").select("job_number, hours")\
+            .eq("org_id", org_id)
+        if start:
+            q = q.gte("work_date", start)
+        if end:
+            q = q.lte("work_date", end)
+        result = q.execute()
+        # Aggregate by job_number
+        totals = {}
+        for row in (result.data or []):
+            jn = row.get("job_number") or "Unassigned"
+            totals[jn] = totals.get(jn, 0) + (row.get("hours", 0) or 0)
+        report = [{"job_number": k, "total_hours": round(v, 2)} for k, v in sorted(totals.items())]
+        return jsonify(report)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/reports/hours-by-employee", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_report_hours_by_employee():
+    """Hours logged per employee (from timesheets)."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        start = request.args.get("start")
+        end = request.args.get("end")
+        q = sb.table("timesheets")\
+            .select("employee_id, hours, employees!inner(first_name, last_name)")\
+            .eq("org_id", org_id)
+        if start:
+            q = q.gte("work_date", start)
+        if end:
+            q = q.lte("work_date", end)
+        result = q.execute()
+        totals = {}
+        names = {}
+        for row in (result.data or []):
+            eid = row["employee_id"]
+            totals[eid] = totals.get(eid, 0) + (row.get("hours", 0) or 0)
+            if eid not in names and row.get("employees"):
+                names[eid] = f"{row['employees']['first_name']} {row['employees']['last_name']}"
+        report = [{"employee_id": k, "name": names.get(k, "Unknown"), "total_hours": round(v, 2)}
+                  for k, v in sorted(totals.items(), key=lambda x: x[1], reverse=True)]
+        return jsonify(report)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/reports/weekly-totals", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_report_weekly_totals():
+    """Timesheet week totals with approval status."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        start = request.args.get("start")
+        end = request.args.get("end")
+        q = sb.table("timesheet_weeks")\
+            .select("*, employees!inner(first_name, last_name, employee_number)")\
+            .eq("org_id", org_id)
+        if start:
+            q = q.gte("week_start", start)
+        if end:
+            q = q.lte("week_start", end)
+        result = q.order("week_start", desc=True).execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/scheduling/reports/estimated-vs-actual", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead")
+def sched_report_est_vs_actual():
+    """Compare estimated panel hours vs actual timesheet hours."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        jobs = sb.table("jobs").select("id, job_number, customer, estimated_hours")\
+            .eq("org_id", org_id).eq("is_deleted", False).execute()
+        panels = sb.table("panels").select("id, job_id, panel_name, estimated_hours, actual_hours")\
+            .eq("org_id", org_id).execute()
+        # Build panel lookup by job
+        job_panels = {}
+        for p in (panels.data or []):
+            jid = p["job_id"]
+            if jid not in job_panels:
+                job_panels[jid] = []
+            job_panels[jid].append(p)
+        report = []
+        for job in (jobs.data or []):
+            jp = job_panels.get(job["id"], [])
+            est = sum(p.get("estimated_hours", 0) or 0 for p in jp)
+            act = sum(p.get("actual_hours", 0) or 0 for p in jp)
+            report.append({
+                "job_id": job["id"],
+                "job_number": job["job_number"],
+                "customer": job.get("customer"),
+                "job_estimated_hours": job.get("estimated_hours", 0),
+                "panel_estimated_hours": round(est, 2),
+                "actual_hours": round(act, 2),
+                "variance": round(est - act, 2) if est > 0 else None,
+                "variance_pct": round(((est - act) / est) * 100, 1) if est > 0 else None,
+                "panel_count": len(jp),
+            })
+        return jsonify(report)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EMPLOYEE PORTAL API
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/portal/me", methods=["GET"])
+@require_auth
+def portal_me():
+    """Employee's own profile, balances, and current week summary."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record linked to your account"}), 404
+        # Get current week info
+        from datetime import date as dt_date, timedelta
+        today = dt_date.today()
+        monday = today - timedelta(days=today.weekday())
+        week_start = monday.isoformat()
+        # Current week's timesheet entries
+        entries = sb.table("timesheets").select("*")\
+            .eq("employee_id", emp["id"])\
+            .eq("org_id", org_id)\
+            .gte("work_date", week_start)\
+            .lte("work_date", (monday + timedelta(days=6)).isoformat())\
+            .order("work_date").execute()
+        # Week status
+        week = sb.table("timesheet_weeks")\
+            .select("*")\
+            .eq("employee_id", emp["id"])\
+            .eq("org_id", org_id)\
+            .eq("week_start", week_start)\
+            .maybe_single().execute()
+        # Pending PTO
+        pto = sb.table("pto_requests").select("*")\
+            .eq("employee_id", emp["id"])\
+            .eq("org_id", org_id)\
+            .eq("status", "pending")\
+            .execute()
+        week_hours = sum(e.get("hours", 0) for e in (entries.data or []))
+        return jsonify({
+            "employee": emp,
+            "week_start": week_start,
+            "week_entries": entries.data or [],
+            "week_total_hours": round(week_hours, 2),
+            "week_status": week.data if week.data else {"status": "draft"},
+            "pending_pto_count": len(pto.data or []),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── Portal Timesheets ────────────────────────────────────────────────────────
+
+@app.route("/api/portal/timesheets", methods=["GET"])
+@require_auth
+def portal_list_timesheets():
+    """List employee's own timesheet entries for a date range."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        start = request.args.get("start")
+        end = request.args.get("end")
+        q = sb.table("timesheets").select("*")\
+            .eq("employee_id", emp["id"]).eq("org_id", org_id)
+        if start:
+            q = q.gte("work_date", start)
+        if end:
+            q = q.lte("work_date", end)
+        result = q.order("work_date").execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/portal/timesheets", methods=["POST"])
+@require_auth
+def portal_create_timesheet():
+    """Create a timesheet entry (employee's own)."""
+    data = request.get_json() or {}
+    if not data.get("work_date") or not data.get("hours"):
+        return jsonify({"error": "work_date and hours are required"}), 400
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        # Check if week is approved (can't add entries)
+        from datetime import date as dt_date, timedelta
+        work_dt = dt_date.fromisoformat(data["work_date"])
+        monday = work_dt - timedelta(days=work_dt.weekday())
+        week = sb.table("timesheet_weeks").select("status")\
+            .eq("employee_id", emp["id"]).eq("org_id", org_id)\
+            .eq("week_start", monday.isoformat()).maybe_single().execute()
+        if week.data and week.data.get("status") == "approved":
+            return jsonify({"error": "Cannot modify entries for an approved week"}), 403
+        row = {
+            "org_id": org_id,
+            "employee_id": emp["id"],
+            "work_date": data["work_date"],
+            "job_number": data.get("job_number", "").strip() or None,
+            "panel_number": data.get("panel_number", "").strip() or None,
+            "hours": float(data["hours"]),
+            "labor_type": data.get("labor_type", "build"),
+            "notes": data.get("notes"),
+        }
+        result = sb.table("timesheets").insert(row).execute()
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/portal/timesheets/<tid>", methods=["PUT"])
+@require_auth
+def portal_update_timesheet(tid):
+    """Update a timesheet entry (employee's own, week not approved)."""
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        data["updated_at"] = datetime.now().isoformat()
+        # RLS handles the approval check
+        result = sb.table("timesheets").update(data)\
+            .eq("id", tid).eq("employee_id", emp["id"]).eq("org_id", org_id).execute()
+        if not result.data:
+            return jsonify({"error": "Entry not found or week is approved"}), 404
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/portal/timesheets/<tid>", methods=["DELETE"])
+@require_auth
+def portal_delete_timesheet(tid):
+    """Delete a timesheet entry (employee's own, week not approved)."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        sb.table("timesheets").delete()\
+            .eq("id", tid).eq("employee_id", emp["id"]).eq("org_id", org_id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── Portal Weeks ─────────────────────────────────────────────────────────────
+
+@app.route("/api/portal/weeks", methods=["GET"])
+@require_auth
+def portal_list_weeks():
+    """List employee's timesheet weeks."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        result = sb.table("timesheet_weeks").select("*")\
+            .eq("employee_id", emp["id"]).eq("org_id", org_id)\
+            .order("week_start", desc=True).limit(52).execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/portal/weeks/submit", methods=["POST"])
+@require_auth
+def portal_submit_week():
+    """Submit a week for approval. Calculates total and overtime hours."""
+    data = request.get_json() or {}
+    week_start = data.get("week_start")
+    if not week_start:
+        return jsonify({"error": "week_start is required"}), 400
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        # Calculate total hours for the week
+        from datetime import date as dt_date, timedelta
+        ws = dt_date.fromisoformat(week_start)
+        we = ws + timedelta(days=6)
+        entries = sb.table("timesheets").select("hours")\
+            .eq("employee_id", emp["id"]).eq("org_id", org_id)\
+            .gte("work_date", ws.isoformat())\
+            .lte("work_date", we.isoformat()).execute()
+        total = sum(e.get("hours", 0) for e in (entries.data or []))
+        default_hrs = emp.get("default_hours", 40) or 40
+        overtime = max(0, total - default_hrs)
+        # Upsert the week record
+        existing = sb.table("timesheet_weeks").select("id, status")\
+            .eq("employee_id", emp["id"]).eq("org_id", org_id)\
+            .eq("week_start", week_start).maybe_single().execute()
+        if existing.data:
+            if existing.data["status"] in ("approved",):
+                return jsonify({"error": "Week already approved"}), 403
+            result = sb.table("timesheet_weeks").update({
+                "status": "submitted",
+                "submitted_at": datetime.now().isoformat(),
+                "total_hours": round(total, 2),
+                "overtime_hours": round(overtime, 2),
+                "updated_at": datetime.now().isoformat(),
+            }).eq("id", existing.data["id"]).execute()
+        else:
+            result = sb.table("timesheet_weeks").insert({
+                "org_id": org_id,
+                "employee_id": emp["id"],
+                "week_start": week_start,
+                "status": "submitted",
+                "submitted_at": datetime.now().isoformat(),
+                "total_hours": round(total, 2),
+                "overtime_hours": round(overtime, 2),
+            }).execute()
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── Portal PTO ───────────────────────────────────────────────────────────────
+
+@app.route("/api/portal/pto", methods=["GET"])
+@require_auth
+def portal_list_pto():
+    """List employee's own PTO requests."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        result = sb.table("pto_requests").select("*")\
+            .eq("employee_id", emp["id"]).eq("org_id", org_id)\
+            .order("start_date", desc=True).execute()
+        return jsonify(result.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/portal/pto", methods=["POST"])
+@require_auth
+def portal_create_pto():
+    """Create a PTO request."""
+    data = request.get_json() or {}
+    required = ["pto_type", "start_date", "end_date", "hours"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        row = {
+            "org_id": org_id,
+            "employee_id": emp["id"],
+            "pto_type": data["pto_type"],
+            "start_date": data["start_date"],
+            "end_date": data["end_date"],
+            "hours": float(data["hours"]),
+            "is_partial_day": data.get("is_partial_day", False),
+            "reason": data.get("reason"),
+        }
+        result = sb.table("pto_requests").insert(row).execute()
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/portal/pto/<pid>", methods=["PUT"])
+@require_auth
+def portal_update_pto(pid):
+    """Update or cancel a pending PTO request."""
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        emp = _get_my_employee(sb, org_id)
+        if not emp:
+            return jsonify({"error": "No employee record found"}), 404
+        data["updated_at"] = datetime.now().isoformat()
+        result = sb.table("pto_requests").update(data)\
+            .eq("id", pid).eq("employee_id", emp["id"]).eq("org_id", org_id).execute()
+        if not result.data:
+            return jsonify({"error": "PTO request not found or not editable"}), 404
+        return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
