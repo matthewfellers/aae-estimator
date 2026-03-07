@@ -382,7 +382,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="modal-title">ADD EXPERIENCE RECORD</div>
   <input type="hidden" id="exp-edit-id">
   <div class="form-group"><label>Employee</label><select id="exp-employee"></select></div>
-  <div class="form-group"><label>Panel Type</label><select id="exp-panel-type"><option value="PLC">PLC</option><option value="MCC">MCC</option><option value="VFD">VFD</option><option value="Relay">Relay</option><option value="Junction Box">Junction Box</option><option value="Control">Control</option><option value="Custom">Custom</option></select></div>
+  <div class="form-group" style="position:relative"><label>Panel Type</label><input type="text" id="exp-panel-type" placeholder="Type to search or add new..." autocomplete="off" oninput="filterPanelTypes()" onfocus="filterPanelTypes()"><div id="exp-panel-type-list" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border);border-top:none;border-radius:0 0 8px 8px;max-height:200px;overflow-y:auto;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div></div>
   <div class="form-row"><div class="form-group"><label>Build Count</label><input type="number" id="exp-build-count" min="0" value="0"></div><div class="form-group"><label>Avg Hours</label><input type="number" id="exp-avg-hours" step="0.5" min="0" value="0"></div></div>
   <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-experience')">Cancel</button><button class="btn btn-primary" onclick="saveExperience()">Save</button></div>
 </div></div>
@@ -1079,11 +1079,22 @@ async function deleteEmployee(id){
 // ═══════════════════════════════════════════════════════════════════════════
 // PANEL EXPERIENCE
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Default panel types + any custom types discovered from existing records
+const _defaultPanelTypes = ["PLC","MCC","VFD","Relay","Junction Box","Control","Custom"];
+let _allPanelTypes = [..._defaultPanelTypes];
+
 async function loadExperience(){
   const tbody=document.getElementById("experience-tbody");
   tbody.innerHTML='<tr><td colspan="5" class="loading-row"><div class="loading-spinner"></div></td></tr>';
   try{
     const records=await api("GET","/api/scheduling/experience")||[];
+    // Collect custom panel types from existing records
+    records.forEach(r=>{
+      if(r.panel_type && !_allPanelTypes.includes(r.panel_type)){
+        _allPanelTypes.push(r.panel_type);
+      }
+    });
     if(records.length===0){ tbody.innerHTML='<tr><td colspan="5" style="text-align:center;padding:1rem;color:#999;">No experience records</td></tr>'; return; }
     let html='';
     records.forEach(r=>{
@@ -1095,6 +1106,49 @@ async function loadExperience(){
   }catch(e){ toast("Failed to load experience: "+e.message,"error"); tbody.innerHTML='<tr><td colspan="5" class="loading-row">Failed</td></tr>'; }
 }
 
+// ── Panel Type Typeahead ──
+function filterPanelTypes(){
+  const input=document.getElementById("exp-panel-type");
+  const list=document.getElementById("exp-panel-type-list");
+  const q=input.value.trim().toLowerCase();
+  // Filter matches — show all if empty, otherwise filter
+  let matches=_allPanelTypes.filter(t=>t.toLowerCase().includes(q));
+  // Sort: exact start matches first, then contains
+  matches.sort((a,b)=>{
+    const aStarts=a.toLowerCase().startsWith(q)?0:1;
+    const bStarts=b.toLowerCase().startsWith(q)?0:1;
+    if(aStarts!==bStarts) return aStarts-bStarts;
+    return a.localeCompare(b);
+  });
+  // If the user typed something that's not in the list, show "Add: <value>" option
+  const exactMatch=_allPanelTypes.some(t=>t.toLowerCase()===q);
+  let html='';
+  matches.forEach(t=>{
+    html+='<div style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;transition:background 0.1s" onmousedown="selectPanelType(\''+t.replace(/'/g,"\\'")+'\')" onmouseover="this.style.background=\'#f5f0f0\'" onmouseout="this.style.background=\'#fff\'">'+t+'</div>';
+  });
+  if(q && !exactMatch){
+    html+='<div style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--primary);font-weight:600;transition:background 0.1s" onmousedown="selectPanelType(\''+input.value.trim().replace(/'/g,"\\'")+'\')" onmouseover="this.style.background=\'#f5f0f0\'" onmouseout="this.style.background=\'#fff\'">+ Add: "'+input.value.trim()+'"</div>';
+  }
+  list.innerHTML=html;
+  list.style.display=html?'block':'none';
+}
+
+function selectPanelType(val){
+  document.getElementById("exp-panel-type").value=val;
+  document.getElementById("exp-panel-type-list").style.display='none';
+  // Add to known types if new
+  if(!_allPanelTypes.includes(val)) _allPanelTypes.push(val);
+}
+
+// Close dropdown when clicking outside
+document.addEventListener("click",function(e){
+  const list=document.getElementById("exp-panel-type-list");
+  const input=document.getElementById("exp-panel-type");
+  if(list && input && !input.contains(e.target) && !list.contains(e.target)){
+    list.style.display='none';
+  }
+});
+
 function openExperienceModal(editId, data){
   document.getElementById("exp-edit-id").value=editId||"";
   const empSel=document.getElementById("exp-employee");
@@ -1105,21 +1159,27 @@ function openExperienceModal(editId, data){
     document.getElementById("exp-build-count").value=data.build_count;
     document.getElementById("exp-avg-hours").value=data.avg_hours;
   } else {
+    document.getElementById("exp-panel-type").value="";
     document.getElementById("exp-build-count").value=0;
     document.getElementById("exp-avg-hours").value=0;
   }
+  document.getElementById("exp-panel-type-list").style.display='none';
   openModal("modal-experience");
 }
 
 async function saveExperience(){
+  const panelType=document.getElementById("exp-panel-type").value.trim();
+  if(!panelType){ toast("Please enter a panel type","error"); return; }
   const body={
     employee_id:document.getElementById("exp-employee").value,
-    panel_type:document.getElementById("exp-panel-type").value,
+    panel_type:panelType,
     build_count:parseInt(document.getElementById("exp-build-count").value)||0,
     avg_hours:parseFloat(document.getElementById("exp-avg-hours").value)||0
   };
   try{
     await api("POST","/api/scheduling/experience",body);
+    // Add new type to known list
+    if(!_allPanelTypes.includes(panelType)) _allPanelTypes.push(panelType);
     toast("Experience record saved","success");
     closeModal("modal-experience");
     loadExperience();
