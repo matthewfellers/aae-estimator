@@ -4093,42 +4093,29 @@ def generate_packing_slip_excel(slip_data, items):
                 ws.cell(row=current_row, column=c).fill = row_fill
             current_row += 1
 
-        # Project sub-line
-        item_project = item.get("project_name", "")
-        if item_project:
-            ws.merge_cells(f"E{current_row}:G{current_row}")
-            ws.cell(row=current_row, column=5, value=f"Project: {item_project}").font = item_sub_font
-            for c in range(1, 9):
-                ws.cell(row=current_row, column=c).fill = row_fill
-            current_row += 1
-
     # ══════════════════════════════════════════════════════════════════════════
-    # BOTTOM SECTION: Approver / Project / WBS / Notes
+    # BOTTOM SECTION: Approver / Project / WBS
+    # Always show these 3 lines 2 rows after last item, left-justified in
+    # the description column (col E), matching Blank Packing Slip.xls layout
     # ══════════════════════════════════════════════════════════════════════════
-    # Approver line — 2 rows below last item, left-justified in description column
+    current_row += 2
     approver = slip_data.get("approver", "")
-    if approver:
-        current_row += 2
-        ws.merge_cells(f"E{current_row}:G{current_row}")
-        ws[f"E{current_row}"].value = f"Approver: {approver}"
-        ws[f"E{current_row}"].font = item_sub_font
+    ws.merge_cells(f"E{current_row}:G{current_row}")
+    ws[f"E{current_row}"].value = f"Approver: {approver}"
+    ws[f"E{current_row}"].font = item_sub_font
 
-    # Project Name line
+    current_row += 1
     proj_name = slip_data.get("project_name", "")
-    if proj_name:
-        current_row += 1
-        ws.merge_cells(f"E{current_row}:G{current_row}")
-        ws[f"E{current_row}"].value = f"Project Name: {proj_name}"
-        ws[f"E{current_row}"].font = item_sub_font
+    ws.merge_cells(f"E{current_row}:G{current_row}")
+    ws[f"E{current_row}"].value = f"Project Name: {proj_name}"
+    ws[f"E{current_row}"].font = item_sub_font
 
-    # WBS / AFE / Cost Center line — dynamic label
+    current_row += 1
     wbs = slip_data.get("wbs", "")
     wbs_label = slip_data.get("wbs_label", "WBS #")
-    if wbs:
-        current_row += 1
-        ws.merge_cells(f"E{current_row}:G{current_row}")
-        ws[f"E{current_row}"].value = f"{wbs_label}: {wbs}"
-        ws[f"E{current_row}"].font = item_sub_font
+    ws.merge_cells(f"E{current_row}:G{current_row}")
+    ws[f"E{current_row}"].value = f"{wbs_label}: {wbs}"
+    ws[f"E{current_row}"].font = item_sub_font
 
     # Red accent line above notes
     current_row += 2
@@ -4203,7 +4190,7 @@ def create_packing_slip():
     data = request.get_json()
     try:
         sb = get_user_sb()
-        slip_number = data.get("slip_number") or _next_slip_number(sb)
+        slip_number = data.get("sales_order") or data.get("slip_number") or _next_slip_number(sb)
 
         row = {
             "slip_number":    slip_number,
@@ -4788,7 +4775,7 @@ def quick_ship():
             .select("*").eq("template_id", template_id)\
             .order("sort_order").execute()
 
-        slip_number = _next_slip_number(sb)
+        slip_number = data.get("sales_order") or _next_slip_number(sb)
         job_number = data.get("job_number", "")
 
         # Build slip data from template + quick-ship overrides
