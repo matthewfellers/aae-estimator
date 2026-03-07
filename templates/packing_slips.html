@@ -639,27 +639,32 @@ a { color: var(--primary); text-decoration: none; }
           <input type="date" id="qs_ship_date">
         </div>
       </div>
-      <div class="form-grid-3" style="margin-top:0.75rem">
-        <div class="field">
-          <label>Approver</label>
-          <div class="dropdown-wrap">
-            <input type="text" id="qs_approver" placeholder="Approver name">
-            <button class="dropdown-btn" onclick="showFieldDropdown('qs_approver','qs_approver',this)">&#9660;</button>
-            <div class="dropdown-menu" id="dd_qs_approver"></div>
+      <div style="margin-top:0.75rem">
+        <label><input type="checkbox" id="chk_qs_show_proj" onchange="document.getElementById('qs-proj-card').style.display = this.checked ? 'block' : 'none'"> Show Approver/Project/WBS</label>
+      </div>
+      <div id="qs-proj-card" style="display:none;margin-top:0.75rem">
+        <div class="form-grid-3">
+          <div class="field">
+            <label>Approver</label>
+            <div class="dropdown-wrap">
+              <input type="text" id="qs_approver" placeholder="Approver name">
+              <button class="dropdown-btn" onclick="showFieldDropdown('qs_approver','qs_approver',this)">&#9660;</button>
+              <div class="dropdown-menu" id="dd_qs_approver"></div>
+            </div>
           </div>
-        </div>
-        <div class="field">
-          <label>Tracking Type</label>
-          <div class="dropdown-wrap">
-            <input type="text" id="qs_wbs_label" value="WBS #" placeholder="WBS #, AFE #, Cost Center...">
-            <button class="dropdown-btn" onclick="showFieldDropdown('qs_wbs_label','qs_wbs_label',this)">&#9660;</button>
-            <div class="dropdown-menu" id="dd_qs_wbs_label"></div>
+          <div class="field">
+            <label>Tracking Type</label>
+            <div class="dropdown-wrap">
+              <input type="text" id="qs_wbs_label" value="WBS #" placeholder="WBS #, AFE #, Cost Center...">
+              <button class="dropdown-btn" onclick="showFieldDropdown('qs_wbs_label','qs_wbs_label',this)">&#9660;</button>
+              <div class="dropdown-menu" id="dd_qs_wbs_label"></div>
+            </div>
+            <input type="text" id="qs_wbs" placeholder="Value" style="margin-top:6px">
           </div>
-          <input type="text" id="qs_wbs" placeholder="Value" style="margin-top:6px">
-        </div>
-        <div class="field">
-          <label>Project Name</label>
-          <input type="text" id="qs_project_name" placeholder="Project name">
+          <div class="field">
+            <label>Project Name</label>
+            <input type="text" id="qs_project_name" placeholder="Project name">
+          </div>
         </div>
       </div>
       <div class="btn-row">
