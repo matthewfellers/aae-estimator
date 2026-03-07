@@ -4354,7 +4354,12 @@ def debug_auth():
         sb = get_user_sb()
         rls_check = sb.rpc("current_role", {}).execute()
         org_check = sb.rpc("current_org_id", {}).execute()
-        rls_info = {"rls_role": rls_check.data, "rls_org_id": org_check.data}
+        admin_check = sb.rpc("is_admin", {}).execute()
+        rls_info = {"rls_role": rls_check.data, "rls_org_id": org_check.data, "rls_is_admin": admin_check.data}
+        # Try a harmless read to see if RLS lets us see slip 1
+        slip_test = sb.table("packing_slips").select("id,org_id,status,is_deleted").eq("id", 1).execute()
+        rls_info["slip_visible"] = len(slip_test.data) > 0
+        rls_info["slip_data"] = slip_test.data
     except Exception as e:
         rls_info = {"rls_error": str(e)}
     return jsonify({**g.user, **rls_info})
