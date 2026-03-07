@@ -1,0 +1,1339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAE Automation — Shipping Docs</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #F8F9FA;
+  --card-bg: #FFFFFF;
+  --primary: #9B1B1B;
+  --primary-dark: #7A1010;
+  --text: #333333;
+  --text-muted: #666666;
+  --border: #E0E0E0;
+  --green: #2E7D32;
+  --green-lt: #E8F5E9;
+  --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --shadow-hover: 0 6px 24px rgba(0,0,0,0.12);
+  --radius: 12px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+a { color: var(--primary); text-decoration: none; }
+
+/* ── Header ── */
+.header {
+  background: #FFFFFF;
+  border-bottom: 3px solid var(--primary);
+  padding: 0 2rem;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 68px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  position: sticky; top: 0; z-index: 100;
+}
+.header-left { display: flex; align-items: center; gap: 12px; }
+.header-logo { height: 40px; border-radius: 4px; }
+.header-brand {
+  font-family: 'Bebas Neue', sans-serif; font-size: 1.8rem;
+  letter-spacing: 2px; color: var(--text);
+}
+.header-brand span { color: var(--primary); }
+.header-cert {
+  font-size: 0.7rem; color: var(--text-muted);
+  font-weight: 300; letter-spacing: 1px;
+}
+.header-right { display: flex; align-items: center; gap: 16px; }
+.user-pill {
+  background: #F5F0F0; color: var(--text);
+  padding: 6px 14px; border-radius: 20px;
+  font-size: 0.82rem; font-weight: 500;
+}
+.logout-btn {
+  background: none; border: 1.5px solid var(--primary); color: var(--primary);
+  font-family: 'DM Sans', sans-serif; font-size: 0.8rem; font-weight: 600;
+  padding: 6px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s;
+}
+.logout-btn:hover { background: var(--primary); color: #fff; }
+
+/* ── Container ── */
+.container {
+  flex: 1; max-width: 1200px; width: 100%;
+  margin: 0 auto; padding: 2rem;
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow);
+}
+.card-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 1.5px;
+  color: var(--primary); margin-bottom: 1rem;
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* ── Form fields ── */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label {
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.5px;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.field input, .field textarea, .field select {
+  background: #fff; border: 1.5px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; color: var(--text);
+  font-family: 'DM Sans', sans-serif; font-size: 0.88rem;
+  transition: border-color 0.2s;
+}
+.field input:focus, .field textarea:focus, .field select:focus {
+  outline: none; border-color: var(--primary);
+}
+
+/* ── Dropdown wrapper ── */
+.dropdown-wrap { position: relative; }
+.dropdown-wrap input { width: 100%; padding-right: 32px; }
+.dropdown-btn {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  background: var(--primary); border: none; color: #fff;
+  width: 24px; height: 24px; border-radius: 4px; cursor: pointer; font-size: 0.7rem;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0.8; transition: opacity 0.2s;
+}
+.dropdown-btn:hover { opacity: 1; }
+.dropdown-menu {
+  display: none; position: absolute; top: 100%; left: 0; right: 0;
+  background: #fff; border: 1px solid var(--border);
+  border-radius: 6px; max-height: 280px; overflow-y: auto; z-index: 50;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+.dropdown-menu.show { display: block; }
+.dropdown-item {
+  padding: 8px 12px; font-size: 0.82rem; color: var(--text);
+  border-bottom: 1px solid #f0f0f0; white-space: pre-wrap;
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.dropdown-item:hover { background: #FDECEA; }
+.dropdown-item-text { flex: 1; cursor: pointer; white-space: pre-wrap; }
+.dropdown-item-del {
+  flex-shrink: 0; width: 20px; height: 20px; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+  color: #999; font-size: 1rem; border-radius: 3px; line-height: 1;
+}
+.dropdown-item-del:hover { color: #fff; background: var(--primary); }
+.dropdown-add-new {
+  border-top: 2px solid var(--border); padding: 8px 12px; background: #fafafa;
+}
+.dropdown-add-btn {
+  color: var(--primary); font-weight: 600; font-size: 0.82rem;
+  cursor: pointer; padding: 4px 0;
+}
+.dropdown-add-btn:hover { text-decoration: underline; }
+
+/* ── Buttons ── */
+.btn {
+  border: none; border-radius: 8px; cursor: pointer; font-weight: 600;
+  padding: 0.6rem 1.2rem; font-family: 'DM Sans', sans-serif; font-size: 0.85rem;
+  transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-secondary { background: #fff; border: 1.5px solid var(--primary); color: var(--primary); }
+.btn-secondary:hover { background: #FDECEA; }
+.btn-success { background: var(--green); color: #fff; }
+.btn-success:hover { background: #1b5e20; }
+.btn-ghost { background: transparent; border: 1.5px solid var(--border); color: var(--text-muted); }
+.btn-ghost:hover { border-color: #999; color: var(--text); }
+.btn-danger { background: #c62828; color: #fff; }
+.btn-danger:hover { background: #b71c1c; }
+.btn-sm { padding: 0.35rem 0.8rem; font-size: 0.78rem; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 1rem; }
+
+/* ── Customer Grid ── */
+.main {
+  flex: 1; max-width: 960px; width: 100%;
+  margin: 0 auto; padding: 3rem 2rem;
+}
+.page-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 1.6rem;
+  letter-spacing: 2px; color: var(--text); margin-bottom: 0.5rem;
+}
+.page-subtitle {
+  font-size: 0.92rem; color: var(--text-muted); margin-bottom: 2.5rem;
+}
+.customer-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.5rem;
+}
+.customer-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 2rem 1.5rem;
+  box-shadow: var(--shadow); transition: all 0.25s ease;
+  cursor: pointer; text-align: center; position: relative;
+}
+.customer-card:hover {
+  box-shadow: var(--shadow-hover); transform: translateY(-2px);
+  border-color: var(--primary);
+}
+.customer-icon { font-size: 2.2rem; margin-bottom: 0.75rem; }
+.customer-name {
+  font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem;
+  letter-spacing: 1.5px; color: var(--text); margin-bottom: 0.25rem;
+}
+.customer-sub { font-size: 0.82rem; color: var(--text-muted); }
+
+/* ── Unit Tabs ── */
+.unit-tabs { display: flex; gap: 8px; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center; }
+.unit-tab {
+  padding: 8px 20px; border-radius: 8px; cursor: pointer;
+  font-family: 'DM Sans', sans-serif; font-size: 0.88rem; font-weight: 600;
+  border: 1.5px solid var(--border); background: #fff; color: var(--text-muted);
+  transition: all 0.2s;
+}
+.unit-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+/* ── Template cards ── */
+.template-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;
+  margin-top: 1rem;
+}
+.template-card {
+  background: #fff; border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.template-card-name { font-weight: 600; font-size: 0.95rem; color: var(--text); margin-bottom: 4px; }
+.template-card-sub { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+.template-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ── History table ── */
+.history-table { width: 100%; border-collapse: collapse; }
+.history-table th {
+  text-align: left; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+  color: var(--text-muted); padding: 10px 8px; border-bottom: 2px solid var(--border);
+}
+.history-table td {
+  padding: 10px 8px; font-size: 0.88rem; color: var(--text);
+  border-bottom: 1px solid #f0f0f0;
+}
+
+/* ── View tabs (Customers / History) ── */
+.view-tabs { display: flex; gap: 8px; margin-bottom: 1.5rem; }
+.view-tab {
+  padding: 8px 20px; border-radius: 8px; cursor: pointer;
+  font-family: 'DM Sans', sans-serif; font-size: 0.88rem; font-weight: 600;
+  border: 1.5px solid var(--border); background: #fff; color: var(--text-muted);
+  transition: all 0.2s;
+}
+.view-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+/* ── Back link ── */
+.view-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.88rem; color: var(--primary); cursor: pointer;
+  margin-bottom: 1.5rem; font-weight: 500;
+  background: none; border: none; font-family: 'DM Sans', sans-serif;
+}
+.view-back:hover { text-decoration: underline; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
+  border-radius: 8px; font-size: 0.88rem; font-weight: 500; z-index: 9999;
+  transform: translateY(80px); opacity: 0; transition: all 0.3s ease;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast-success { background: var(--green); color: #fff; }
+.toast-error { background: #c62828; color: #fff; }
+
+/* ── Login Overlay ── */
+#login-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45); z-index: 9999;
+  justify-content: center; align-items: center;
+}
+#login-overlay.visible { display: flex; }
+.login-card {
+  background: #fff; border-radius: 12px; padding: 40px 36px;
+  width: 380px; max-width: calc(100vw - 2rem); text-align: center;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.18);
+}
+.login-card img { width: 140px; margin-bottom: 6px; border-radius: 4px; }
+.login-logo-name { font-family: 'Bebas Neue', sans-serif; font-size: 22px; letter-spacing: 3px; color: #333; margin-bottom: 2px; }
+.login-tagline { font-size: 11px; color: #888; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 28px; }
+.login-card h2 { font-family: 'Bebas Neue', sans-serif; font-size: 20px; color: #2C2C2C; margin-bottom: 20px; }
+.login-field { text-align: left; margin-bottom: 14px; }
+.login-field label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #666; margin-bottom: 5px; }
+.login-field input { width: 100%; padding: 9px 12px; border: 1.5px solid #DDD; border-radius: 4px; font-size: 14px; color: #333; }
+.login-field input:focus { outline: none; border-color: #9B1B1B; }
+.login-submit { width: 100%; padding: 12px; background: #9B1B1B; color: white; border: none; border-radius: 4px; font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 1px; cursor: pointer; margin-top: 6px; }
+.login-submit:hover { background: #7A1010; }
+.login-err { color: #9B1B1B; font-size: 12px; margin-top: 8px; display: none; }
+#mfa-section { display: none; }
+
+/* ── Modal ── */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4); z-index: 500;
+  justify-content: center; align-items: center;
+}
+.modal-overlay.visible { display: flex; }
+.modal {
+  background: #fff; border-radius: 12px; padding: 2rem;
+  width: 480px; max-width: calc(100vw - 2rem);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.2);
+}
+.modal-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 1.2rem;
+  letter-spacing: 1.5px; color: var(--primary); margin-bottom: 1rem;
+}
+
+/* ── Footer ── */
+.footer {
+  background: #FFFFFF; border-top: 1px solid var(--border);
+  padding: 1.25rem 2rem; text-align: center;
+  font-size: 0.78rem; color: var(--text-muted); line-height: 1.6;
+}
+.footer a { color: var(--primary); text-decoration: none; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
+  .header { flex-wrap: wrap; height: auto; padding: 8px 1rem; }
+  .container { padding: 1rem; }
+  .customer-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  .customer-grid { grid-template-columns: 1fr; }
+  .template-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- Supabase JS -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<!-- LOGIN OVERLAY -->
+<div id="login-overlay" class="visible">
+  <div class="login-card">
+    <img src="/static/aae_logo.jpg" alt="AAE Automation" onerror="this.style.display='none'">
+    <div class="login-logo-name">AAE AUTOMATION</div>
+    <div class="login-tagline">Enterprise Resource Planning</div>
+    <div id="signin-form">
+      <h2>Sign In</h2>
+      <div class="login-field"><label>Email</label><input type="email" id="login_email" placeholder="you@aaeautomation.com" autocomplete="username"></div>
+      <div class="login-field"><label>Password</label><input type="password" id="login_pass" placeholder="password" autocomplete="current-password"></div>
+      <div id="mfa-section">
+        <div class="login-field"><label>MFA Code</label><input type="text" id="login_mfa" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" inputmode="numeric"></div>
+      </div>
+      <button class="login-submit" onclick="doLogin()">SIGN IN</button>
+      <div class="login-err" id="login_err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header class="header" id="app-header" style="display:none">
+  <div class="header-left">
+    <a href="/" style="color:var(--text-muted);font-size:0.85rem;margin-right:4px">&larr; Home</a>
+    <img src="/static/aae_logo.jpg" alt="AAE" class="header-logo" onerror="this.style.display='none'">
+    <div>
+      <div class="header-brand">AAE <span>AUTO</span>MATION</div>
+      <div class="header-cert">SHIPPING DOCS MODULE</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="user-pill" id="user_pill"></span>
+    <button class="logout-btn" onclick="doLogout()">Sign Out</button>
+  </div>
+</header>
+
+<!-- MAIN CONTENT -->
+<div id="app-main" style="display:none">
+<div class="container">
+
+<!-- View tabs -->
+<div class="view-tabs">
+  <button class="view-tab active" id="vtab-customers" onclick="switchMainTab('customers')">Customers</button>
+  <button class="view-tab" id="vtab-history" onclick="switchMainTab('history')">History</button>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- LEVEL 1: CUSTOMER GRID -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="view-customers">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
+    <div>
+      <div class="page-title">SHIPPING DOCS</div>
+      <div class="page-subtitle">Select a customer to manage templates and generate documents.</div>
+    </div>
+    <button class="btn btn-primary" id="btn-add-customer" style="display:none" onclick="showAddCustomerModal()">+ Add Customer</button>
+  </div>
+  <div class="customer-grid" id="customer-grid"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- LEVEL 2: UNITS + TEMPLATES -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="view-units" style="display:none">
+  <button class="view-back" onclick="backToCustomers()">&larr; Back to Customers</button>
+  <div class="page-title" id="unit-page-title"></div>
+
+  <div class="unit-tabs" id="unit-tabs"></div>
+
+  <div id="templates-area">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+      <div class="card-title" style="margin-bottom:0">TEMPLATES</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+          Upload Template (.docx)
+          <input type="file" accept=".docx" style="display:none" onchange="uploadTemplate(this)">
+        </label>
+        <button class="btn btn-ghost btn-sm" id="btn-manage-defaults" onclick="showDefaultsModal()">Manage Defaults</button>
+      </div>
+    </div>
+    <div class="template-grid" id="template-grid"></div>
+    <div id="no-templates" style="display:none;text-align:center;padding:3rem;color:var(--text-muted)">
+      No templates yet. Upload a .docx template to get started.
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- LEVEL 3: GENERATE DOCUMENT -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="view-generate" style="display:none">
+  <button class="view-back" id="gen-back-btn">&larr; Back</button>
+  <div class="page-title" id="gen-page-title"></div>
+
+  <div class="card">
+    <div class="card-title">FILL IN PLACEHOLDERS</div>
+    <div id="gen-fields"></div>
+    <div class="btn-row">
+      <button class="btn btn-success" onclick="generateAndDownload()">Generate &amp; Download DOCX</button>
+      <button class="btn btn-ghost" onclick="clearGenForm()">Clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- LEVEL 4: HISTORY -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="view-history" style="display:none">
+  <div class="page-title">GENERATION HISTORY</div>
+  <div class="page-subtitle">Previously generated shipping documents.</div>
+  <div class="card" style="overflow-x:auto">
+    <table class="history-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Customer</th>
+          <th>Unit</th>
+          <th>Template</th>
+          <th>File</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="history-body"></tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /container -->
+</div><!-- /app-main -->
+
+<!-- MODALS -->
+
+<!-- Add Customer Modal -->
+<div class="modal-overlay" id="modal-add-customer">
+  <div class="modal">
+    <div class="modal-title">ADD CUSTOMER</div>
+    <div class="field" style="margin-bottom:1rem">
+      <label>Customer Name</label>
+      <input type="text" id="new-customer-name" placeholder="e.g. Devon">
+    </div>
+    <div class="field" style="margin-bottom:1rem">
+      <label>Icon (emoji, optional)</label>
+      <input type="text" id="new-customer-icon" placeholder="e.g. emoji">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="createCustomer()">Create</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-add-customer')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Unit Modal -->
+<div class="modal-overlay" id="modal-add-unit">
+  <div class="modal">
+    <div class="modal-title">ADD UNIT</div>
+    <div class="field" style="margin-bottom:1rem">
+      <label>Unit Name</label>
+      <input type="text" id="new-unit-name" placeholder="e.g. DBBU">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="createUnit()">Create</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-add-unit')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Defaults Modal -->
+<div class="modal-overlay" id="modal-defaults">
+  <div class="modal">
+    <div class="modal-title">CUSTOMER DEFAULTS</div>
+    <div id="defaults-fields"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="saveDefaults()">Save Defaults</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-defaults')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- FOOTER -->
+<footer class="footer" id="app-footer" style="display:none">
+  AAE Automation Inc. &middot; 8528 SW 2nd St, OKC, OK 73128 &middot;
+  <a href="tel:4052101567">405-210-1567</a> &middot;
+  <a href="https://aaeok.com" target="_blank">aaeok.com</a><br>
+  UL-508A Certified Industrial Control Panel Shop
+</footer>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTH — Supabase session, login, logout (same pattern as packing_slips.html)
+// ═══════════════════════════════════════════════════════════════════════════════
+const SUPABASE_URL  = "{{ supabase_url }}";
+const SUPABASE_ANON = "{{ supabase_anon_key }}";
+
+let _sbClient = null;
+let _accessToken = null;
+let _pendingMfaFactorId = null;
+let _userRole = "viewer";
+let _isAdmin = false;
+
+function authHeaders() { return { "Authorization": "Bearer " + _accessToken, "Content-Type": "application/json" }; }
+function authHeadersNoBody() { return { "Authorization": "Bearer " + _accessToken }; }
+function showLoginErr(msg) { const el=document.getElementById("login_err"); el.textContent=msg; el.style.display="block"; }
+function escHtml(s) { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+// 24-hour session max
+const SESSION_KEY = "aae_session_start_shipping";
+function stampSessionLogin() { localStorage.setItem(SESSION_KEY, Date.now().toString()); }
+function clearSessionStamp() { localStorage.removeItem(SESSION_KEY); }
+function isSessionExpired() {
+  const s = localStorage.getItem(SESSION_KEY);
+  if (!s) return false;
+  return (Date.now() - parseInt(s)) > 24*60*60*1000;
+}
+
+(async function initAuth() {
+  _sbClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  if (isSessionExpired()) { clearSessionStamp(); return; }
+  try {
+    const { data } = await _sbClient.auth.getSession();
+    if (data?.session?.access_token) {
+      _accessToken = data.session.access_token;
+      const resp = await fetch("/api/me", { headers: authHeadersNoBody() });
+      if (resp.ok) { stampSessionLogin(); onLoginSuccess(await resp.json()); }
+      else { _accessToken = null; }
+    }
+  } catch(e) { console.error("Session restore failed:", e); }
+})();
+
+async function doLogin() {
+  const email = document.getElementById("login_email").value.trim();
+  const pass  = document.getElementById("login_pass").value;
+  const mfa   = document.getElementById("login_mfa").value.trim();
+  const btn   = document.querySelector(".login-submit");
+  if (!email || !pass) { showLoginErr("Email and password required."); return; }
+  btn.disabled = true; btn.textContent = "Signing in...";
+  try {
+    if (_pendingMfaFactorId && mfa) {
+      const { data: chal } = await _sbClient.auth.mfa.challenge({ factorId: _pendingMfaFactorId });
+      const { data, error } = await _sbClient.auth.mfa.verify({ factorId: _pendingMfaFactorId, challengeId: chal.id, code: mfa });
+      if (error) throw error;
+      _accessToken = data.session?.access_token;
+      _pendingMfaFactorId = null;
+    } else {
+      const { data, error } = await _sbClient.auth.signInWithPassword({ email, password: pass });
+      if (error) throw error;
+      const { data: fd } = await _sbClient.auth.mfa.listFactors();
+      const vf = (fd?.totp || []).filter(f => f.status === 'verified');
+      if (vf.length > 0) {
+        _pendingMfaFactorId = vf[0].id;
+        document.getElementById("mfa-section").style.display = "block";
+        btn.textContent = "VERIFY MFA"; btn.disabled = false;
+        document.getElementById("login_mfa").focus(); return;
+      }
+      _accessToken = data.session?.access_token;
+    }
+    const resp = await fetch("/api/me", { headers: authHeadersNoBody() });
+    if (!resp.ok) throw new Error("Failed to load profile");
+    stampSessionLogin();
+    onLoginSuccess(await resp.json());
+  } catch(err) {
+    _pendingMfaFactorId = null;
+    document.getElementById("mfa-section").style.display = "none";
+    showLoginErr(err.message || "Sign-in failed.");
+  } finally { btn.disabled = false; if (!_pendingMfaFactorId) btn.textContent = "SIGN IN"; }
+}
+
+function onLoginSuccess(profile) {
+  document.getElementById("login-overlay").classList.remove("visible");
+  document.getElementById("app-header").style.display = "flex";
+  document.getElementById("app-main").style.display = "block";
+  document.getElementById("app-footer").style.display = "block";
+  const name = profile.display_name || profile.email || "User";
+  document.getElementById("user_pill").textContent = name;
+  _userRole = profile.role || "viewer";
+  _isAdmin = _userRole === "admin";
+  initPage();
+}
+
+async function doLogout() {
+  if (_sbClient) { try { await _sbClient.auth.signOut(); } catch(e) {} }
+  _accessToken = null; clearSessionStamp();
+  document.getElementById("app-header").style.display = "none";
+  document.getElementById("app-main").style.display = "none";
+  document.getElementById("app-footer").style.display = "none";
+  document.getElementById("login-overlay").classList.add("visible");
+  document.getElementById("login_pass").value = "";
+  document.getElementById("login_mfa").value = "";
+  document.getElementById("login_err").style.display = "none";
+  document.getElementById("mfa-section").style.display = "none";
+  _pendingMfaFactorId = null;
+}
+
+["login_email","login_pass","login_mfa"].forEach(id => {
+  document.getElementById(id)?.addEventListener("keydown", e => { if (e.key==="Enter") doLogin(); });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════════════════════════════
+function toast(msg, type="success") {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast toast-" + type + " show";
+  setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════════
+let _customers = [];
+let _currentCustomer = null;
+let _currentUnits = [];
+let _currentUnitId = null;
+let _currentTemplates = [];
+let _currentDefaults = {};
+let _genTemplateId = null;
+let _genPlaceholders = [];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODAL HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+function closeModal(id) { document.getElementById(id).classList.remove("visible"); }
+function showModal(id) { document.getElementById(id).classList.add("visible"); }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN TAB SWITCH (Customers / History)
+// ═══════════════════════════════════════════════════════════════════════════════
+function switchMainTab(tab) {
+  document.querySelectorAll(".view-tab").forEach(b => b.classList.remove("active"));
+  document.getElementById("vtab-" + tab).classList.add("active");
+
+  document.getElementById("view-customers").style.display = tab === "customers" ? "" : "none";
+  document.getElementById("view-units").style.display = "none";
+  document.getElementById("view-generate").style.display = "none";
+  document.getElementById("view-history").style.display = tab === "history" ? "" : "none";
+
+  if (tab === "history") loadHistory();
+  if (tab === "customers") loadCustomers();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEVEL 1: CUSTOMERS
+// ═══════════════════════════════════════════════════════════════════════════════
+async function loadCustomers() {
+  try {
+    const resp = await fetch("/api/shipping/customers", { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    _customers = data.customers || [];
+    renderCustomers();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+function renderCustomers() {
+  const grid = document.getElementById("customer-grid");
+  grid.innerHTML = "";
+
+  if (_isAdmin) document.getElementById("btn-add-customer").style.display = "";
+
+  _customers.forEach(c => {
+    const card = document.createElement("div");
+    card.className = "customer-card";
+    card.onclick = () => openCustomer(c);
+    card.innerHTML = `
+      <div class="customer-icon">${escHtml(c.icon || '')}</div>
+      <div class="customer-name">${escHtml(c.customer_name)}</div>
+      <div class="customer-sub">${c.unit_count || 0} unit${c.unit_count !== 1 ? 's' : ''}</div>
+      ${_isAdmin ? `<button class="btn btn-danger btn-sm" style="position:absolute;top:8px;right:8px;padding:2px 8px;font-size:0.7rem" onclick="event.stopPropagation();deleteCustomer(${c.id})">&times;</button>` : ''}
+    `;
+    grid.appendChild(card);
+  });
+
+  if (_customers.length === 0) {
+    grid.innerHTML = '<div style="text-align:center;padding:3rem;color:var(--text-muted);grid-column:1/-1">No customers yet. Add one to get started.</div>';
+  }
+}
+
+function showAddCustomerModal() {
+  document.getElementById("new-customer-name").value = "";
+  document.getElementById("new-customer-icon").value = "";
+  showModal("modal-add-customer");
+  document.getElementById("new-customer-name").focus();
+}
+
+async function createCustomer() {
+  const name = document.getElementById("new-customer-name").value.trim();
+  if (!name) { toast("Customer name required", "error"); return; }
+  const icon = document.getElementById("new-customer-icon").value.trim();
+  try {
+    const resp = await fetch("/api/shipping/customers", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ customer_name: name, icon: icon || null })
+    });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    closeModal("modal-add-customer");
+    toast("Customer created");
+    loadCustomers();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function deleteCustomer(id) {
+  if (!confirm("Delete this customer and all its units/templates?")) return;
+  try {
+    const resp = await fetch(`/api/shipping/customers/${id}`, { method: "DELETE", headers: authHeadersNoBody() });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    toast("Customer deleted");
+    loadCustomers();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEVEL 2: UNITS + TEMPLATES
+// ═══════════════════════════════════════════════════════════════════════════════
+async function openCustomer(customer) {
+  _currentCustomer = customer;
+  document.getElementById("view-customers").style.display = "none";
+  document.getElementById("view-units").style.display = "";
+  document.getElementById("unit-page-title").textContent = customer.customer_name.toUpperCase();
+
+  // Load defaults
+  try {
+    const resp = await fetch(`/api/shipping/customers/${customer.id}/defaults`, { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    _currentDefaults = data.defaults || {};
+  } catch(e) { _currentDefaults = {}; }
+
+  await loadUnits(customer.id);
+}
+
+function backToCustomers() {
+  document.getElementById("view-units").style.display = "none";
+  document.getElementById("view-customers").style.display = "";
+  _currentCustomer = null;
+  _currentUnitId = null;
+  loadCustomers();
+}
+
+async function loadUnits(customerId) {
+  try {
+    const resp = await fetch(`/api/shipping/customers/${customerId}/units`, { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    _currentUnits = data.units || [];
+    renderUnitTabs();
+    if (_currentUnits.length > 0) {
+      selectUnit(_currentUnits[0].id);
+    } else {
+      _currentUnitId = null;
+      document.getElementById("template-grid").innerHTML = "";
+      document.getElementById("no-templates").style.display = "";
+    }
+  } catch(e) { toast(e.message, "error"); }
+}
+
+function renderUnitTabs() {
+  const container = document.getElementById("unit-tabs");
+  container.innerHTML = "";
+  _currentUnits.forEach(u => {
+    const btn = document.createElement("button");
+    btn.className = "unit-tab" + (u.id === _currentUnitId ? " active" : "");
+    btn.textContent = u.unit_name;
+    btn.onclick = () => selectUnit(u.id);
+
+    // Admin delete button
+    if (_isAdmin) {
+      const del = document.createElement("span");
+      del.innerHTML = " &times;";
+      del.style.cssText = "cursor:pointer;margin-left:4px;font-size:0.9rem;opacity:0.6";
+      del.title = "Delete unit";
+      del.onclick = (e) => { e.stopPropagation(); deleteUnit(u.id); };
+      btn.appendChild(del);
+    }
+    container.appendChild(btn);
+  });
+
+  if (_isAdmin) {
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn btn-secondary btn-sm";
+    addBtn.textContent = "+ Add Unit";
+    addBtn.onclick = showAddUnitModal;
+    container.appendChild(addBtn);
+  }
+}
+
+async function selectUnit(unitId) {
+  _currentUnitId = unitId;
+  renderUnitTabs();
+  await loadTemplates(unitId);
+}
+
+function showAddUnitModal() {
+  document.getElementById("new-unit-name").value = "";
+  showModal("modal-add-unit");
+  document.getElementById("new-unit-name").focus();
+}
+
+async function createUnit() {
+  const name = document.getElementById("new-unit-name").value.trim();
+  if (!name) { toast("Unit name required", "error"); return; }
+  try {
+    const resp = await fetch(`/api/shipping/customers/${_currentCustomer.id}/units`, {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ unit_name: name })
+    });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    closeModal("modal-add-unit");
+    toast("Unit created");
+    await loadUnits(_currentCustomer.id);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function deleteUnit(id) {
+  if (!confirm("Delete this unit and all its templates?")) return;
+  try {
+    const resp = await fetch(`/api/shipping/units/${id}`, { method: "DELETE", headers: authHeadersNoBody() });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    toast("Unit deleted");
+    await loadUnits(_currentCustomer.id);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function loadTemplates(unitId) {
+  try {
+    const resp = await fetch(`/api/shipping/units/${unitId}/templates`, { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    _currentTemplates = data.templates || [];
+    renderTemplates();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+function renderTemplates() {
+  const grid = document.getElementById("template-grid");
+  grid.innerHTML = "";
+
+  if (_currentTemplates.length === 0) {
+    document.getElementById("no-templates").style.display = "";
+    return;
+  }
+  document.getElementById("no-templates").style.display = "none";
+
+  _currentTemplates.forEach(t => {
+    let placeholders = t.placeholders;
+    if (typeof placeholders === "string") placeholders = JSON.parse(placeholders);
+    const count = (placeholders || []).length;
+
+    const card = document.createElement("div");
+    card.className = "template-card";
+    card.innerHTML = `
+      <div class="template-card-name">${escHtml(t.template_name)}</div>
+      <div class="template-card-sub">${count} placeholder${count !== 1 ? 's' : ''} &middot; ${escHtml(t.file_name || '')}</div>
+      <div class="template-card-actions">
+        <button class="btn btn-primary btn-sm" onclick="openGenerate(${t.id})">Generate</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadOriginalTemplate(${t.id})">Download</button>
+        ${_isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteTemplate(${t.id})">Delete</button>` : ''}
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+async function uploadTemplate(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (!_currentUnitId) { toast("Select a unit first", "error"); input.value=""; return; }
+
+  const tmplName = prompt("Template name:", file.name.replace(/\.\w+$/, ""));
+  if (!tmplName) { input.value = ""; return; }
+
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("template_name", tmplName);
+
+  try {
+    const resp = await fetch(`/api/shipping/units/${_currentUnitId}/templates`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + _accessToken },
+      body: fd
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || "Upload failed");
+
+    const placeholders = result.placeholders || [];
+    toast(`Template uploaded: ${placeholders.length} placeholders detected`);
+    loadTemplates(_currentUnitId);
+  } catch(e) { toast(e.message, "error"); }
+  input.value = "";
+}
+
+async function downloadOriginalTemplate(tid) {
+  try {
+    const resp = await fetch(`/api/shipping/templates/${tid}/download`, { headers: authHeadersNoBody() });
+    if (!resp.ok) throw new Error("Download failed");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = resp.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g,"") || "template.docx";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function deleteTemplate(tid) {
+  if (!confirm("Delete this template?")) return;
+  try {
+    const resp = await fetch(`/api/shipping/templates/${tid}`, { method: "DELETE", headers: authHeadersNoBody() });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    toast("Template deleted");
+    loadTemplates(_currentUnitId);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ── Defaults Modal ──
+
+function showDefaultsModal() {
+  const container = document.getElementById("defaults-fields");
+  const defaultKeys = [
+    { key: "OWNERSHIP_TEXT", label: "Ownership Text" },
+    { key: "WBS_LABEL", label: "WBS Label" },
+    { key: "FACILITY_NAME", label: "Facility Name" },
+    { key: "PO_NUMBER", label: "PO Number" },
+    { key: "JOB_NUMBER", label: "Job Number" },
+  ];
+
+  container.innerHTML = "";
+  defaultKeys.forEach(dk => {
+    const val = _currentDefaults[dk.key] || _currentDefaults[dk.key.toLowerCase()] || "";
+    container.innerHTML += `
+      <div class="field" style="margin-bottom:0.75rem">
+        <label>${escHtml(dk.label)}</label>
+        <input type="text" id="def_${dk.key}" value="${escHtml(val)}" placeholder="Default value (optional)">
+      </div>
+    `;
+  });
+  showModal("modal-defaults");
+}
+
+async function saveDefaults() {
+  const defaultKeys = ["OWNERSHIP_TEXT", "WBS_LABEL", "FACILITY_NAME", "PO_NUMBER", "JOB_NUMBER"];
+  const defaults = {};
+  defaultKeys.forEach(k => {
+    const val = document.getElementById("def_" + k).value.trim();
+    if (val) defaults[k] = val;
+  });
+
+  try {
+    const resp = await fetch(`/api/shipping/customers/${_currentCustomer.id}/defaults`, {
+      method: "PUT", headers: authHeaders(),
+      body: JSON.stringify({ defaults })
+    });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    _currentDefaults = defaults;
+    closeModal("modal-defaults");
+    toast("Defaults saved");
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEVEL 3: GENERATE DOCUMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+async function openGenerate(tid) {
+  _genTemplateId = tid;
+
+  // Get template metadata
+  try {
+    const resp = await fetch(`/api/shipping/templates/${tid}`, { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    const tmpl = data.template;
+
+    let placeholders = tmpl.placeholders;
+    if (typeof placeholders === "string") placeholders = JSON.parse(placeholders);
+    _genPlaceholders = placeholders || [];
+
+    // Get breadcrumb info
+    const unitName = _currentUnits.find(u => u.id === tmpl.unit_id)?.unit_name || "";
+    const custName = _currentCustomer?.customer_name || "";
+
+    document.getElementById("gen-page-title").textContent =
+      `Generate: ${tmpl.template_name}`;
+    document.getElementById("gen-back-btn").onclick = () => {
+      document.getElementById("view-generate").style.display = "none";
+      document.getElementById("view-units").style.display = "";
+    };
+
+    // Build form fields
+    const container = document.getElementById("gen-fields");
+    container.innerHTML = "";
+
+    if (_genPlaceholders.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-muted);padding:1rem 0">No placeholders detected in this template.</div>';
+    } else {
+      const grid = document.createElement("div");
+      grid.className = "form-grid";
+
+      _genPlaceholders.forEach(ph => {
+        // Remove braces for the field key
+        const key = ph.replace(/[{}]/g, "");
+        const label = key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+        // Check for customer default (case-insensitive)
+        const defaultVal = _currentDefaults[key] || _currentDefaults[key.toLowerCase()] || "";
+
+        const fieldDiv = document.createElement("div");
+        fieldDiv.className = "field";
+        fieldDiv.innerHTML = `
+          <label>${escHtml(label)}</label>
+          <div class="dropdown-wrap">
+            <input type="text" id="gen_${key}" value="${escHtml(defaultVal)}" placeholder="${escHtml(label)}">
+            <button class="dropdown-btn" onclick="showShippingDropdown('${key}','gen_${key}',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_gen_${key}"></div>
+          </div>
+        `;
+        grid.appendChild(fieldDiv);
+      });
+      container.appendChild(grid);
+    }
+
+    // Show generate view
+    document.getElementById("view-units").style.display = "none";
+    document.getElementById("view-generate").style.display = "";
+
+    // Init type-to-filter for generate fields
+    initGenTypeToFilter();
+
+  } catch(e) { toast(e.message, "error"); }
+}
+
+function clearGenForm() {
+  _genPlaceholders.forEach(ph => {
+    const key = ph.replace(/[{}]/g, "");
+    const el = document.getElementById("gen_" + key);
+    if (el) el.value = "";
+  });
+  // Clear dropdown cache
+  Object.keys(_shippingDdCache).forEach(k => delete _shippingDdCache[k]);
+}
+
+async function generateAndDownload() {
+  if (!_genTemplateId) return;
+
+  const fieldValues = {};
+  _genPlaceholders.forEach(ph => {
+    const key = ph.replace(/[{}]/g, "");
+    const el = document.getElementById("gen_" + key);
+    fieldValues[key] = el ? el.value : "";
+  });
+
+  try {
+    const resp = await fetch(`/api/shipping/templates/${_genTemplateId}/generate`, {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ field_values: fieldValues })
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || "Generation failed");
+    }
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = resp.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g,"") || "generated.docx";
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast("Document generated and downloaded");
+    // Clear dropdown cache so new values show
+    Object.keys(_shippingDdCache).forEach(k => delete _shippingDdCache[k]);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SMART DROPDOWNS (shipping-specific, same pattern as packing slips)
+// ═══════════════════════════════════════════════════════════════════════════════
+const _shippingDdCache = {};
+
+async function _ensureShippingCache(fieldName) {
+  if (!_shippingDdCache[fieldName]) {
+    try {
+      const resp = await fetch(`/api/shipping/field-history?field=${encodeURIComponent(fieldName)}`, { headers: authHeadersNoBody() });
+      const data = await resp.json();
+      _shippingDdCache[fieldName] = data.values || [];
+    } catch(e) { _shippingDdCache[fieldName] = []; }
+  }
+  return _shippingDdCache[fieldName];
+}
+
+function _renderShippingDropdown(fieldName, inputId, values, filter) {
+  const menu = document.getElementById("dd_" + inputId);
+  if (!menu) return;
+  menu.innerHTML = "";
+
+  let sorted = [...values];
+  if (filter) {
+    const f = filter.toLowerCase();
+    sorted.sort((a, b) => {
+      const aMatch = a.toLowerCase().includes(f) ? 0 : 1;
+      const bMatch = b.toLowerCase().includes(f) ? 0 : 1;
+      return aMatch - bMatch;
+    });
+  }
+
+  if (sorted.length === 0) {
+    menu.innerHTML = '<div class="dropdown-item" style="color:var(--text-muted)">No saved values yet</div>';
+  } else {
+    sorted.forEach(v => {
+      const item = document.createElement("div");
+      item.className = "dropdown-item";
+
+      const textSpan = document.createElement("span");
+      textSpan.className = "dropdown-item-text";
+      textSpan.textContent = v;
+      textSpan.onclick = () => {
+        document.getElementById(inputId).value = v;
+        menu.classList.remove("show");
+      };
+
+      const delBtn = document.createElement("span");
+      delBtn.className = "dropdown-item-del";
+      delBtn.innerHTML = "&times;";
+      delBtn.title = "Delete from saved list";
+      delBtn.onclick = (e) => {
+        e.stopPropagation();
+        deleteShippingFieldValue(fieldName, v, item);
+      };
+
+      item.appendChild(textSpan);
+      item.appendChild(delBtn);
+      menu.appendChild(item);
+    });
+  }
+
+  // + Add New
+  const addNewDiv = document.createElement("div");
+  addNewDiv.className = "dropdown-add-new";
+  addNewDiv.innerHTML = `
+    <div class="dropdown-add-btn" id="dd_add_btn_${inputId}">+ Add New</div>
+    <div id="dd_add_form_${inputId}" style="display:none">
+      <input type="text" id="dd_add_input_${inputId}" placeholder="Enter new value..." style="width:100%;font-size:0.82rem;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-family:inherit;margin-bottom:6px">
+      <div style="display:flex;gap:6px;">
+        <button onclick="saveNewShippingValue('${fieldName}','${inputId}')" style="flex:1;padding:5px 10px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.8rem;">Save</button>
+        <button onclick="cancelShippingAdd('${inputId}')" style="padding:5px 10px;background:#e0e0e0;color:#333;border:none;border-radius:4px;cursor:pointer;font-size:0.8rem;">Cancel</button>
+      </div>
+    </div>
+  `;
+  addNewDiv.querySelector('.dropdown-add-btn').onclick = (e) => {
+    e.stopPropagation();
+    document.getElementById(`dd_add_btn_${inputId}`).style.display = 'none';
+    document.getElementById(`dd_add_form_${inputId}`).style.display = 'block';
+    document.getElementById(`dd_add_input_${inputId}`).focus();
+  };
+  menu.appendChild(addNewDiv);
+}
+
+async function showShippingDropdown(fieldName, inputId, btnEl) {
+  const menu = document.getElementById("dd_" + inputId);
+  if (!menu) return;
+  if (menu.classList.contains("show")) { menu.classList.remove("show"); return; }
+  document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
+
+  const values = await _ensureShippingCache(fieldName);
+  const el = document.getElementById(inputId);
+  const filter = (el.value || "").trim();
+  _renderShippingDropdown(fieldName, inputId, values, filter);
+  menu.classList.add("show");
+}
+
+async function deleteShippingFieldValue(fieldName, value, itemEl) {
+  if (!confirm("Remove this from the saved list?")) return;
+  try {
+    const resp = await fetch("/api/shipping/field-history", {
+      method: "DELETE", headers: authHeaders(),
+      body: JSON.stringify({ field: fieldName, value: value })
+    });
+    if (resp.ok) {
+      if (_shippingDdCache[fieldName]) {
+        _shippingDdCache[fieldName] = _shippingDdCache[fieldName].filter(v => v !== value);
+      }
+      itemEl.remove();
+      toast("Removed from dropdown");
+    } else { toast("Failed to delete", "error"); }
+  } catch(e) { toast("Failed to delete", "error"); }
+}
+
+async function saveNewShippingValue(fieldName, inputId) {
+  const input = document.getElementById(`dd_add_input_${inputId}`);
+  const val = (input.value || "").trim();
+  if (!val) { input.focus(); return; }
+  try {
+    const resp = await fetch("/api/shipping/field-history", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ field: fieldName, value: val })
+    });
+    if (resp.ok) {
+      document.getElementById(inputId).value = val;
+      delete _shippingDdCache[fieldName];
+      document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
+      toast("Saved to dropdown");
+    } else { toast("Failed to save", "error"); }
+  } catch(e) { toast("Failed to save", "error"); }
+}
+
+function cancelShippingAdd(inputId) {
+  document.getElementById(`dd_add_btn_${inputId}`).style.display = '';
+  document.getElementById(`dd_add_form_${inputId}`).style.display = 'none';
+  document.getElementById(`dd_add_input_${inputId}`).value = '';
+}
+
+// Type-to-filter for generate fields
+function initGenTypeToFilter() {
+  _genPlaceholders.forEach(ph => {
+    const key = ph.replace(/[{}]/g, "");
+    const inputId = "gen_" + key;
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    el.addEventListener("input", async () => {
+      const values = await _ensureShippingCache(key);
+      const filter = (el.value || "").trim();
+      if (!filter) {
+        const menu = document.getElementById("dd_" + inputId);
+        if (menu) menu.classList.remove("show");
+        return;
+      }
+      const f = filter.toLowerCase();
+      const hasMatch = values.some(v => v.toLowerCase().includes(f));
+      if (hasMatch) {
+        document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
+        _renderShippingDropdown(key, inputId, values, filter);
+        const menu = document.getElementById("dd_" + inputId);
+        if (menu) menu.classList.add("show");
+      }
+    });
+  });
+}
+
+// Close dropdowns on outside click
+document.addEventListener("click", e => {
+  if (!e.target.closest(".dropdown-wrap")) {
+    document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LEVEL 4: HISTORY
+// ═══════════════════════════════════════════════════════════════════════════════
+async function loadHistory() {
+  try {
+    const resp = await fetch("/api/shipping/history", { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    const tbody = document.getElementById("history-body");
+    tbody.innerHTML = "";
+
+    (data.docs || []).forEach(d => {
+      const tr = document.createElement("tr");
+      const date = d.generated_at ? new Date(d.generated_at).toLocaleString() : "";
+      let actions = `<button class="btn btn-ghost btn-sm" onclick="downloadHistoryDoc(${d.id})">Download</button> `;
+      if (_isAdmin) {
+        actions += `<button class="btn btn-danger btn-sm" onclick="deleteHistoryDoc(${d.id})">Delete</button>`;
+      }
+      tr.innerHTML = `
+        <td style="white-space:nowrap">${escHtml(date)}</td>
+        <td>${escHtml(d.customer_name || '')}</td>
+        <td>${escHtml(d.unit_name || '')}</td>
+        <td>${escHtml(d.template_name || '')}</td>
+        <td style="font-size:0.78rem;color:var(--text-muted)">${escHtml(d.file_name || '')}</td>
+        <td style="white-space:nowrap">${actions}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    if ((data.docs || []).length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:2rem">No generated documents yet</td></tr>';
+    }
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function downloadHistoryDoc(docId) {
+  try {
+    const resp = await fetch(`/api/shipping/history/${docId}/download`, { headers: authHeadersNoBody() });
+    if (!resp.ok) throw new Error("Download failed");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = resp.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g,"") || "document.docx";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function deleteHistoryDoc(docId) {
+  if (!confirm("Delete this generated document?")) return;
+  try {
+    const resp = await fetch(`/api/shipping/history/${docId}`, { method: "DELETE", headers: authHeadersNoBody() });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    toast("Document deleted");
+    loadHistory();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════════
+function initPage() {
+  loadCustomers();
+}
+</script>
+</body>
+</html>
