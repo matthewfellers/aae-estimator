@@ -22,7 +22,8 @@ USAGE:
     --role admin \
     --org-id <UUID from orgs table>
 
-VALID ROLES: admin, estimator, purchasing, accounting, manufacturing, viewer
+VALID ROLES: admin, estimator, purchasing, accounting, manufacturing, viewer,
+              shop_employee, shop_lead, supervisor
 
 GETTING THE ORG UUID:
   Run in Supabase SQL Editor:
@@ -39,7 +40,8 @@ SUPABASE_URL     = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 ANON_KEY         = os.environ.get("SUPABASE_ANON_KEY", "")
 
-VALID_ROLES = {"admin","estimator","purchasing","accounting","manufacturing","viewer"}
+VALID_ROLES = {"admin","estimator","purchasing","accounting","manufacturing","viewer",
+               "shop_employee","shop_lead","supervisor"}
 
 def check_env():
     missing = [v for v in ["SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY","SUPABASE_ANON_KEY"]
