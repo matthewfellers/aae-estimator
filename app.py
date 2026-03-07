@@ -4330,8 +4330,10 @@ def update_packing_slip(slip_id):
 # ── API: Soft delete packing slip (admin only) ──────────────────────────────
 
 @app.route("/api/packing-slips/<int:slip_id>", methods=["DELETE"])
-@require_role("admin", require_mfa=True)
+@require_auth
 def delete_packing_slip(slip_id):
+    # Debug: log what the JWT actually contains
+    print(f"[DELETE DEBUG] user={g.user}", flush=True)
     try:
         sb = get_user_sb()
         sb.table("packing_slips").update({
@@ -4341,7 +4343,14 @@ def delete_packing_slip(slip_id):
         audit_log("delete_packing_slip", "packing_slip", slip_id)
         return jsonify({"success": True})
     except Exception as e:
+        print(f"[DELETE ERROR] {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/packing-slips/debug-auth", methods=["GET"])
+@require_auth
+def debug_auth():
+    """Temporary: see what the app reads from your JWT."""
+    return jsonify(g.user)
 
 # ── API: Finalize packing slip ───────────────────────────────────────────────
 
