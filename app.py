@@ -4332,42 +4332,14 @@ def update_packing_slip(slip_id):
 @app.route("/api/packing-slips/<int:slip_id>", methods=["DELETE"])
 @require_auth
 def delete_packing_slip(slip_id):
-    # Debug: log what the JWT actually contains
-    print(f"[DELETE DEBUG] user={g.user}", flush=True)
     try:
         sb = get_user_sb()
-        sb.table("packing_slips").update({
-            "is_deleted": True,
-            "updated_at": datetime.now().isoformat()
-        }).eq("id", slip_id).execute()
+        sb.rpc("soft_delete_packing_slip", {"p_slip_id": slip_id}).execute()
         audit_log("delete_packing_slip", "packing_slip", slip_id)
         return jsonify({"success": True})
     except Exception as e:
-        print(f"[DELETE ERROR] {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/packing-slips/debug-auth", methods=["GET"])
-@require_auth
-def debug_auth():
-    """Temporary: test the actual UPDATE that fails."""
-    try:
-        sb = get_user_sb()
-        # Try the exact same update the delete endpoint does
-        result = sb.table("packing_slips").update({
-            "is_deleted": True,
-            "updated_at": datetime.now().isoformat()
-        }).eq("id", 1).execute()
-        return jsonify({"update_ok": True, "result": str(result.data)})
-    except Exception as e:
-        # Try without is_deleted - maybe that column has a trigger or constraint
-        try:
-            sb2 = get_user_sb()
-            result2 = sb2.table("packing_slips").update({
-                "notes": "test update"
-            }).eq("id", 1).execute()
-            return jsonify({"is_deleted_update_failed": str(e), "notes_update_ok": True})
-        except Exception as e2:
-            return jsonify({"is_deleted_update_failed": str(e), "notes_update_also_failed": str(e2)})
 
 # ── API: Finalize packing slip ───────────────────────────────────────────────
 
