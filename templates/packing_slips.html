@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAE Automation — Packing Slips</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy: #1A0505;
+  --blue: #9B1B1B;
+  --lightblue: #F4A9A8;
+  --paleblue: #FDECEA;
+  --green: #2E7D32;
+  --green-lt: #E8F5E9;
+  --gray: #F5F0F0;
+  --mid-gray: #DDD0D0;
+  --dark: #1A0505;
+  --white: #ffffff;
+  --yellow: #FFF8E1;
+  --text: #1A0505;
+  --muted: #888080;
+  --radius: 8px;
+  --shadow: 0 4px 24px rgba(155,27,27,0.15);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', sans-serif; background: var(--navy); color: var(--white); min-height: 100vh; }
+a { color: var(--lightblue); text-decoration: none; }
+
+/* ── Top Nav ── */
+.topnav {
+  background: rgba(26,5,5,0.95);
+  border-bottom: 2px solid rgba(155,27,27,0.5);
+  padding: 0 1.5rem;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 56px; position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(10px);
+}
+.topnav-left { display: flex; align-items: center; gap: 10px; }
+.topnav-logo { height: 34px; border-radius: 4px; }
+.topnav-brand { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; letter-spacing: 2px; color: #fff; }
+.topnav-brand span { color: var(--lightblue); }
+.topnav-cert { font-size: 0.6rem; color: var(--muted); letter-spacing: 1px; }
+.topnav-tabs { display: flex; gap: 4px; }
+.tab-btn {
+  background: transparent; border: none; color: var(--muted);
+  font-family: 'DM Sans', sans-serif; font-size: 0.82rem; font-weight: 500;
+  padding: 8px 14px; border-radius: 6px; cursor: pointer; transition: all 0.2s;
+}
+.tab-btn:hover { background: rgba(155,27,27,0.2); color: #fff; }
+.tab-btn.active { background: rgba(155,27,27,0.35); color: #fff; font-weight: 600; }
+.topnav-right { display: flex; align-items: center; gap: 12px; }
+.user-pill { background: rgba(155,27,27,0.3); color: var(--lightblue); padding: 5px 12px; border-radius: 16px; font-size: 0.78rem; font-weight: 500; }
+.logout-lnk { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.78rem; font-family: 'DM Sans', sans-serif; }
+.logout-lnk:hover { color: #fff; }
+
+/* ── Container ── */
+.container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── Cards ── */
+.card {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(155,27,27,0.25);
+  border-radius: 12px; padding: 1.5rem; margin-bottom: 1.25rem;
+}
+.card-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 1.5px;
+  color: var(--lightblue); margin-bottom: 1rem; display: flex; align-items: center; gap: 8px;
+}
+
+/* ── Form fields ── */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+.form-grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--muted); }
+.field input, .field textarea, .field select {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(155,27,27,0.3);
+  border-radius: 6px; padding: 8px 10px; color: #fff; font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem; transition: border-color 0.2s;
+}
+.field input:focus, .field textarea:focus, .field select:focus { outline: none; border-color: var(--blue); }
+.field textarea { resize: vertical; min-height: 60px; }
+.field select option { background: #2a0808; color: #fff; }
+
+/* ── Dropdown wrapper ── */
+.dropdown-wrap { position: relative; }
+.dropdown-wrap input, .dropdown-wrap textarea { width: 100%; padding-right: 32px; }
+.dropdown-btn {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  background: rgba(155,27,27,0.4); border: none; color: var(--lightblue);
+  width: 24px; height: 24px; border-radius: 4px; cursor: pointer; font-size: 0.7rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.dropdown-btn:hover { background: rgba(155,27,27,0.7); }
+.dropdown-menu {
+  display: none; position: absolute; top: 100%; left: 0; right: 0;
+  background: #2a0808; border: 1px solid rgba(155,27,27,0.5);
+  border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 50;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.dropdown-menu.show { display: block; }
+.dropdown-item {
+  padding: 8px 12px; cursor: pointer; font-size: 0.82rem;
+  border-bottom: 1px solid rgba(155,27,27,0.15); white-space: pre-wrap;
+}
+.dropdown-item:hover { background: rgba(155,27,27,0.3); }
+.dropdown-item:last-child { border-bottom: none; }
+
+/* ── Buttons ── */
+.btn {
+  border: none; border-radius: 8px; cursor: pointer; font-weight: 600;
+  padding: 0.6rem 1.2rem; font-family: 'DM Sans', sans-serif; font-size: 0.85rem;
+  transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-primary { background: var(--blue); color: #fff; }
+.btn-primary:hover { background: #7a1010; }
+.btn-secondary { background: rgba(255,255,255,0.08); border: 1px solid rgba(155,27,27,0.4); color: var(--lightblue); }
+.btn-secondary:hover { background: rgba(155,27,27,0.2); }
+.btn-success { background: var(--green); color: #fff; }
+.btn-success:hover { background: #1b5e20; }
+.btn-ghost { background: transparent; border: 1px solid rgba(255,255,255,0.15); color: var(--muted); }
+.btn-ghost:hover { border-color: rgba(255,255,255,0.3); color: #fff; }
+.btn-danger { background: #c62828; color: #fff; }
+.btn-danger:hover { background: #b71c1c; }
+.btn-sm { padding: 0.35rem 0.8rem; font-size: 0.78rem; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 1rem; }
+
+/* ── Table ── */
+.items-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+.items-table th {
+  text-align: left; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--muted); padding: 8px 6px;
+  border-bottom: 1px solid rgba(155,27,27,0.3);
+}
+.items-table td { padding: 6px; vertical-align: middle; }
+.items-table td input {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(155,27,27,0.2);
+  border-radius: 4px; padding: 6px 8px; color: #fff; font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem; width: 100%;
+}
+.items-table td input:focus { outline: none; border-color: var(--blue); }
+.items-table .col-item { width: 70px; }
+.items-table .col-qty { width: 90px; }
+.items-table .col-part { width: 180px; }
+.items-table .col-desc { min-width: 200px; }
+.items-table .col-proj { width: 120px; }
+.items-table .col-wbs { width: 100px; }
+.items-table .col-actions { width: 40px; text-align: center; }
+.remove-row-btn {
+  background: none; border: none; color: #c62828; cursor: pointer; font-size: 1.1rem;
+  padding: 2px 6px; border-radius: 4px;
+}
+.remove-row-btn:hover { background: rgba(198,40,40,0.2); }
+.items-table tr:hover td { background: rgba(155,27,27,0.08); }
+
+/* ── Toolbar ── */
+.toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.toolbar label { font-size: 0.82rem; color: var(--muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.toolbar input[type="checkbox"] { accent-color: var(--blue); }
+
+/* ── History table ── */
+.history-table { width: 100%; border-collapse: collapse; }
+.history-table th {
+  text-align: left; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+  color: var(--muted); padding: 10px 8px; border-bottom: 1px solid rgba(155,27,27,0.3);
+}
+.history-table td { padding: 10px 8px; font-size: 0.88rem; border-bottom: 1px solid rgba(155,27,27,0.1); }
+.badge {
+  display: inline-block; padding: 2px 10px; border-radius: 12px;
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.badge-draft { background: rgba(255,193,7,0.2); color: #FFD54F; }
+.badge-finalized { background: rgba(46,125,50,0.2); color: #81C784; }
+.badge-voided { background: rgba(150,150,150,0.2); color: #999; }
+
+/* ── Common tab ── */
+.mode-toggle { display: flex; gap: 8px; margin-bottom: 1.25rem; }
+.mode-btn {
+  padding: 8px 20px; border-radius: 8px; cursor: pointer;
+  font-family: 'DM Sans', sans-serif; font-size: 0.88rem; font-weight: 600;
+  border: 1px solid rgba(155,27,27,0.3); background: transparent; color: var(--muted);
+  transition: all 0.2s;
+}
+.mode-btn.active { background: rgba(155,27,27,0.35); color: #fff; border-color: var(--blue); }
+.mode-panel { display: none; }
+.mode-panel.active { display: block; }
+
+/* ── Template card list ── */
+.tmpl-list { display: flex; flex-direction: column; gap: 8px; margin: 1rem 0; }
+.tmpl-card {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(155,27,27,0.2);
+  border-radius: 8px; padding: 12px 16px; cursor: pointer; transition: all 0.2s;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.tmpl-card:hover, .tmpl-card.selected { border-color: var(--blue); background: rgba(155,27,27,0.15); }
+.tmpl-card-name { font-weight: 600; font-size: 0.92rem; }
+.tmpl-card-sub { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+/* ── Toast / status ── */
+.toast {
+  position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
+  border-radius: 8px; font-size: 0.88rem; font-weight: 500; z-index: 9999;
+  transform: translateY(80px); opacity: 0; transition: all 0.3s ease;
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast-success { background: var(--green); color: #fff; }
+.toast-error { background: #c62828; color: #fff; }
+
+/* ── Login Overlay (shared with homepage) ── */
+#login-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.65); z-index: 9999;
+  justify-content: center; align-items: center;
+}
+#login-overlay.visible { display: flex; }
+.login-card {
+  background: #fff; border-radius: 12px; padding: 40px 36px;
+  width: 380px; max-width: calc(100vw - 2rem); text-align: center;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.3);
+}
+.login-card img { width: 140px; margin-bottom: 6px; border-radius: 4px; }
+.login-logo-name { font-family: 'Bebas Neue', sans-serif; font-size: 22px; letter-spacing: 3px; color: #333; margin-bottom: 2px; }
+.login-tagline { font-size: 11px; color: #888; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 28px; }
+.login-card h2 { font-family: 'Bebas Neue', sans-serif; font-size: 20px; color: #2C2C2C; margin-bottom: 20px; }
+.login-field { text-align: left; margin-bottom: 14px; }
+.login-field label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #666; margin-bottom: 5px; }
+.login-field input { width: 100%; padding: 9px 12px; border: 1.5px solid #DDD; border-radius: 4px; font-size: 14px; color: #333; }
+.login-field input:focus { outline: none; border-color: #9B1B1B; }
+.login-submit { width: 100%; padding: 12px; background: #9B1B1B; color: white; border: none; border-radius: 4px; font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 1px; cursor: pointer; margin-top: 6px; }
+.login-submit:hover { background: #7A1010; }
+.login-err { color: #9B1B1B; font-size: 12px; margin-top: 8px; display: none; }
+#mfa-section { display: none; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .form-grid, .form-grid-3, .form-grid-4 { grid-template-columns: 1fr; }
+  .topnav { flex-wrap: wrap; height: auto; padding: 8px 1rem; }
+  .container { padding: 1rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- Supabase JS -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<!-- LOGIN OVERLAY -->
+<div id="login-overlay" class="visible">
+  <div class="login-card">
+    <img src="/static/aae_logo.jpg" alt="AAE Automation" onerror="this.style.display='none'">
+    <div class="login-logo-name">AAE AUTOMATION</div>
+    <div class="login-tagline">Enterprise Resource Planning</div>
+    <div id="signin-form">
+      <h2>Sign In</h2>
+      <div class="login-field"><label>Email</label><input type="email" id="login_email" placeholder="you@aaeautomation.com" autocomplete="username"></div>
+      <div class="login-field"><label>Password</label><input type="password" id="login_pass" placeholder="password" autocomplete="current-password"></div>
+      <div id="mfa-section">
+        <div class="login-field"><label>MFA Code</label><input type="text" id="login_mfa" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" inputmode="numeric"></div>
+      </div>
+      <button class="login-submit" onclick="doLogin()">SIGN IN</button>
+      <div class="login-err" id="login_err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TOP NAV -->
+<nav class="topnav" id="app-nav" style="display:none">
+  <div class="topnav-left">
+    <a href="/" style="color:var(--muted);font-size:0.85rem">&larr; Home</a>
+    <img src="/static/aae_logo.jpg" alt="AAE" class="topnav-logo" onerror="this.style.display='none'">
+    <div>
+      <div class="topnav-brand">AAE <span>AUTO</span>MATION</div>
+      <div class="topnav-cert">PACKING SLIP MODULE</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="topnav-tabs">
+      <button class="tab-btn active" onclick="showTab('custom')">Custom</button>
+      <button class="tab-btn" onclick="showTab('common')">Common</button>
+      <button class="tab-btn" onclick="showTab('history')">History</button>
+    </div>
+    <span class="user-pill" id="user_pill"></span>
+    <button class="logout-lnk" onclick="doLogout()">Sign Out</button>
+  </div>
+</nav>
+
+<!-- MAIN CONTENT -->
+<div class="container" id="app-main" style="display:none">
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- CUSTOM TAB -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-custom" class="tab-panel active">
+
+  <!-- Shipment Details -->
+  <div class="card">
+    <div class="card-title">SHIPMENT DETAILS</div>
+    <div class="form-grid" style="margin-bottom:1rem">
+      <div class="field">
+        <label>Sold To</label>
+        <div class="dropdown-wrap">
+          <textarea id="ps_sold_to" rows="3" placeholder="Company name and address"></textarea>
+          <button class="dropdown-btn" onclick="showFieldDropdown('sold_to','ps_sold_to',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_sold_to"></div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Ship To</label>
+        <div class="dropdown-wrap">
+          <textarea id="ps_ship_to" rows="3" placeholder="Delivery address"></textarea>
+          <button class="dropdown-btn" onclick="showFieldDropdown('ship_to','ps_ship_to',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_ship_to"></div>
+        </div>
+      </div>
+    </div>
+    <div class="form-grid-3" style="margin-bottom:1rem">
+      <div class="field">
+        <label>ATTN</label>
+        <div class="dropdown-wrap">
+          <input type="text" id="ps_attn" placeholder="Attention">
+          <button class="dropdown-btn" onclick="showFieldDropdown('attn','ps_attn',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_attn"></div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Sales Order #</label>
+        <div class="dropdown-wrap">
+          <input type="text" id="ps_sales_order" placeholder="e.g. 25-7900.00">
+          <button class="dropdown-btn" onclick="showFieldDropdown('sales_order','ps_sales_order',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_sales_order"></div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Customer Order #</label>
+        <div class="dropdown-wrap">
+          <input type="text" id="ps_customer_order" placeholder="PO number">
+          <button class="dropdown-btn" onclick="showFieldDropdown('customer_order','ps_customer_order',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_customer_order"></div>
+        </div>
+      </div>
+    </div>
+    <div class="form-grid-4">
+      <div class="field">
+        <label>Order Date</label>
+        <input type="date" id="ps_order_date">
+      </div>
+      <div class="field">
+        <label>Ship Date</label>
+        <input type="date" id="ps_ship_date">
+      </div>
+      <div class="field">
+        <label>F.O.B.</label>
+        <div class="dropdown-wrap">
+          <input type="text" id="ps_fob" placeholder="ORIGIN">
+          <button class="dropdown-btn" onclick="showFieldDropdown('fob','ps_fob',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_fob"></div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Terms</label>
+        <div class="dropdown-wrap">
+          <input type="text" id="ps_terms" placeholder="NET 30">
+          <button class="dropdown-btn" onclick="showFieldDropdown('terms','ps_terms',this)">&#9660;</button>
+          <div class="dropdown-menu" id="dd_terms"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Line Items -->
+  <div class="card">
+    <div class="card-title">LINE ITEMS</div>
+    <div class="toolbar">
+      <button class="btn btn-secondary btn-sm" onclick="addItemRow()">+ Add Item</button>
+      <button class="btn btn-ghost btn-sm" onclick="everythingShipping()">Everything Shipping?</button>
+      <label><input type="checkbox" id="chk_show_proj" onchange="toggleProjectCols()"> Show Project/WBS</label>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="items-table" id="items-table">
+        <thead>
+          <tr>
+            <th class="col-item">Item</th>
+            <th class="col-qty">Qty Ordered</th>
+            <th class="col-qty">Qty Shipped</th>
+            <th class="col-part">Part Number</th>
+            <th class="col-desc">Description</th>
+            <th class="col-proj proj-col" style="display:none">Project</th>
+            <th class="col-wbs proj-col" style="display:none">WBS</th>
+            <th class="col-actions"></th>
+          </tr>
+        </thead>
+        <tbody id="items-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Notes -->
+  <div class="card">
+    <div class="card-title">NOTES</div>
+    <div class="field">
+      <textarea id="ps_notes" rows="3" placeholder="Additional notes for the packing slip"></textarea>
+    </div>
+  </div>
+
+  <!-- Project / WBS (optional) -->
+  <div class="card" id="proj-wbs-card" style="display:none">
+    <div class="card-title">PROJECT / WBS</div>
+    <div class="form-grid">
+      <div class="field">
+        <label>Project Name</label>
+        <input type="text" id="ps_project_name" placeholder="Project name">
+      </div>
+      <div class="field">
+        <label>WBS</label>
+        <input type="text" id="ps_wbs" placeholder="Work breakdown structure">
+      </div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="btn-row">
+    <button class="btn btn-primary" onclick="saveDraft()">Save Draft</button>
+    <button class="btn btn-secondary" onclick="saveAsTemplate()">Save as Template</button>
+    <button class="btn btn-success" onclick="finalizeAndDownload()">Finalize & Download Excel</button>
+    <button class="btn btn-ghost" onclick="clearCustomForm()">Clear</button>
+  </div>
+  <input type="hidden" id="ps_editing_id" value="">
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- COMMON TAB -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-common" class="tab-panel">
+
+  <div class="mode-toggle">
+    <button class="mode-btn active" onclick="showCommonMode('ship')">Ship</button>
+    <button class="mode-btn" onclick="showCommonMode('manage')">Manage Templates</button>
+  </div>
+
+  <!-- ── Ship Mode ── -->
+  <div id="mode-ship" class="mode-panel active">
+    <div class="card">
+      <div class="card-title">QUICK SHIP</div>
+      <div class="field" style="margin-bottom:1rem">
+        <label>Select Template</label>
+        <select id="qs_template" onchange="onQuickShipTemplateChange()">
+          <option value="">-- Choose a template --</option>
+        </select>
+      </div>
+      <div id="qs-template-preview" style="display:none;margin-bottom:1rem;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;font-size:0.85rem">
+        <div style="color:var(--muted);margin-bottom:4px">Template preview:</div>
+        <div id="qs-preview-content"></div>
+      </div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div class="field">
+          <label>Job Number</label>
+          <input type="text" id="qs_job_number" placeholder="e.g. 7900">
+        </div>
+        <div class="field">
+          <label>Sales Order #</label>
+          <input type="text" id="qs_sales_order" placeholder="e.g. 25-7900.00">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Customer Order #</label>
+          <input type="text" id="qs_customer_order" placeholder="PO number">
+        </div>
+        <div class="field">
+          <label>Ship Date</label>
+          <input type="date" id="qs_ship_date">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="quickShipDownload()">Download Excel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Manage Templates Mode ── -->
+  <div id="mode-manage" class="mode-panel">
+    <div class="card">
+      <div class="card-title">TEMPLATES</div>
+      <div class="toolbar">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('upload-xls-input').click()">Upload Template (.xls)</button>
+        <input type="file" id="upload-xls-input" accept=".xls,.xlsx" style="display:none" onchange="uploadTemplate(this)">
+        <button class="btn btn-primary btn-sm" onclick="newTemplate()">+ New Template</button>
+      </div>
+      <div class="tmpl-list" id="tmpl-list"></div>
+    </div>
+
+    <!-- Template Editor -->
+    <div id="tmpl-editor" style="display:none">
+      <div class="card">
+        <div class="card-title">TEMPLATE EDITOR</div>
+        <div class="form-grid" style="margin-bottom:1rem">
+          <div class="field">
+            <label>Template Name</label>
+            <input type="text" id="te_name" placeholder="Template name">
+          </div>
+          <div class="field">
+            <label>Description</label>
+            <input type="text" id="te_desc" placeholder="Optional description">
+          </div>
+        </div>
+        <div class="form-grid" style="margin-bottom:1rem">
+          <div class="field">
+            <label>Sold To</label>
+            <textarea id="te_sold_to" rows="3"></textarea>
+          </div>
+          <div class="field">
+            <label>Ship To</label>
+            <textarea id="te_ship_to" rows="3"></textarea>
+          </div>
+        </div>
+        <div class="form-grid-4" style="margin-bottom:1rem">
+          <div class="field">
+            <label>ATTN</label>
+            <input type="text" id="te_attn">
+          </div>
+          <div class="field">
+            <label>F.O.B.</label>
+            <input type="text" id="te_fob">
+          </div>
+          <div class="field">
+            <label>Terms</label>
+            <input type="text" id="te_terms">
+          </div>
+          <div class="field">
+            <label>Project Name</label>
+            <input type="text" id="te_project_name">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">TEMPLATE ITEMS</div>
+        <div class="toolbar">
+          <button class="btn btn-secondary btn-sm" onclick="addTemplateItemRow()">+ Add Item</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="items-table" id="te-items-table">
+            <thead>
+              <tr>
+                <th class="col-item">Item</th>
+                <th class="col-qty">Qty Ordered</th>
+                <th class="col-part">Part Number</th>
+                <th class="col-desc">Description</th>
+                <th style="width:120px">Replace Part#</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody id="te-items-body"></tbody>
+          </table>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-success" onclick="saveTemplate()">Save Template</button>
+          <button class="btn btn-ghost" onclick="cancelTemplateEdit()">Cancel</button>
+        </div>
+      </div>
+      <input type="hidden" id="te_editing_id" value="">
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- HISTORY TAB -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-history" class="tab-panel">
+  <div class="card">
+    <div class="card-title">PACKING SLIP HISTORY</div>
+    <table class="history-table">
+      <thead>
+        <tr>
+          <th>Slip #</th>
+          <th>Sold To</th>
+          <th>Ship To</th>
+          <th>Sales Order</th>
+          <th>Ship Date</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="history-body"></tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════════════════════════════════
+const SUPABASE_URL  = "{{ supabase_url }}";
+const SUPABASE_ANON = "{{ supabase_anon_key }}";
+let _sbClient = null, _accessToken = null, _pendingMfaFactorId = null;
+let _userRole = "viewer", _isAdmin = false;
+
+const SESSION_MAX_AGE_MS = 24*60*60*1000;
+function stampSessionLogin() { localStorage.setItem("aae_session_start", Date.now().toString()); }
+function isSessionExpiredByAge() { const s=parseInt(localStorage.getItem("aae_session_start")||"0",10); return !s||(Date.now()-s)>SESSION_MAX_AGE_MS; }
+function clearSessionStamp() { localStorage.removeItem("aae_session_start"); }
+
+function authHeaders() { return { "Authorization": "Bearer " + _accessToken, "Content-Type": "application/json" }; }
+function authHeadersNoBody() { return { "Authorization": "Bearer " + _accessToken }; }
+
+if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undefined") {
+  _sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { persistSession: true, detectSessionInUrl: false }
+  });
+  (async () => {
+    try {
+      if (isSessionExpiredByAge()) {
+        clearSessionStamp();
+        try { await _sbClient.auth.signOut(); } catch(e) {}
+        document.getElementById("login-overlay").classList.add("visible");
+        return;
+      }
+      const { data: { session } } = await _sbClient.auth.getSession();
+      if (session?.access_token) {
+        _accessToken = session.access_token;
+        const resp = await fetch("/api/me", { headers: authHeadersNoBody() });
+        if (resp.ok) { onLoginSuccess(await resp.json()); return; }
+      }
+    } catch(e) { console.warn("[auth] restore failed:", e.message); }
+    document.getElementById("login-overlay").classList.add("visible");
+  })();
+  _sbClient.auth.onAuthStateChange((ev, session) => { if (session?.access_token) _accessToken = session.access_token; });
+}
+
+function showLoginErr(msg) { const el=document.getElementById("login_err"); el.textContent=msg; el.style.display="block"; }
+
+async function doLogin() {
+  const email=document.getElementById("login_email").value.trim();
+  const pass=document.getElementById("login_pass").value;
+  const mfaCode=document.getElementById("login_mfa").value.trim();
+  const btn=document.querySelector("#signin-form .login-submit");
+  document.getElementById("login_err").style.display="none";
+  if (!_sbClient) { showLoginErr("Auth service not available."); return; }
+  btn.disabled=true; btn.textContent="SIGNING IN...";
+  try {
+    if (_pendingMfaFactorId) {
+      if (!mfaCode) { showLoginErr("Enter your 6-digit MFA code."); return; }
+      const {error:e}=await _sbClient.auth.mfa.challengeAndVerify({factorId:_pendingMfaFactorId,code:mfaCode});
+      if (e) throw e;
+      _pendingMfaFactorId=null;
+      const {data:sd}=await _sbClient.auth.getSession();
+      _accessToken=sd?.session?.access_token;
+    } else {
+      const {data,error}=await _sbClient.auth.signInWithPassword({email,password:pass});
+      if (error) throw error;
+      const {data:fd}=await _sbClient.auth.mfa.listFactors();
+      const vf=(fd?.totp||[]).filter(f=>f.status==='verified');
+      if (vf.length>0) {
+        _pendingMfaFactorId=vf[0].id;
+        document.getElementById("mfa-section").style.display="block";
+        btn.textContent="VERIFY MFA"; btn.disabled=false;
+        document.getElementById("login_mfa").focus(); return;
+      }
+      _accessToken=data.session?.access_token;
+    }
+    const resp=await fetch("/api/me",{headers:authHeadersNoBody()});
+    if (!resp.ok) throw new Error("Failed to load profile");
+    stampSessionLogin();
+    onLoginSuccess(await resp.json());
+  } catch(err) {
+    _pendingMfaFactorId=null;
+    document.getElementById("mfa-section").style.display="none";
+    showLoginErr(err.message||"Sign-in failed.");
+  } finally { btn.disabled=false; if (!_pendingMfaFactorId) btn.textContent="SIGN IN"; }
+}
+
+function onLoginSuccess(profile) {
+  document.getElementById("login-overlay").classList.remove("visible");
+  document.getElementById("app-nav").style.display="flex";
+  document.getElementById("app-main").style.display="block";
+  const name=profile.display_name||profile.email||"User";
+  document.getElementById("user_pill").textContent=name;
+  _userRole=profile.role||"viewer";
+  _isAdmin=_userRole==="admin";
+  initPage();
+}
+
+async function doLogout() {
+  if (_sbClient) { try { await _sbClient.auth.signOut(); } catch(e) {} }
+  _accessToken=null; clearSessionStamp();
+  document.getElementById("app-nav").style.display="none";
+  document.getElementById("app-main").style.display="none";
+  document.getElementById("login-overlay").classList.add("visible");
+  document.getElementById("login_pass").value="";
+  document.getElementById("login_mfa").value="";
+  document.getElementById("login_err").style.display="none";
+  document.getElementById("mfa-section").style.display="none";
+  _pendingMfaFactorId=null;
+}
+
+["login_email","login_pass","login_mfa"].forEach(id => {
+  document.getElementById(id)?.addEventListener("keydown", e => { if (e.key==="Enter") doLogin(); });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════════════════════════
+function showTab(name) {
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("tab-"+name).classList.add("active");
+  event.target.classList.add("active");
+  if (name === "history") loadHistory();
+  if (name === "common") loadTemplatesForCommon();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════════════════════════════
+function toast(msg, type="success") {
+  const el=document.getElementById("toast");
+  el.textContent=msg;
+  el.className="toast toast-"+type+" show";
+  setTimeout(()=>el.classList.remove("show"), 3000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════════
+function initPage() {
+  addItemRow(); // start with one empty row
+  loadTemplatesForCommon();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SMART DROPDOWNS
+// ═══════════════════════════════════════════════════════════════════════════════
+const _ddCache = {};
+
+async function showFieldDropdown(fieldName, inputId, btnEl) {
+  const menu = document.getElementById("dd_" + fieldName);
+  if (!menu) return;
+
+  // Toggle
+  if (menu.classList.contains("show")) { menu.classList.remove("show"); return; }
+
+  // Close all other menus
+  document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
+
+  // Load from cache or API
+  let values = _ddCache[fieldName];
+  if (!values) {
+    try {
+      const resp = await fetch(`/api/packing-slips/field-history?field=${fieldName}`, { headers: authHeadersNoBody() });
+      const data = await resp.json();
+      values = data.values || [];
+      _ddCache[fieldName] = values;
+    } catch(e) { values = []; }
+  }
+
+  menu.innerHTML = "";
+  if (values.length === 0) {
+    menu.innerHTML = '<div class="dropdown-item" style="color:var(--muted)">No saved values yet</div>';
+  } else {
+    values.forEach(v => {
+      const item = document.createElement("div");
+      item.className = "dropdown-item";
+      item.textContent = v;
+      item.onclick = () => {
+        const el = document.getElementById(inputId);
+        el.value = v;
+        menu.classList.remove("show");
+      };
+      menu.appendChild(item);
+    });
+  }
+  menu.classList.add("show");
+}
+
+// Close dropdowns on outside click
+document.addEventListener("click", e => {
+  if (!e.target.closest(".dropdown-wrap")) {
+    document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CUSTOM TAB — LINE ITEMS
+// ═══════════════════════════════════════════════════════════════════════════════
+let _nextItemNum = 0;
+
+function addItemRow(data) {
+  _nextItemNum += 10;
+  const num = data?.item_number || _nextItemNum;
+  if (num >= _nextItemNum) _nextItemNum = num;
+
+  const tbody = document.getElementById("items-body");
+  const tr = document.createElement("tr");
+  const showProj = document.getElementById("chk_show_proj")?.checked;
+
+  tr.innerHTML = `
+    <td><input type="text" class="item-num" value="${String(num).padStart(5,'0')}" style="text-align:center"></td>
+    <td><input type="number" class="item-qty-ord" value="${data?.qty_ordered??''}" min="0" step="1"></td>
+    <td><input type="number" class="item-qty-ship" value="${data?.qty_shipped??''}" min="0" step="1"></td>
+    <td><input type="text" class="item-part" value="${escHtml(data?.part_number||'')}"></td>
+    <td><input type="text" class="item-desc" value="${escHtml(data?.description||'')}"></td>
+    <td class="proj-col" style="display:${showProj?'':'none'}"><input type="text" class="item-proj" value="${escHtml(data?.project_name||'')}"></td>
+    <td class="proj-col" style="display:${showProj?'':'none'}"><input type="text" class="item-wbs" value="${escHtml(data?.wbs||'')}"></td>
+    <td><button class="remove-row-btn" onclick="this.closest('tr').remove()" title="Remove">&times;</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function escHtml(s) { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+function toggleProjectCols() {
+  const show = document.getElementById("chk_show_proj").checked;
+  document.querySelectorAll(".proj-col").forEach(el => el.style.display = show ? "" : "none");
+  document.getElementById("proj-wbs-card").style.display = show ? "block" : "none";
+}
+
+function everythingShipping() {
+  if (!confirm("Set all Qty Shipped = Qty Ordered?")) return;
+  document.querySelectorAll("#items-body tr").forEach(tr => {
+    const ord = tr.querySelector(".item-qty-ord");
+    const ship = tr.querySelector(".item-qty-ship");
+    if (ord && ship) ship.value = ord.value;
+  });
+  toast("All quantities set to shipped");
+}
+
+function getCustomFormData() {
+  const items = [];
+  document.querySelectorAll("#items-body tr").forEach((tr, i) => {
+    const numStr = tr.querySelector(".item-num")?.value || "";
+    items.push({
+      item_number: parseInt(numStr) || (i+1)*10,
+      qty_ordered: parseFloat(tr.querySelector(".item-qty-ord")?.value) || null,
+      qty_shipped: parseFloat(tr.querySelector(".item-qty-ship")?.value) || null,
+      part_number: tr.querySelector(".item-part")?.value || "",
+      description: tr.querySelector(".item-desc")?.value || "",
+      project_name: tr.querySelector(".item-proj")?.value || "",
+      wbs: tr.querySelector(".item-wbs")?.value || "",
+      sort_order: i + 1,
+    });
+  });
+
+  return {
+    sold_to: document.getElementById("ps_sold_to").value,
+    ship_to: document.getElementById("ps_ship_to").value,
+    attn: document.getElementById("ps_attn").value,
+    sales_order: document.getElementById("ps_sales_order").value,
+    order_date: document.getElementById("ps_order_date").value || null,
+    customer_order: document.getElementById("ps_customer_order").value,
+    ship_date: document.getElementById("ps_ship_date").value || null,
+    fob: document.getElementById("ps_fob").value,
+    terms: document.getElementById("ps_terms").value,
+    project_name: document.getElementById("ps_project_name")?.value || "",
+    wbs: document.getElementById("ps_wbs")?.value || "",
+    notes: document.getElementById("ps_notes").value,
+    items: items,
+  };
+}
+
+function clearCustomForm() {
+  ["ps_sold_to","ps_ship_to","ps_attn","ps_sales_order","ps_customer_order",
+   "ps_fob","ps_terms","ps_notes","ps_project_name","ps_wbs"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  document.getElementById("ps_order_date").value = "";
+  document.getElementById("ps_ship_date").value = "";
+  document.getElementById("items-body").innerHTML = "";
+  document.getElementById("ps_editing_id").value = "";
+  _nextItemNum = 0;
+  addItemRow();
+  // Clear dropdown cache so new values show up
+  Object.keys(_ddCache).forEach(k => delete _ddCache[k]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CUSTOM TAB — SAVE / FINALIZE
+// ═══════════════════════════════════════════════════════════════════════════════
+async function saveDraft() {
+  const data = getCustomFormData();
+  const editingId = document.getElementById("ps_editing_id").value;
+  try {
+    let resp;
+    if (editingId) {
+      resp = await fetch(`/api/packing-slips/${editingId}`, {
+        method: "PUT", headers: authHeaders(), body: JSON.stringify(data)
+      });
+    } else {
+      resp = await fetch("/api/packing-slips", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(data)
+      });
+    }
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || "Save failed");
+    if (result.id) document.getElementById("ps_editing_id").value = result.id;
+    toast(editingId ? "Draft updated" : `Draft saved: ${result.slip_number}`);
+    Object.keys(_ddCache).forEach(k => delete _ddCache[k]);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function saveAsTemplate() {
+  const name = prompt("Template name:");
+  if (!name) return;
+  const data = getCustomFormData();
+  data.template_name = name;
+  try {
+    const resp = await fetch("/api/packing-templates", {
+      method: "POST", headers: authHeaders(), body: JSON.stringify(data)
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || "Save failed");
+    toast(`Template "${name}" saved`);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function finalizeAndDownload() {
+  const data = getCustomFormData();
+  const editingId = document.getElementById("ps_editing_id").value;
+  try {
+    let slipId = editingId;
+    // Save first if not yet saved
+    if (!slipId) {
+      const resp = await fetch("/api/packing-slips", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(data)
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || "Save failed");
+      slipId = result.id;
+    } else {
+      // Update the draft
+      const resp = await fetch(`/api/packing-slips/${slipId}`, {
+        method: "PUT", headers: authHeaders(), body: JSON.stringify(data)
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || "Update failed");
+    }
+
+    // Finalize
+    const fResp = await fetch(`/api/packing-slips/${slipId}/finalize`, {
+      method: "POST", headers: authHeaders()
+    });
+    const fResult = await fResp.json();
+    if (!fResp.ok) throw new Error(fResult.error || "Finalize failed");
+
+    // Download Excel
+    const dlResp = await fetch(`/api/packing-slips/${slipId}/excel`, { headers: authHeadersNoBody() });
+    if (!dlResp.ok) throw new Error("Download failed");
+    const blob = await dlResp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = dlResp.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g,"") || "packing_slip.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast("Finalized and downloaded");
+    clearCustomForm();
+    Object.keys(_ddCache).forEach(k => delete _ddCache[k]);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMMON TAB — SHIP MODE
+// ═══════════════════════════════════════════════════════════════════════════════
+let _templates = [];
+
+function showCommonMode(mode) {
+  document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".mode-panel").forEach(p => p.classList.remove("active"));
+  event.target.classList.add("active");
+  document.getElementById("mode-"+mode).classList.add("active");
+  if (mode === "manage") loadTemplatesForManage();
+}
+
+async function loadTemplatesForCommon() {
+  try {
+    const resp = await fetch("/api/packing-templates", { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    _templates = data.templates || [];
+
+    // Populate quick-ship dropdown
+    const sel = document.getElementById("qs_template");
+    sel.innerHTML = '<option value="">-- Choose a template --</option>';
+    _templates.forEach(t => {
+      const opt = document.createElement("option");
+      opt.value = t.id;
+      opt.textContent = t.template_name;
+      sel.appendChild(opt);
+    });
+  } catch(e) { console.error("Failed to load templates:", e); }
+}
+
+async function onQuickShipTemplateChange() {
+  const id = document.getElementById("qs_template").value;
+  const preview = document.getElementById("qs-template-preview");
+  if (!id) { preview.style.display = "none"; return; }
+
+  try {
+    const resp = await fetch(`/api/packing-templates/${id}`, { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    const t = data.template;
+    const items = data.items || [];
+    document.getElementById("qs-preview-content").innerHTML =
+      `<strong>Sold To:</strong> ${escHtml(t.sold_to||'').replace(/\n/g,'<br>')}<br>` +
+      `<strong>Ship To:</strong> ${escHtml(t.ship_to||'').replace(/\n/g,'<br>')}<br>` +
+      `<strong>FOB:</strong> ${escHtml(t.fob||'')} &middot; <strong>Terms:</strong> ${escHtml(t.terms||'')}<br>` +
+      `<strong>Items:</strong> ${items.length} line items`;
+    preview.style.display = "block";
+  } catch(e) { preview.style.display = "none"; }
+}
+
+async function quickShipDownload() {
+  const templateId = document.getElementById("qs_template").value;
+  if (!templateId) { toast("Select a template first", "error"); return; }
+
+  const payload = {
+    template_id: parseInt(templateId),
+    job_number: document.getElementById("qs_job_number").value,
+    sales_order: document.getElementById("qs_sales_order").value,
+    customer_order: document.getElementById("qs_customer_order").value,
+    ship_date: document.getElementById("qs_ship_date").value || null,
+  };
+
+  try {
+    const resp = await fetch("/api/packing-slips/quick-ship", {
+      method: "POST", headers: authHeaders(), body: JSON.stringify(payload)
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || "Quick ship failed");
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = resp.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g,"") || "packing_slip.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("Packing slip downloaded");
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMMON TAB — MANAGE TEMPLATES
+// ═══════════════════════════════════════════════════════════════════════════════
+async function loadTemplatesForManage() {
+  await loadTemplatesForCommon();
+  const list = document.getElementById("tmpl-list");
+  list.innerHTML = "";
+  _templates.forEach(t => {
+    const card = document.createElement("div");
+    card.className = "tmpl-card";
+    card.innerHTML = `
+      <div>
+        <div class="tmpl-card-name">${escHtml(t.template_name)}</div>
+        <div class="tmpl-card-sub">${escHtml(t.sold_to||'').split('\n')[0]} &rarr; ${escHtml(t.ship_to||'').split('\n')[0]}</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" onclick="editTemplate(${t.id})">Edit</button>
+        ${_isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteTemplate(${t.id})">Delete</button>` : ''}
+      </div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function newTemplate() {
+  document.getElementById("te_editing_id").value = "";
+  document.getElementById("te_name").value = "";
+  document.getElementById("te_desc").value = "";
+  document.getElementById("te_sold_to").value = "";
+  document.getElementById("te_ship_to").value = "";
+  document.getElementById("te_attn").value = "";
+  document.getElementById("te_fob").value = "";
+  document.getElementById("te_terms").value = "";
+  document.getElementById("te_project_name").value = "";
+  document.getElementById("te-items-body").innerHTML = "";
+  addTemplateItemRow();
+  document.getElementById("tmpl-editor").style.display = "block";
+}
+
+async function editTemplate(id) {
+  try {
+    const resp = await fetch(`/api/packing-templates/${id}`, { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    const t = data.template;
+    document.getElementById("te_editing_id").value = id;
+    document.getElementById("te_name").value = t.template_name || "";
+    document.getElementById("te_desc").value = t.description || "";
+    document.getElementById("te_sold_to").value = t.sold_to || "";
+    document.getElementById("te_ship_to").value = t.ship_to || "";
+    document.getElementById("te_attn").value = t.attn || "";
+    document.getElementById("te_fob").value = t.fob || "";
+    document.getElementById("te_terms").value = t.terms || "";
+    document.getElementById("te_project_name").value = t.project_name || "";
+
+    document.getElementById("te-items-body").innerHTML = "";
+    (data.items || []).forEach(item => addTemplateItemRow(item));
+    if ((data.items || []).length === 0) addTemplateItemRow();
+
+    document.getElementById("tmpl-editor").style.display = "block";
+    document.getElementById("tmpl-editor").scrollIntoView({ behavior: "smooth" });
+  } catch(e) { toast(e.message, "error"); }
+}
+
+let _teNextItemNum = 0;
+
+function addTemplateItemRow(data) {
+  _teNextItemNum += 10;
+  const num = data?.item_number || _teNextItemNum;
+  if (num >= _teNextItemNum) _teNextItemNum = num;
+
+  const tbody = document.getElementById("te-items-body");
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="text" class="te-item-num" value="${String(num).padStart(5,'0')}" style="text-align:center"></td>
+    <td><input type="number" class="te-item-qty" value="${data?.qty_ordered??''}" min="0" step="1"></td>
+    <td><input type="text" class="te-item-part" value="${escHtml(data?.part_number||'')}"></td>
+    <td><input type="text" class="te-item-desc" value="${escHtml(data?.description||'')}"></td>
+    <td>
+      <button class="btn btn-ghost btn-sm" onclick="replacePartNumber(this)" title="Replace part number">Replace</button>
+    </td>
+    <td><button class="remove-row-btn" onclick="this.closest('tr').remove()" title="Remove">&times;</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function replacePartNumber(btn) {
+  const tr = btn.closest("tr");
+  const partInput = tr.querySelector(".te-item-part");
+  const oldPart = partInput.value;
+  const newPart = prompt(`Replace part number:\n\nOld: ${oldPart}\nNew:`, oldPart);
+  if (newPart !== null && newPart !== oldPart) {
+    partInput.value = newPart;
+    toast(`Part# updated: ${oldPart} → ${newPart}`);
+  }
+}
+
+function cancelTemplateEdit() {
+  document.getElementById("tmpl-editor").style.display = "none";
+  _teNextItemNum = 0;
+}
+
+async function saveTemplate() {
+  const editingId = document.getElementById("te_editing_id").value;
+  const items = [];
+  document.querySelectorAll("#te-items-body tr").forEach((tr, i) => {
+    items.push({
+      item_number: parseInt(tr.querySelector(".te-item-num")?.value) || (i+1)*10,
+      qty_ordered: parseFloat(tr.querySelector(".te-item-qty")?.value) || null,
+      part_number: tr.querySelector(".te-item-part")?.value || "",
+      description: tr.querySelector(".te-item-desc")?.value || "",
+      sort_order: i + 1,
+    });
+  });
+
+  const payload = {
+    template_name: document.getElementById("te_name").value || "Untitled",
+    description: document.getElementById("te_desc").value,
+    sold_to: document.getElementById("te_sold_to").value,
+    ship_to: document.getElementById("te_ship_to").value,
+    attn: document.getElementById("te_attn").value,
+    fob: document.getElementById("te_fob").value,
+    terms: document.getElementById("te_terms").value,
+    project_name: document.getElementById("te_project_name").value,
+    items: items,
+  };
+
+  try {
+    let resp;
+    if (editingId) {
+      resp = await fetch(`/api/packing-templates/${editingId}`, {
+        method: "PUT", headers: authHeaders(), body: JSON.stringify(payload)
+      });
+    } else {
+      resp = await fetch("/api/packing-templates", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(payload)
+      });
+    }
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || "Save failed");
+    toast(editingId ? "Template updated" : "Template created");
+    document.getElementById("tmpl-editor").style.display = "none";
+    _teNextItemNum = 0;
+    loadTemplatesForManage();
+    loadTemplatesForCommon();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function deleteTemplate(id) {
+  if (!confirm("Delete this template?")) return;
+  try {
+    const resp = await fetch(`/api/packing-templates/${id}`, {
+      method: "DELETE", headers: authHeadersNoBody()
+    });
+    if (!resp.ok) { const r=await resp.json(); throw new Error(r.error); }
+    toast("Template deleted");
+    loadTemplatesForManage();
+    loadTemplatesForCommon();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function uploadTemplate(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const tmplName = prompt("Template name:", file.name.replace(/\.\w+$/, ""));
+  if (!tmplName) { input.value = ""; return; }
+
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("template_name", tmplName);
+
+  try {
+    const resp = await fetch("/api/packing-templates/upload", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + _accessToken },
+      body: fd
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || "Upload failed");
+    toast(`Template "${tmplName}" created from upload`);
+    loadTemplatesForManage();
+    loadTemplatesForCommon();
+  } catch(e) { toast(e.message, "error"); }
+  input.value = "";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HISTORY TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+async function loadHistory() {
+  try {
+    const resp = await fetch("/api/packing-slips", { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    const tbody = document.getElementById("history-body");
+    tbody.innerHTML = "";
+
+    (data.slips || []).forEach(s => {
+      const tr = document.createElement("tr");
+      const statusClass = s.status === "finalized" ? "badge-finalized" : s.status === "voided" ? "badge-voided" : "badge-draft";
+      const shipDate = s.ship_date ? new Date(s.ship_date).toLocaleDateString() : "";
+      const soldToFirst = (s.sold_to || "").split("\n")[0];
+      const shipToFirst = (s.ship_to || "").split("\n")[0];
+
+      let actions = "";
+      if (s.status === "draft") {
+        actions += `<button class="btn btn-secondary btn-sm" onclick="editSlip(${s.id})">Edit</button> `;
+      }
+      actions += `<button class="btn btn-ghost btn-sm" onclick="downloadSlipExcel(${s.id})">Excel</button> `;
+      if (_isAdmin) {
+        actions += `<button class="btn btn-danger btn-sm" onclick="deleteSlip(${s.id})">Delete</button>`;
+      }
+
+      tr.innerHTML = `
+        <td style="white-space:nowrap">${escHtml(s.slip_number||'')}</td>
+        <td>${escHtml(soldToFirst)}</td>
+        <td>${escHtml(shipToFirst)}</td>
+        <td>${escHtml(s.sales_order||'')}</td>
+        <td>${shipDate}</td>
+        <td><span class="badge ${statusClass}">${s.status}</span></td>
+        <td style="white-space:nowrap">${actions}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    if ((data.slips || []).length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem">No packing slips yet</td></tr>';
+    }
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function editSlip(id) {
+  try {
+    const resp = await fetch(`/api/packing-slips/${id}`, { headers: authHeadersNoBody() });
+    const data = await resp.json();
+    const s = data.slip;
+
+    document.getElementById("ps_sold_to").value = s.sold_to || "";
+    document.getElementById("ps_ship_to").value = s.ship_to || "";
+    document.getElementById("ps_attn").value = s.attn || "";
+    document.getElementById("ps_sales_order").value = s.sales_order || "";
+    document.getElementById("ps_order_date").value = s.order_date || "";
+    document.getElementById("ps_customer_order").value = s.customer_order || "";
+    document.getElementById("ps_ship_date").value = s.ship_date || "";
+    document.getElementById("ps_fob").value = s.fob || "";
+    document.getElementById("ps_terms").value = s.terms || "";
+    document.getElementById("ps_project_name").value = s.project_name || "";
+    document.getElementById("ps_wbs").value = s.wbs || "";
+    document.getElementById("ps_notes").value = s.notes || "";
+    document.getElementById("ps_editing_id").value = id;
+
+    document.getElementById("items-body").innerHTML = "";
+    _nextItemNum = 0;
+    (data.items || []).forEach(item => addItemRow(item));
+    if ((data.items || []).length === 0) addItemRow();
+
+    // Switch to Custom tab
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("tab-custom").classList.add("active");
+    document.querySelector(".tab-btn").classList.add("active");
+
+    toast("Loaded draft for editing");
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function downloadSlipExcel(id) {
+  try {
+    const resp = await fetch(`/api/packing-slips/${id}/excel`, { headers: authHeadersNoBody() });
+    if (!resp.ok) throw new Error("Download failed");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = resp.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g,"") || "packing_slip.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function deleteSlip(id) {
+  if (!confirm("Delete this packing slip?")) return;
+  try {
+    const resp = await fetch(`/api/packing-slips/${id}`, {
+      method: "DELETE", headers: authHeadersNoBody()
+    });
+    if (!resp.ok) { const r=await resp.json(); throw new Error(r.error); }
+    toast("Packing slip deleted");
+    loadHistory();
+  } catch(e) { toast(e.message, "error"); }
+}
+</script>
+</body>
+</html>
