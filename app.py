@@ -4415,6 +4415,23 @@ def get_field_history():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/packing-slips/field-history", methods=["POST"])
+@require_auth
+def save_field_history():
+    """Save a new value to the field history dropdown."""
+    data = request.get_json() or {}
+    field = data.get("field", "").strip()
+    value = data.get("value", "").strip()
+    if not field or not value:
+        return jsonify({"error": "field and value required"}), 400
+    try:
+        sb = get_user_sb()
+        _save_field_history(sb, {field: value})
+        audit_log("field_history_add", {"field": field, "value": value[:80]})
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ── API: Next slip number ────────────────────────────────────────────────────
 
 @app.route("/api/packing-slips/next-number", methods=["POST"])
