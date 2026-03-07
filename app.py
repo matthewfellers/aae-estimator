@@ -3886,12 +3886,12 @@ def generate_packing_slip_excel(slip_data, items):
 
     fill_range(1, 1, 4, 8, white_fill)
 
-    # Logo image
+    # Logo image — 2:1 aspect ratio, span A1:B2
     logo_path = os.path.join(os.path.dirname(__file__), "static", "aae_logo.jpg")
     try:
         img = XlImage(logo_path)
-        img.width = 62
-        img.height = 62
+        img.width = 140
+        img.height = 70
         ws.add_image(img, "A1")
     except Exception:
         pass  # graceful if logo missing
@@ -3936,10 +3936,11 @@ def generate_packing_slip_excel(slip_data, items):
     for c_idx in range(1, 6):
         ws.cell(row=5, column=c_idx).fill = header_fill
 
-    # Slip number in the title bar
+    # Job / slip label in the title bar — prefer job_number, fall back to slip_number
+    display_num = slip_data.get("job_number", "") or slip_data.get("slip_number", "")
     ws.merge_cells("F5:G5")
     sn = ws["F5"]
-    sn.value = slip_data.get("slip_number", "")
+    sn.value = display_num
     sn.font = Font(name="Calibri", bold=True, size=12, color=WHITE)
     sn.fill = header_fill
     sn.alignment = right_align
@@ -4742,11 +4743,12 @@ def quick_ship():
         # Build slip data from template + quick-ship overrides
         slip_data = {
             "slip_number":    slip_number,
+            "job_number":     job_number,
             "sold_to":        tmpl.data.get("sold_to", ""),
             "ship_to":        tmpl.data.get("ship_to", ""),
             "attn":           tmpl.data.get("attn", ""),
             "sales_order":    data.get("sales_order", ""),
-            "order_date":     None,
+            "order_date":     data.get("order_date") or None,
             "customer_order": data.get("customer_order", ""),
             "ship_date":      data.get("ship_date") or None,
             "fob":            tmpl.data.get("fob", ""),
@@ -4783,6 +4785,7 @@ def quick_ship():
             "ship_to":        slip_data["ship_to"],
             "attn":           slip_data["attn"],
             "sales_order":    slip_data["sales_order"],
+            "order_date":     slip_data["order_date"],
             "customer_order": slip_data["customer_order"],
             "ship_date":      slip_data["ship_date"],
             "fob":            slip_data["fob"],
