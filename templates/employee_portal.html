@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAE Automation — Employee Portal</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #F8F9FA;
+  --card-bg: #FFFFFF;
+  --primary: #9B1B1B;
+  --primary-dark: #7A1010;
+  --text: #333333;
+  --text-muted: #666666;
+  --border: #E0E0E0;
+  --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --shadow-hover: 0 6px 24px rgba(0,0,0,0.12);
+  --radius: 12px;
+  --success: #2E7D32;
+  --success-bg: #E8F5E9;
+  --warning: #E65100;
+  --warning-bg: #FFF3E0;
+  --info: #1565C0;
+  --info-bg: #E3F2FD;
+  --danger: #C62828;
+  --danger-bg: #FFEBEE;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ── */
+.header {
+  background: #FFFFFF;
+  border-bottom: 3px solid var(--primary);
+  padding: 0 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 68px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.header-logo {
+  height: 40px;
+  border-radius: 4px;
+}
+.header-brand {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.8rem;
+  letter-spacing: 2px;
+  color: var(--text);
+}
+.header-brand span { color: var(--primary); }
+.header-cert {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 300;
+  letter-spacing: 1px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.user-pill {
+  background: #F5F0F0;
+  color: var(--text);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.logout-btn {
+  background: none;
+  border: 1.5px solid var(--primary);
+  color: var(--primary);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.logout-btn:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ── Tab Navigation ── */
+.tab-nav {
+  background: #FFFFFF;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 14px 24px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.05rem;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.tab-btn:hover {
+  color: var(--text);
+  background: #FAFAFA;
+}
+.tab-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* ── Main Content ── */
+.main {
+  flex: 1;
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem;
+}
+.tab-panel {
+  display: none;
+}
+.tab-panel.active {
+  display: block;
+}
+.section-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.4rem;
+  letter-spacing: 2px;
+  color: var(--text);
+  margin-bottom: 1.25rem;
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow);
+  margin-bottom: 1.25rem;
+}
+.card-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.1rem;
+  letter-spacing: 1.5px;
+  color: var(--text);
+  margin-bottom: 0.75rem;
+}
+.card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 0.9rem;
+}
+.card-row + .card-row {
+  border-top: 1px solid #F0F0F0;
+}
+.card-label {
+  color: var(--text-muted);
+}
+.card-value {
+  font-weight: 600;
+  font-family: 'DM Mono', monospace;
+}
+
+/* ── Summary Cards Grid ── */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.summary-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.summary-card .big-num {
+  font-family: 'DM Mono', monospace;
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--primary);
+  line-height: 1.2;
+}
+.summary-card .big-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+.summary-card.accent-green .big-num { color: var(--success); }
+.summary-card.accent-blue .big-num { color: var(--info); }
+.summary-card.accent-orange .big-num { color: var(--warning); }
+
+/* ── Status Badges ── */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.badge-submitted { background: var(--info-bg); color: var(--info); }
+.badge-approved { background: var(--success-bg); color: var(--success); }
+.badge-rejected { background: var(--danger-bg); color: var(--danger); }
+.badge-returned { background: var(--warning-bg); color: var(--warning); }
+.badge-pending { background: #FFF8E1; color: #F9A825; }
+.badge-draft { background: #F5F5F5; color: #999; }
+.badge-cancelled { background: #F5F5F5; color: #999; }
+
+/* ── Quick Links ── */
+.quick-links {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.quick-link {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--primary);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.quick-link:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+/* ── Timesheet Week Nav ── */
+.week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.week-nav-btn {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 1.2rem;
+  color: var(--text);
+  transition: all 0.2s;
+}
+.week-nav-btn:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.week-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  min-width: 220px;
+  text-align: center;
+}
+
+/* ── Table ── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.data-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #F0F0F0;
+  vertical-align: middle;
+}
+.data-table tr:hover td {
+  background: #FAFAFA;
+}
+.data-table .mono {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.85rem;
+}
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 1rem;
+}
+
+/* ── Forms ── */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.form-field {
+  display: flex;
+  flex-direction: column;
+}
+.form-field label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+.form-field input,
+.form-field select,
+.form-field textarea {
+  padding: 9px 12px;
+  border: 1.5px solid #DDD;
+  border-radius: 6px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text);
+  transition: border-color 0.2s;
+  background: #fff;
+}
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+.form-field textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+.form-field.full-width {
+  grid-column: 1 / -1;
+}
+
+/* ── Buttons ── */
+.btn {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-primary:disabled {
+  background: #CCC;
+  cursor: not-allowed;
+}
+.btn-secondary {
+  background: #F5F5F5;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover { background: #ECECEC; }
+.btn-danger {
+  background: none;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+.btn-danger:hover { background: var(--danger-bg); }
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 0.78rem;
+}
+.btn-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ── Inline Actions ── */
+.action-btns {
+  display: flex;
+  gap: 4px;
+}
+.action-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+.action-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.action-btn.del:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ── Messages ── */
+.msg {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  margin-bottom: 1rem;
+  display: none;
+}
+.msg.visible { display: block; }
+.msg-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid #FFCDD2;
+}
+.msg-success {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid #C8E6C9;
+}
+.msg-info {
+  background: var(--info-bg);
+  color: var(--info);
+  border: 1px solid #BBDEFB;
+}
+.msg-warn {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid #FFE0B2;
+}
+
+/* ── Loading Spinner ── */
+.loading {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.spinner {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── No-Employee Notice ── */
+.no-employee-notice {
+  display: none;
+  text-align: center;
+  padding: 4rem 2rem;
+}
+.no-employee-notice h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.6rem;
+  letter-spacing: 2px;
+  margin-bottom: 1rem;
+}
+.no-employee-notice p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* ── Week Status Row ── */
+.week-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* ── Profile Grid ── */
+.profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+.profile-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #F0F0F0;
+}
+.profile-row:nth-child(odd) {
+  background: #FAFAFA;
+}
+.profile-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.profile-value {
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: right;
+}
+
+/* ── Footer ── */
+.footer {
+  background: #FFFFFF;
+  border-top: 1px solid var(--border);
+  padding: 1.25rem 2rem;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.footer a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+/* ── Login Overlay ── */
+#login-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 9999;
+  justify-content: center;
+  align-items: center;
+}
+#login-overlay.visible { display: flex; }
+.login-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 40px 36px;
+  width: 380px;
+  max-width: calc(100vw - 2rem);
+  text-align: center;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.18);
+}
+.login-card img { width: 140px; margin-bottom: 6px; border-radius: 4px; }
+.login-logo-name {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px;
+  letter-spacing: 3px;
+  color: #333;
+  margin-bottom: 2px;
+}
+.login-tagline {
+  font-size: 11px;
+  color: #888;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+.login-card h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px;
+  color: #2C2C2C;
+  margin-bottom: 20px;
+}
+.login-field {
+  text-align: left;
+  margin-bottom: 14px;
+}
+.login-field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #666;
+  margin-bottom: 5px;
+}
+.login-field input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1.5px solid #DDD;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #333;
+  transition: border-color 0.2s;
+}
+.login-field input:focus { outline: none; border-color: #9B1B1B; }
+.login-submit {
+  width: 100%;
+  padding: 12px;
+  background: #9B1B1B;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: background 0.2s;
+}
+.login-submit:hover { background: #7A1010; }
+.login-err {
+  color: #9B1B1B;
+  font-size: 12px;
+  margin-top: 8px;
+  display: none;
+}
+
+/* ── MFA row ── */
+#mfa-section { display: none; }
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .header { padding: 0 1rem; height: 56px; }
+  .header-cert { display: none; }
+  .header-brand { font-size: 1.4rem; }
+  .main { padding: 1.25rem 0.75rem; }
+  .login-card { padding: 28px 20px; }
+  .tab-btn { padding: 12px 14px; font-size: 0.9rem; }
+  .summary-grid { grid-template-columns: 1fr 1fr; }
+  .form-grid { grid-template-columns: 1fr; }
+  .profile-grid { grid-template-columns: 1fr; }
+  .week-label { min-width: 160px; font-size: 0.88rem; }
+  .data-table { font-size: 0.8rem; }
+  .data-table th, .data-table td { padding: 8px 8px; }
+}
+@media (max-width: 400px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .tab-btn { padding: 10px 10px; font-size: 0.82rem; letter-spacing: 1px; }
+  .user-pill { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Redirect invite/recovery links to /estimator where the set-password flow lives -->
+<script>
+(function() {
+  try {
+    var h = window.location.hash;
+    if (h && (h.indexOf('type=invite') !== -1 || h.indexOf('type=recovery') !== -1)) {
+      window.location.replace('/estimator' + h);
+      return;
+    }
+  } catch(e) {}
+})();
+</script>
+
+<!-- Supabase JS client for authentication -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<!-- LOGIN OVERLAY -->
+<div id="login-overlay" class="visible">
+  <div class="login-card">
+    <img src="/static/aae_logo.jpg" alt="AAE Automation" onerror="this.style.display='none'">
+    <div class="login-logo-name">AAE AUTOMATION</div>
+    <div class="login-tagline">Employee Portal</div>
+    <div id="signin-form">
+      <h2>Sign In</h2>
+      <div class="login-field"><label>Email</label><input type="email" id="login_email" placeholder="you@aaeautomation.com" autocomplete="username"></div>
+      <div class="login-field"><label>Password</label><input type="password" id="login_pass" placeholder="password" autocomplete="current-password"></div>
+      <div id="mfa-section">
+        <div class="login-field"><label>MFA Code</label><input type="text" id="login_mfa" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" inputmode="numeric"></div>
+      </div>
+      <button class="login-submit" onclick="doLogin()">SIGN IN</button>
+      <div class="login-err" id="login_err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header class="header" id="app-header" style="display:none">
+  <div class="header-left">
+    <img src="/static/aae_logo.jpg" alt="AAE" class="header-logo" onerror="this.style.display='none'">
+    <div>
+      <div class="header-brand">AAE <span>AUTO</span>MATION</div>
+      <div class="header-cert">EMPLOYEE PORTAL</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="user-pill" id="user_pill"></span>
+    <button class="logout-btn" onclick="doLogout()">Sign Out</button>
+  </div>
+</header>
+
+<!-- TAB NAVIGATION -->
+<nav class="tab-nav" id="app-tabs" style="display:none">
+  <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">DASHBOARD</button>
+  <button class="tab-btn" data-tab="timesheet" onclick="switchTab('timesheet')">TIMESHEET</button>
+  <button class="tab-btn" data-tab="pto" onclick="switchTab('pto')">PTO</button>
+  <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">PROFILE</button>
+</nav>
+
+<!-- NO EMPLOYEE RECORD NOTICE -->
+<div class="no-employee-notice" id="no-employee-notice">
+  <h2>ACCOUNT NOT LINKED</h2>
+  <p>Your login is not linked to an employee record. Please contact your administrator to set up your employee profile in the system.</p>
+</div>
+
+<!-- MAIN CONTENT -->
+<main class="main" id="app-main" style="display:none">
+
+  <!-- ============================================================ -->
+  <!-- DASHBOARD TAB                                                 -->
+  <!-- ============================================================ -->
+  <div class="tab-panel active" id="panel-dashboard">
+    <div class="section-title">WEEK SUMMARY</div>
+    <div class="summary-grid" id="dash-week-summary">
+      <div class="summary-card">
+        <div class="big-num" id="dash-hours-worked">--</div>
+        <div class="big-label">Hours This Week</div>
+      </div>
+      <div class="summary-card accent-green">
+        <div class="big-num" id="dash-hours-remaining">--</div>
+        <div class="big-label">Remaining for 40</div>
+      </div>
+      <div class="summary-card">
+        <div class="big-num" id="dash-week-status">--</div>
+        <div class="big-label">Week Status</div>
+      </div>
+    </div>
+
+    <div class="section-title">PTO BALANCES</div>
+    <div class="summary-grid" id="dash-pto-balances">
+      <div class="summary-card accent-blue">
+        <div class="big-num" id="dash-vacation-hrs">--</div>
+        <div class="big-label">Vacation Hours</div>
+      </div>
+      <div class="summary-card accent-orange">
+        <div class="big-num" id="dash-sick-hrs">--</div>
+        <div class="big-label">Sick Hours</div>
+      </div>
+      <div class="summary-card accent-green">
+        <div class="big-num" id="dash-holiday-hrs">--</div>
+        <div class="big-label">Holiday Hours</div>
+      </div>
+    </div>
+
+    <div class="card" id="dash-pending-card" style="display:none">
+      <div class="card-title">PENDING PTO REQUESTS</div>
+      <div class="card-row">
+        <span class="card-label">You have pending PTO requests awaiting review.</span>
+        <span class="card-value" id="dash-pending-count">0</span>
+      </div>
+    </div>
+
+    <div class="section-title">QUICK LINKS</div>
+    <div class="quick-links">
+      <a class="quick-link" onclick="switchTab('timesheet')">Enter Time</a>
+      <a class="quick-link" onclick="switchTab('pto')">Request PTO</a>
+      <a class="quick-link" onclick="switchTab('profile')">My Profile</a>
+      <a class="quick-link" href="/" >ERP Home</a>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- TIMESHEET TAB                                                 -->
+  <!-- ============================================================ -->
+  <div class="tab-panel" id="panel-timesheet">
+    <!-- Week Navigator -->
+    <div class="week-nav">
+      <button class="week-nav-btn" onclick="changeWeek(-1)" title="Previous week">&larr;</button>
+      <div class="week-label" id="ts-week-label">--</div>
+      <button class="week-nav-btn" onclick="changeWeek(1)" title="Next week">&rarr;</button>
+    </div>
+
+    <div id="ts-msg" class="msg"></div>
+
+    <!-- Week Status + Submit -->
+    <div class="week-status-row">
+      <div>
+        <span class="badge badge-draft" id="ts-week-badge">DRAFT</span>
+        <span style="font-size:0.85rem; margin-left:8px; color:var(--text-muted)" id="ts-week-total-label">Week total: <strong id="ts-week-total">0.00</strong> hrs</span>
+      </div>
+      <div class="btn-row" id="ts-submit-row">
+        <button class="btn btn-primary btn-sm" id="ts-submit-btn" onclick="submitWeek()">Submit Week</button>
+      </div>
+    </div>
+
+    <!-- Entries Table -->
+    <div class="table-wrap">
+      <table class="data-table" id="ts-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Job #</th>
+            <th>Panel</th>
+            <th>Hours</th>
+            <th>Type</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ts-tbody">
+          <tr><td colspan="7" class="loading"><div class="spinner"></div><br>Loading entries...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Add Entry Form -->
+    <div class="card" id="ts-add-card">
+      <div class="card-title">ADD ENTRY</div>
+      <div id="ts-form-msg" class="msg"></div>
+      <div class="form-grid">
+        <div class="form-field">
+          <label>Date</label>
+          <input type="date" id="ts-date">
+        </div>
+        <div class="form-field">
+          <label>Job Number</label>
+          <input type="text" id="ts-job" placeholder="e.g. 2024-001">
+        </div>
+        <div class="form-field">
+          <label>Panel</label>
+          <input type="text" id="ts-panel" placeholder="e.g. MCP-1">
+        </div>
+        <div class="form-field">
+          <label>Hours</label>
+          <input type="number" id="ts-hours" step="0.25" min="0.25" max="24" placeholder="8.00">
+        </div>
+        <div class="form-field">
+          <label>Labor Type</label>
+          <select id="ts-type">
+            <option value="build">Build</option>
+            <option value="wiring">Wiring</option>
+            <option value="test">Test</option>
+            <option value="rework">Rework</option>
+            <option value="field">Field</option>
+            <option value="misc">Misc</option>
+          </select>
+        </div>
+        <div class="form-field full-width">
+          <label>Notes (optional)</label>
+          <input type="text" id="ts-notes" placeholder="Optional notes">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="ts-add-btn" onclick="addTimesheetEntry()">Add Entry</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- PTO TAB                                                       -->
+  <!-- ============================================================ -->
+  <div class="tab-panel" id="panel-pto">
+    <div class="section-title">PTO BALANCES</div>
+    <div class="summary-grid" id="pto-balances">
+      <div class="summary-card accent-blue">
+        <div class="big-num" id="pto-vacation-hrs">--</div>
+        <div class="big-label">Vacation</div>
+      </div>
+      <div class="summary-card accent-orange">
+        <div class="big-num" id="pto-sick-hrs">--</div>
+        <div class="big-label">Sick</div>
+      </div>
+      <div class="summary-card accent-green">
+        <div class="big-num" id="pto-holiday-hrs">--</div>
+        <div class="big-label">Holiday</div>
+      </div>
+    </div>
+
+    <!-- Request Form -->
+    <div class="card">
+      <div class="card-title">REQUEST TIME OFF</div>
+      <div id="pto-form-msg" class="msg"></div>
+      <div class="form-grid">
+        <div class="form-field">
+          <label>Type</label>
+          <select id="pto-type">
+            <option value="vacation">Vacation</option>
+            <option value="sick">Sick</option>
+            <option value="holiday">Holiday</option>
+            <option value="personal">Personal</option>
+            <option value="bereavement">Bereavement</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Start Date</label>
+          <input type="date" id="pto-start">
+        </div>
+        <div class="form-field">
+          <label>End Date</label>
+          <input type="date" id="pto-end">
+        </div>
+        <div class="form-field">
+          <label>Total Hours</label>
+          <input type="number" id="pto-hours" step="0.5" min="0.5" max="200" placeholder="8">
+        </div>
+        <div class="form-field">
+          <label>Partial Day?</label>
+          <select id="pto-partial">
+            <option value="false">No - Full Day(s)</option>
+            <option value="true">Yes - Partial Day</option>
+          </select>
+        </div>
+        <div class="form-field full-width">
+          <label>Reason (optional)</label>
+          <textarea id="pto-reason" placeholder="Reason for request..."></textarea>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="pto-submit-btn" onclick="submitPtoRequest()">Submit Request</button>
+      </div>
+    </div>
+
+    <!-- PTO History -->
+    <div class="section-title" style="margin-top:1.5rem">REQUEST HISTORY</div>
+    <div id="pto-msg" class="msg"></div>
+    <div class="table-wrap">
+      <table class="data-table" id="pto-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Dates</th>
+            <th>Hours</th>
+            <th>Status</th>
+            <th>Reason</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="pto-tbody">
+          <tr><td colspan="6" class="loading"><div class="spinner"></div><br>Loading requests...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- PROFILE TAB                                                   -->
+  <!-- ============================================================ -->
+  <div class="tab-panel" id="panel-profile">
+    <div class="section-title">MY PROFILE</div>
+    <div class="card" id="profile-card">
+      <div class="loading" id="profile-loading"><div class="spinner"></div><br>Loading profile...</div>
+      <div id="profile-content" style="display:none">
+        <div class="profile-grid" id="profile-grid"></div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- FOOTER -->
+<footer class="footer" id="app-footer" style="display:none">
+  AAE Automation Inc. &middot; 8528 SW 2nd St, OKC, OK 73128 &middot;
+  <a href="tel:4052101567">405-210-1567</a> &middot;
+  <a href="https://aaeok.com" target="_blank">aaeok.com</a><br>
+  UL-508A Certified Industrial Control Panel Shop
+</footer>
+
+<script>
+// ── Supabase Auth ──────────────────────────────────────────────────────────
+const SUPABASE_URL  = "{{ supabase_url }}";
+const SUPABASE_ANON = "{{ supabase_anon_key }}";
+
+let _sbClient = null;
+let _accessToken = null;
+let _pendingMfaFactorId = null;
+
+// ── 24-hour session lifetime ───────────────────────────────────────────────
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+function stampSessionLogin() {
+  localStorage.setItem("aae_session_start", Date.now().toString());
+}
+function isSessionExpiredByAge() {
+  const start = parseInt(localStorage.getItem("aae_session_start") || "0", 10);
+  if (!start) return true;
+  return (Date.now() - start) > SESSION_MAX_AGE_MS;
+}
+function clearSessionStamp() {
+  localStorage.removeItem("aae_session_start");
+}
+
+if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undefined") {
+  _sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { persistSession: true, detectSessionInUrl: false }
+  });
+
+  // Auto-restore session on page load
+  (async () => {
+    try {
+      // Enforce 24-hour max session lifetime
+      if (isSessionExpiredByAge()) {
+        console.log("[auth] Session older than 24 hours — requiring re-login");
+        clearSessionStamp();
+        try { await _sbClient.auth.signOut(); } catch(e) {}
+        _accessToken = null;
+        document.getElementById("login-overlay").classList.add("visible");
+        return;
+      }
+
+      const { data: { session } } = await _sbClient.auth.getSession();
+      if (session?.access_token) {
+        _accessToken = session.access_token;
+        // Verify token is still valid against server
+        const resp = await fetch("/api/portal/me", { headers: { "Authorization": "Bearer " + _accessToken } });
+        if (resp.ok) {
+          const data = await resp.json();
+          onLoginSuccess(data);
+          return;
+        } else if (resp.status === 404) {
+          // User authenticated but no employee record
+          onLoginNoEmployee(session);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("[auth] Session restore failed:", e.message);
+    }
+    // No valid session — show login
+    document.getElementById("login-overlay").classList.add("visible");
+  })();
+
+  // Keep token in sync on auto-refresh
+  _sbClient.auth.onAuthStateChange((event, session) => {
+    if (session?.access_token) {
+      _accessToken = session.access_token;
+    }
+  });
+}
+
+function showLoginErr(msg) {
+  const el = document.getElementById("login_err");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+async function doLogin() {
+  const email = document.getElementById("login_email").value.trim();
+  const pass  = document.getElementById("login_pass").value;
+  const mfaCode = document.getElementById("login_mfa").value.trim();
+  const btn   = document.querySelector("#signin-form .login-submit");
+
+  document.getElementById("login_err").style.display = "none";
+
+  if (!_sbClient) {
+    showLoginErr("Auth service not available. Contact your administrator.");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "SIGNING IN...";
+
+  try {
+    // If MFA challenge is pending, verify
+    if (_pendingMfaFactorId) {
+      if (!mfaCode) { showLoginErr("Enter your 6-digit MFA code."); return; }
+      const { data: chalData, error: chalErr } = await _sbClient.auth.mfa.challengeAndVerify({
+        factorId: _pendingMfaFactorId,
+        code: mfaCode
+      });
+      if (chalErr) throw chalErr;
+      _pendingMfaFactorId = null;
+      const { data: sessionData } = await _sbClient.auth.getSession();
+      _accessToken = sessionData?.session?.access_token;
+    } else {
+      // Standard email/password sign-in
+      const { data, error } = await _sbClient.auth.signInWithPassword({ email, password: pass });
+      if (error) throw error;
+
+      // Check if MFA is required
+      const { data: factorsData } = await _sbClient.auth.mfa.listFactors();
+      const verifiedFactors = (factorsData?.totp || []).filter(f => f.status === 'verified');
+      if (verifiedFactors.length > 0) {
+        _pendingMfaFactorId = verifiedFactors[0].id;
+        document.getElementById("mfa-section").style.display = "block";
+        btn.textContent = "VERIFY MFA";
+        btn.disabled = false;
+        document.getElementById("login_mfa").focus();
+        return;
+      }
+
+      _accessToken = data.session?.access_token;
+    }
+
+    // Fetch employee profile
+    const resp = await fetch("/api/portal/me", { headers: { "Authorization": "Bearer " + _accessToken } });
+    if (resp.status === 404) {
+      stampSessionLogin();
+      onLoginNoEmployee();
+      return;
+    }
+    if (!resp.ok) throw new Error("Failed to load profile");
+    const profileData = await resp.json();
+    stampSessionLogin();
+    onLoginSuccess(profileData);
+
+  } catch (err) {
+    _pendingMfaFactorId = null;
+    document.getElementById("mfa-section").style.display = "none";
+    showLoginErr(err.message || "Sign-in failed. Check your credentials.");
+  } finally {
+    btn.disabled = false;
+    if (!_pendingMfaFactorId) btn.textContent = "SIGN IN";
+  }
+}
+
+// ── App State ──────────────────────────────────────────────────────────────
+let _employee = null;
+let _balances = null;
+let _weekSummary = null;
+let _currentWeekStart = getMonday(new Date());
+let _timesheetEntries = [];
+let _weekRecords = [];
+let _ptoRequests = [];
+let _currentWeekRecord = null;
+
+function getMonday(d) {
+  const dt = new Date(d);
+  const day = dt.getDay();
+  const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
+  dt.setDate(diff);
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+}
+
+function formatDate(d) {
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + ' ' + d.getDate();
+}
+
+function formatFullDate(d) {
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  return days[d.getDay()] + ', ' + months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+}
+
+function toISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + dd;
+}
+
+function parseDateLocal(s) {
+  // Parse YYYY-MM-DD as local date
+  const parts = s.split('-');
+  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+}
+
+function onLoginNoEmployee() {
+  document.getElementById("login-overlay").classList.remove("visible");
+  document.getElementById("app-header").style.display = "flex";
+  document.getElementById("app-footer").style.display = "block";
+  document.getElementById("no-employee-notice").style.display = "block";
+  document.getElementById("user_pill").textContent = "User";
+}
+
+function onLoginSuccess(data) {
+  document.getElementById("login-overlay").classList.remove("visible");
+  document.getElementById("app-header").style.display = "flex";
+  document.getElementById("app-tabs").style.display = "flex";
+  document.getElementById("app-main").style.display = "block";
+  document.getElementById("app-footer").style.display = "block";
+
+  _employee = data.employee || data;
+  _balances = data.balances || {};
+  _weekSummary = data.week_summary || {};
+
+  const name = _employee.first_name
+    ? (_employee.first_name + ' ' + (_employee.last_name || '')).trim()
+    : (_employee.display_name || _employee.email || "User");
+  document.getElementById("user_pill").textContent = name;
+
+  // Populate dashboard
+  populateDashboard();
+
+  // Set default date for timesheet form to today
+  document.getElementById("ts-date").value = toISODate(new Date());
+
+  // Set default PTO dates to today
+  const todayStr = toISODate(new Date());
+  document.getElementById("pto-start").value = todayStr;
+  document.getElementById("pto-end").value = todayStr;
+
+  // Load initial data
+  loadTimesheetData();
+  loadPtoData();
+  populateProfile();
+}
+
+async function doLogout() {
+  if (_sbClient) { try { await _sbClient.auth.signOut(); } catch(e) {} }
+  _accessToken = null;
+  clearSessionStamp();
+  _employee = null;
+  _balances = null;
+  _weekSummary = null;
+  document.getElementById("app-header").style.display = "none";
+  document.getElementById("app-tabs").style.display = "none";
+  document.getElementById("app-main").style.display = "none";
+  document.getElementById("app-footer").style.display = "none";
+  document.getElementById("no-employee-notice").style.display = "none";
+  document.getElementById("login-overlay").classList.add("visible");
+  document.getElementById("login_pass").value = "";
+  document.getElementById("login_mfa").value = "";
+  document.getElementById("login_err").style.display = "none";
+  document.getElementById("mfa-section").style.display = "none";
+  _pendingMfaFactorId = null;
+}
+
+// Enter key submits login
+["login_email", "login_pass", "login_mfa"].forEach(id => {
+  document.getElementById(id)?.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+});
+
+// ── Tab Switching ──────────────────────────────────────────────────────────
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
+  });
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === 'panel-' + tabId);
+  });
+}
+
+// ── API Helper ─────────────────────────────────────────────────────────────
+async function apiCall(method, url, body) {
+  const opts = {
+    method: method,
+    headers: {
+      "Authorization": "Bearer " + _accessToken,
+      "Content-Type": "application/json"
+    }
+  };
+  if (body && method !== 'GET' && method !== 'DELETE') {
+    opts.body = JSON.stringify(body);
+  }
+  const resp = await fetch(url, opts);
+  if (!resp.ok) {
+    let errMsg = "Request failed (" + resp.status + ")";
+    try {
+      const errData = await resp.json();
+      errMsg = errData.error || errData.message || errMsg;
+    } catch(e) {}
+    throw new Error(errMsg);
+  }
+  if (resp.status === 204) return null;
+  return resp.json();
+}
+
+function showMsg(elId, type, text) {
+  const el = document.getElementById(elId);
+  el.className = 'msg msg-' + type + ' visible';
+  el.textContent = text;
+  // Auto-hide success messages
+  if (type === 'success') {
+    setTimeout(() => { el.classList.remove('visible'); }, 4000);
+  }
+}
+
+function hideMsg(elId) {
+  const el = document.getElementById(elId);
+  el.classList.remove('visible');
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+function populateDashboard() {
+  // Week summary
+  const hoursWorked = parseFloat(_weekSummary.total_hours || 0);
+  const remaining = Math.max(0, 40 - hoursWorked);
+  document.getElementById("dash-hours-worked").textContent = hoursWorked.toFixed(1);
+  document.getElementById("dash-hours-remaining").textContent = remaining.toFixed(1);
+  document.getElementById("dash-week-status").textContent = (_weekSummary.status || "draft").toUpperCase();
+
+  // PTO balances
+  document.getElementById("dash-vacation-hrs").textContent = parseFloat(_balances.vacation_hours || 0).toFixed(1);
+  document.getElementById("dash-sick-hrs").textContent = parseFloat(_balances.sick_hours || 0).toFixed(1);
+  document.getElementById("dash-holiday-hrs").textContent = parseFloat(_balances.holiday_hours || 0).toFixed(1);
+
+  // Also update PTO tab balances
+  document.getElementById("pto-vacation-hrs").textContent = parseFloat(_balances.vacation_hours || 0).toFixed(1);
+  document.getElementById("pto-sick-hrs").textContent = parseFloat(_balances.sick_hours || 0).toFixed(1);
+  document.getElementById("pto-holiday-hrs").textContent = parseFloat(_balances.holiday_hours || 0).toFixed(1);
+
+  // Pending PTO count
+  const pendingCount = parseInt(_weekSummary.pending_pto_count || _balances.pending_pto_count || 0);
+  if (pendingCount > 0) {
+    document.getElementById("dash-pending-card").style.display = "block";
+    document.getElementById("dash-pending-count").textContent = pendingCount;
+  } else {
+    document.getElementById("dash-pending-card").style.display = "none";
+  }
+}
+
+// ── Timesheet ──────────────────────────────────────────────────────────────
+function updateWeekLabel() {
+  const end = new Date(_currentWeekStart);
+  end.setDate(end.getDate() + 6);
+  const label = formatDate(_currentWeekStart) + ' - ' + formatDate(end) + ', ' + end.getFullYear();
+  document.getElementById("ts-week-label").textContent = label;
+}
+
+function changeWeek(dir) {
+  _currentWeekStart.setDate(_currentWeekStart.getDate() + (dir * 7));
+  updateWeekLabel();
+  loadTimesheetData();
+}
+
+async function loadTimesheetData() {
+  updateWeekLabel();
+  const start = toISODate(_currentWeekStart);
+  const end = new Date(_currentWeekStart);
+  end.setDate(end.getDate() + 6);
+  const endStr = toISODate(end);
+
+  document.getElementById("ts-tbody").innerHTML =
+    '<tr><td colspan="7" class="loading"><div class="spinner"></div><br>Loading entries...</td></tr>';
+  hideMsg("ts-msg");
+
+  try {
+    // Load entries and week records in parallel
+    const [entries, weeks] = await Promise.all([
+      apiCall("GET", "/api/portal/timesheets?start=" + start + "&end=" + endStr),
+      apiCall("GET", "/api/portal/weeks")
+    ]);
+
+    _timesheetEntries = entries || [];
+    _weekRecords = weeks || [];
+
+    // Find the week record for this week
+    _currentWeekRecord = _weekRecords.find(w => w.week_start === start) || null;
+
+    renderTimesheetTable();
+    updateWeekStatus();
+  } catch (err) {
+    document.getElementById("ts-tbody").innerHTML =
+      '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--danger)">' + escapeHtml(err.message) + '</td></tr>';
+  }
+}
+
+function renderTimesheetTable() {
+  const tbody = document.getElementById("ts-tbody");
+  if (_timesheetEntries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--text-muted)">No entries this week. Add your first entry below.</td></tr>';
+    document.getElementById("ts-week-total").textContent = "0.00";
+    return;
+  }
+
+  const isLocked = _currentWeekRecord && (_currentWeekRecord.status === 'approved');
+
+  // Sort by date
+  _timesheetEntries.sort((a, b) => (a.work_date || '').localeCompare(b.work_date || ''));
+
+  let totalHours = 0;
+  let html = '';
+  _timesheetEntries.forEach(entry => {
+    const hrs = parseFloat(entry.hours || 0);
+    totalHours += hrs;
+    const dt = entry.work_date ? parseDateLocal(entry.work_date) : null;
+    const dateStr = dt ? formatFullDate(dt) : entry.work_date;
+    const typeLabel = (entry.labor_type || '').charAt(0).toUpperCase() + (entry.labor_type || '').slice(1);
+
+    html += '<tr>';
+    html += '<td>' + escapeHtml(dateStr) + '</td>';
+    html += '<td class="mono">' + escapeHtml(entry.job_number || '-') + '</td>';
+    html += '<td class="mono">' + escapeHtml(entry.panel_number || '-') + '</td>';
+    html += '<td class="mono">' + hrs.toFixed(2) + '</td>';
+    html += '<td>' + escapeHtml(typeLabel) + '</td>';
+    html += '<td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(entry.notes || '') + '">' + escapeHtml(entry.notes || '-') + '</td>';
+    html += '<td>';
+    if (!isLocked) {
+      html += '<div class="action-btns">';
+      html += '<button class="action-btn" onclick="editEntry(' + entry.id + ')" title="Edit">Edit</button>';
+      html += '<button class="action-btn del" onclick="deleteEntry(' + entry.id + ')" title="Delete">Del</button>';
+      html += '</div>';
+    }
+    html += '</td>';
+    html += '</tr>';
+  });
+
+  tbody.innerHTML = html;
+  document.getElementById("ts-week-total").textContent = totalHours.toFixed(2);
+}
+
+function updateWeekStatus() {
+  const badge = document.getElementById("ts-week-badge");
+  const submitRow = document.getElementById("ts-submit-row");
+  const addCard = document.getElementById("ts-add-card");
+
+  if (!_currentWeekRecord || !_currentWeekRecord.status || _currentWeekRecord.status === 'draft') {
+    badge.className = 'badge badge-draft';
+    badge.textContent = 'DRAFT';
+    submitRow.style.display = 'flex';
+    addCard.style.display = 'block';
+  } else if (_currentWeekRecord.status === 'submitted') {
+    badge.className = 'badge badge-submitted';
+    badge.textContent = 'SUBMITTED';
+    submitRow.style.display = 'none';
+    addCard.style.display = 'block';
+  } else if (_currentWeekRecord.status === 'approved') {
+    badge.className = 'badge badge-approved';
+    badge.textContent = 'APPROVED';
+    submitRow.style.display = 'none';
+    addCard.style.display = 'none';
+  } else if (_currentWeekRecord.status === 'rejected') {
+    badge.className = 'badge badge-rejected';
+    badge.textContent = 'REJECTED';
+    submitRow.style.display = 'flex';
+    addCard.style.display = 'block';
+  } else if (_currentWeekRecord.status === 'returned') {
+    badge.className = 'badge badge-returned';
+    badge.textContent = 'RETURNED';
+    submitRow.style.display = 'flex';
+    addCard.style.display = 'block';
+  } else {
+    badge.className = 'badge badge-draft';
+    badge.textContent = _currentWeekRecord.status.toUpperCase();
+    submitRow.style.display = 'flex';
+    addCard.style.display = 'block';
+  }
+}
+
+async function addTimesheetEntry() {
+  const date = document.getElementById("ts-date").value;
+  const job = document.getElementById("ts-job").value.trim();
+  const panel = document.getElementById("ts-panel").value.trim();
+  const hours = document.getElementById("ts-hours").value;
+  const type = document.getElementById("ts-type").value;
+  const notes = document.getElementById("ts-notes").value.trim();
+
+  hideMsg("ts-form-msg");
+
+  if (!date) { showMsg("ts-form-msg", "error", "Please select a date."); return; }
+  if (!hours || parseFloat(hours) <= 0) { showMsg("ts-form-msg", "error", "Please enter valid hours."); return; }
+
+  const btn = document.getElementById("ts-add-btn");
+  btn.disabled = true;
+  btn.textContent = "Adding...";
+
+  try {
+    await apiCall("POST", "/api/portal/timesheets", {
+      work_date: date,
+      job_number: job || null,
+      panel_number: panel || null,
+      hours: parseFloat(hours),
+      labor_type: type,
+      notes: notes || null
+    });
+
+    showMsg("ts-form-msg", "success", "Entry added.");
+    // Clear form except date and type
+    document.getElementById("ts-job").value = "";
+    document.getElementById("ts-panel").value = "";
+    document.getElementById("ts-hours").value = "";
+    document.getElementById("ts-notes").value = "";
+
+    // Reload
+    await loadTimesheetData();
+  } catch (err) {
+    showMsg("ts-form-msg", "error", err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Add Entry";
+  }
+}
+
+async function deleteEntry(id) {
+  if (!confirm("Delete this timesheet entry?")) return;
+  try {
+    await apiCall("DELETE", "/api/portal/timesheets/" + id);
+    await loadTimesheetData();
+  } catch (err) {
+    showMsg("ts-msg", "error", err.message);
+  }
+}
+
+async function editEntry(id) {
+  const entry = _timesheetEntries.find(e => e.id === id);
+  if (!entry) return;
+
+  const newHours = prompt("Edit hours for " + (entry.work_date || '') + " / " + (entry.job_number || 'no job') + ":", entry.hours);
+  if (newHours === null) return;
+  const parsed = parseFloat(newHours);
+  if (isNaN(parsed) || parsed <= 0) {
+    alert("Invalid hours value.");
+    return;
+  }
+
+  try {
+    await apiCall("PUT", "/api/portal/timesheets/" + id, {
+      hours: parsed
+    });
+    await loadTimesheetData();
+  } catch (err) {
+    showMsg("ts-msg", "error", err.message);
+  }
+}
+
+async function submitWeek() {
+  if (_timesheetEntries.length === 0) {
+    showMsg("ts-msg", "warn", "No entries to submit this week.");
+    return;
+  }
+
+  if (!confirm("Submit this week for approval? You won't be able to make changes after submission unless the week is returned.")) return;
+
+  const btn = document.getElementById("ts-submit-btn");
+  btn.disabled = true;
+  btn.textContent = "Submitting...";
+  hideMsg("ts-msg");
+
+  try {
+    await apiCall("POST", "/api/portal/weeks/submit", {
+      week_start: toISODate(_currentWeekStart)
+    });
+    showMsg("ts-msg", "success", "Week submitted for approval.");
+    await loadTimesheetData();
+  } catch (err) {
+    showMsg("ts-msg", "error", err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Submit Week";
+  }
+}
+
+// ── PTO ────────────────────────────────────────────────────────────────────
+async function loadPtoData() {
+  document.getElementById("pto-tbody").innerHTML =
+    '<tr><td colspan="6" class="loading"><div class="spinner"></div><br>Loading requests...</td></tr>';
+  hideMsg("pto-msg");
+
+  try {
+    const requests = await apiCall("GET", "/api/portal/pto");
+    _ptoRequests = requests || [];
+    renderPtoTable();
+  } catch (err) {
+    document.getElementById("pto-tbody").innerHTML =
+      '<tr><td colspan="6" style="padding:2rem;text-align:center;color:var(--danger)">' + escapeHtml(err.message) + '</td></tr>';
+  }
+}
+
+function renderPtoTable() {
+  const tbody = document.getElementById("pto-tbody");
+  if (_ptoRequests.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:2rem;text-align:center;color:var(--text-muted)">No PTO requests found.</td></tr>';
+    return;
+  }
+
+  // Sort by start_date descending
+  _ptoRequests.sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''));
+
+  let html = '';
+  _ptoRequests.forEach(req => {
+    const typeLabel = (req.pto_type || '').charAt(0).toUpperCase() + (req.pto_type || '').slice(1);
+    const startDt = req.start_date ? parseDateLocal(req.start_date) : null;
+    const endDt = req.end_date ? parseDateLocal(req.end_date) : null;
+    const dateRange = startDt && endDt
+      ? (req.start_date === req.end_date
+          ? formatFullDate(startDt)
+          : formatDate(startDt) + ' - ' + formatDate(endDt) + ', ' + endDt.getFullYear())
+      : (req.start_date || '-');
+    const hrs = parseFloat(req.hours || 0);
+    const status = (req.status || 'pending').toLowerCase();
+
+    let badgeClass = 'badge-pending';
+    if (status === 'approved') badgeClass = 'badge-approved';
+    else if (status === 'rejected') badgeClass = 'badge-rejected';
+    else if (status === 'submitted') badgeClass = 'badge-submitted';
+    else if (status === 'cancelled') badgeClass = 'badge-cancelled';
+
+    html += '<tr>';
+    html += '<td>' + escapeHtml(typeLabel) + '</td>';
+    html += '<td>' + escapeHtml(dateRange) + '</td>';
+    html += '<td class="mono">' + hrs.toFixed(1) + '</td>';
+    html += '<td><span class="badge ' + badgeClass + '">' + escapeHtml(status.toUpperCase()) + '</span></td>';
+    html += '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(req.reason || '') + '">' + escapeHtml(req.reason || '-') + '</td>';
+    html += '<td>';
+    if (status === 'pending') {
+      html += '<button class="action-btn del" onclick="cancelPto(' + req.id + ')" title="Cancel">Cancel</button>';
+    }
+    html += '</td>';
+    html += '</tr>';
+  });
+
+  tbody.innerHTML = html;
+}
+
+async function submitPtoRequest() {
+  const ptoType = document.getElementById("pto-type").value;
+  const startDate = document.getElementById("pto-start").value;
+  const endDate = document.getElementById("pto-end").value;
+  const hours = document.getElementById("pto-hours").value;
+  const isPartial = document.getElementById("pto-partial").value === 'true';
+  const reason = document.getElementById("pto-reason").value.trim();
+
+  hideMsg("pto-form-msg");
+
+  if (!startDate) { showMsg("pto-form-msg", "error", "Please select a start date."); return; }
+  if (!endDate) { showMsg("pto-form-msg", "error", "Please select an end date."); return; }
+  if (endDate < startDate) { showMsg("pto-form-msg", "error", "End date cannot be before start date."); return; }
+  if (!hours || parseFloat(hours) <= 0) { showMsg("pto-form-msg", "error", "Please enter valid hours."); return; }
+
+  const btn = document.getElementById("pto-submit-btn");
+  btn.disabled = true;
+  btn.textContent = "Submitting...";
+
+  try {
+    await apiCall("POST", "/api/portal/pto", {
+      pto_type: ptoType,
+      start_date: startDate,
+      end_date: endDate,
+      hours: parseFloat(hours),
+      is_partial_day: isPartial,
+      reason: reason || null
+    });
+
+    showMsg("pto-form-msg", "success", "PTO request submitted.");
+    document.getElementById("pto-hours").value = "";
+    document.getElementById("pto-reason").value = "";
+
+    // Reload PTO and refresh balances
+    await loadPtoData();
+    await refreshProfile();
+  } catch (err) {
+    showMsg("pto-form-msg", "error", err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Submit Request";
+  }
+}
+
+async function cancelPto(id) {
+  if (!confirm("Cancel this PTO request?")) return;
+  try {
+    await apiCall("PUT", "/api/portal/pto/" + id, { status: "cancelled" });
+    await loadPtoData();
+  } catch (err) {
+    showMsg("pto-msg", "error", err.message);
+  }
+}
+
+// ── Profile ────────────────────────────────────────────────────────────────
+function populateProfile() {
+  if (!_employee) return;
+  document.getElementById("profile-loading").style.display = "none";
+  document.getElementById("profile-content").style.display = "block";
+
+  const fields = [
+    { label: "Full Name", value: [_employee.first_name, _employee.last_name].filter(Boolean).join(' ') || '-' },
+    { label: "Employee Number", value: _employee.employee_number || _employee.emp_number || '-' },
+    { label: "Email", value: _employee.email || '-' },
+    { label: "Phone", value: _employee.phone || '-' },
+    { label: "Hire Date", value: _employee.hire_date ? formatFullDate(parseDateLocal(_employee.hire_date)) : '-' },
+    { label: "Role / Position", value: _employee.role || _employee.position || '-' },
+  ];
+
+  let html = '';
+  fields.forEach(f => {
+    html += '<div class="profile-row">';
+    html += '<span class="profile-label">' + escapeHtml(f.label) + '</span>';
+    html += '<span class="profile-value">' + escapeHtml(f.value) + '</span>';
+    html += '</div>';
+  });
+
+  document.getElementById("profile-grid").innerHTML = html;
+}
+
+async function refreshProfile() {
+  try {
+    const data = await apiCall("GET", "/api/portal/me");
+    _employee = data.employee || data;
+    _balances = data.balances || {};
+    _weekSummary = data.week_summary || {};
+    populateDashboard();
+    populateProfile();
+  } catch (e) {
+    console.warn("[portal] Profile refresh failed:", e.message);
+  }
+}
+
+// ── Utility ────────────────────────────────────────────────────────────────
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+</script>
+</body>
+</html>
