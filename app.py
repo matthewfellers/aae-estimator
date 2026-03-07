@@ -5484,8 +5484,10 @@ def _get_my_employee(sb, org_id):
         .eq("org_id", org_id)\
         .eq("user_id", g.user["id"])\
         .eq("is_active", True)\
-        .maybe_single().execute()
-    return result.data if result.data else None
+        .execute()
+    if not result or not result.data:
+        return None
+    return result.data[0] if isinstance(result.data, list) else result.data
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SCHEDULING API — Employees
@@ -6314,42 +6316,51 @@ def portal_me():
         monday = today - timedelta(days=today.weekday())
         week_start = monday.isoformat()
         # Current week's timesheet entries (may be empty if RLS blocks)
+        entries_data = []
         try:
-            entries = sb.table("timesheets").select("*")\
+            r = sb.table("timesheets").select("*")\
                 .eq("employee_id", emp["id"])\
                 .eq("org_id", org_id)\
                 .gte("work_date", week_start)\
                 .lte("work_date", (monday + timedelta(days=6)).isoformat())\
                 .order("work_date").execute()
-        except Exception:
-            entries = type("R", (), {"data": []})()
+            if r and r.data:
+                entries_data = r.data
+        except Exception as ex:
+            print(f"[PORTAL_ME] timesheets query failed: {ex}", flush=True)
         # Week status
+        week_data = None
         try:
-            week = sb.table("timesheet_weeks")\
+            r = sb.table("timesheet_weeks")\
                 .select("*")\
                 .eq("employee_id", emp["id"])\
                 .eq("org_id", org_id)\
                 .eq("week_start", week_start)\
-                .maybe_single().execute()
-        except Exception:
-            week = type("R", (), {"data": None})()
+                .execute()
+            if r and r.data and len(r.data) > 0:
+                week_data = r.data[0]
+        except Exception as ex:
+            print(f"[PORTAL_ME] timesheet_weeks query failed: {ex}", flush=True)
         # Pending PTO
+        pto_data = []
         try:
-            pto = sb.table("pto_requests").select("*")\
+            r = sb.table("pto_requests").select("*")\
                 .eq("employee_id", emp["id"])\
                 .eq("org_id", org_id)\
                 .eq("status", "pending")\
                 .execute()
-        except Exception:
-            pto = type("R", (), {"data": []})()
-        week_hours = sum(e.get("hours", 0) for e in (entries.data or []))
+            if r and r.data:
+                pto_data = r.data
+        except Exception as ex:
+            print(f"[PORTAL_ME] pto_requests query failed: {ex}", flush=True)
+        week_hours = sum(e.get("hours", 0) for e in entries_data)
         return jsonify({
             "employee": emp,
             "week_start": week_start,
-            "week_entries": entries.data or [],
+            "week_entries": entries_data,
             "week_total_hours": round(week_hours, 2),
-            "week_status": week.data if week.data else {"status": "draft"},
-            "pending_pto_count": len(pto.data or []),
+            "week_status": week_data if week_data else {"status": "draft"},
+            "pending_pto_count": len(pto_data),
         })
     except Exception as e:
         import traceback
