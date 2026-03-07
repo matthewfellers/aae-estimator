@@ -3849,14 +3849,13 @@ def generate_packing_slip_excel(slip_data, items):
     brand_font = Font(name="Calibri", bold=True, size=20, color=AAE_RED)
     sub_font = Font(name="Calibri", size=9, color=MID_GRAY)
     title_font = Font(name="Calibri", bold=True, size=16, color=WHITE)
-    slip_num_font = Font(name="Calibri", bold=True, size=11, color=AAE_RED)
-    label_font = Font(name="Calibri", bold=True, size=9, color=MID_GRAY)
-    value_font = Font(name="Calibri", size=10, color=DARK_TEXT)
-    value_bold = Font(name="Calibri", bold=True, size=10, color=DARK_TEXT)
-    col_hdr_font = Font(name="Calibri", bold=True, size=9, color=WHITE)
-    item_font = Font(name="Calibri", size=10, color=DARK_TEXT)
-    item_sub_font = Font(name="Calibri", italic=True, size=9, color=MID_GRAY)
-    section_font = Font(name="Calibri", bold=True, size=10, color=AAE_RED)
+    label_font = Font(name="Calibri", bold=True, size=10, color=MID_GRAY)
+    value_font = Font(name="Calibri", size=11, color=DARK_TEXT)
+    value_bold = Font(name="Calibri", bold=True, size=11, color=DARK_TEXT)
+    col_hdr_font = Font(name="Calibri", bold=True, size=10, color=WHITE)
+    item_font = Font(name="Calibri", size=11, color=DARK_TEXT)
+    item_sub_font = Font(name="Calibri", italic=True, size=10, color=MID_GRAY)
+    section_font = Font(name="Calibri", bold=True, size=11, color=AAE_RED)
     footer_font = Font(name="Calibri", size=8, color=MID_GRAY)
 
     red_fill = PatternFill(start_color=AAE_RED, end_color=AAE_RED, fill_type="solid")
@@ -3910,14 +3909,14 @@ def generate_packing_slip_excel(slip_data, items):
     ws["E1"].alignment = right_align
 
     ws.merge_cells("E2:G2")
-    ws["E2"].value = "405-210-1567  |  contact@aaeautomation.com  |  aaeok.com"
+    ws["E2"].value = "405-210-1567  |  mfellers@aaeok.com  |  aaeok.com"
     ws["E2"].font = sub_font
     ws["E2"].alignment = right_align
 
-    ws.merge_cells("C3:G3")
+    ws.merge_cells("C3:D3")
     ws["C3"].value = "UL-508A Certified Industrial Control Panel Shop"
     ws["C3"].font = Font(name="Calibri", italic=True, size=8, color=MID_GRAY)
-    ws["C3"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["C3"].alignment = Alignment(horizontal="left", vertical="center")
 
     # Red accent line (row 4 bottom border)
     for c_idx in range(1, 9):
@@ -4147,7 +4146,7 @@ def generate_packing_slip_excel(slip_data, items):
     # ══════════════════════════════════════════════════════════════════════════
     current_row += 2
     ws.merge_cells(f"A{current_row}:G{current_row}")
-    ws[f"A{current_row}"].value = "AAE Automation, Inc.  |  8528 SW 2nd St, OKC, OK 73128  |  405-210-1567  |  aaeok.com"
+    ws[f"A{current_row}"].value = "AAE Automation, Inc.  |  8528 SW 2nd St, OKC, OK 73128  |  405-210-1567  |  mfellers@aaeok.com"
     ws[f"A{current_row}"].font = footer_font
     ws[f"A{current_row}"].alignment = center_align
 
