@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAE Automation — Scheduling</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F8F9FA;--card-bg:#FFFFFF;--primary:#9B1B1B;--primary-dark:#7A1010;--text:#333333;--text-muted:#666666;--border:#E0E0E0;--shadow:0 2px 12px rgba(0,0,0,0.08);--shadow-hover:0 6px 24px rgba(0,0,0,0.12);--radius:12px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+.header{background:#FFF;border-bottom:3px solid var(--primary);padding:0 2rem;display:flex;align-items:center;justify-content:space-between;height:68px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.header-left{display:flex;align-items:center;gap:12px}
+.header-logo{height:40px;border-radius:4px}
+.header-brand{font-family:'Bebas Neue',sans-serif;font-size:1.8rem;letter-spacing:2px;color:var(--text)}
+.header-brand span{color:var(--primary)}
+.header-cert{font-size:.7rem;color:var(--text-muted);font-weight:300;letter-spacing:1px}
+.header-right{display:flex;align-items:center;gap:16px}
+.user-pill{background:#F5F0F0;color:var(--text);padding:6px 14px;border-radius:20px;font-size:.82rem;font-weight:500}
+.logout-btn,.home-btn{background:none;border:1.5px solid var(--primary);color:var(--primary);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;padding:6px 16px;border-radius:6px;cursor:pointer;transition:all .2s;text-decoration:none}
+.logout-btn:hover,.home-btn:hover{background:var(--primary);color:#fff}
+.home-btn{border-color:var(--border);color:var(--text-muted)}
+.home-btn:hover{border-color:var(--primary);color:var(--primary);background:none}
+#login-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;justify-content:center;align-items:center}
+#login-overlay.visible{display:flex}
+.login-card{background:#fff;border-radius:12px;padding:40px 36px;width:380px;max-width:calc(100vw - 2rem);text-align:center;box-shadow:0 12px 48px rgba(0,0,0,0.18)}
+.login-card img{width:140px;margin-bottom:6px;border-radius:4px}
+.login-logo-name{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:3px;color:#333;margin-bottom:2px}
+.login-tagline{font-size:11px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-bottom:28px}
+.login-card h2{font-family:'Bebas Neue',sans-serif;font-size:20px;color:#2C2C2C;margin-bottom:20px}
+.login-field{text-align:left;margin-bottom:14px}
+.login-field label{display:block;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#666;margin-bottom:5px}
+.login-field input{width:100%;padding:9px 12px;border:1.5px solid #DDD;border-radius:4px;font-size:14px;color:#333;transition:border-color .2s}
+.login-field input:focus{outline:none;border-color:#9B1B1B}
+.login-submit{width:100%;padding:12px;background:#9B1B1B;color:#fff;border:none;border-radius:4px;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;cursor:pointer;margin-top:6px;transition:background .2s}
+.login-submit:hover{background:#7A1010}
+.login-err{color:#9B1B1B;font-size:12px;margin-top:8px;display:none}
+#mfa-section{display:none}
+.main{flex:1;width:100%;max-width:1400px;margin:0 auto;padding:1.5rem 2rem}
+.tab-bar{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:1.5rem}
+.tab-btn{padding:10px 24px;background:none;border:none;border-bottom:3px solid transparent;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:1.5px;color:var(--text-muted);cursor:pointer;transition:all .2s;margin-bottom:-2px}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--primary);border-bottom-color:var(--primary)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow);margin-bottom:1.5rem}
+.card-title{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:1.5px;color:var(--text);margin-bottom:1rem}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border:none;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-secondary{background:#F5F5F5;color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--primary);color:var(--primary)}
+.btn-sm{padding:5px 12px;font-size:.76rem}
+.btn-danger{background:#DC3545;color:#fff}
+.btn-danger:hover{background:#B02A37}
+.btn-success{background:#28A745;color:#fff}
+.btn-success:hover{background:#1E7E34}
+.btn-warning{background:#FFC107;color:#333}
+.btn-warning:hover{background:#E0A800}
+.data-table{width:100%;border-collapse:collapse;font-size:.85rem}
+.data-table th{text-align:left;padding:10px 12px;border-bottom:2px solid var(--border);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);cursor:pointer;user-select:none;white-space:nowrap}
+.data-table th:hover{color:var(--primary)}
+.data-table td{padding:9px 12px;border-bottom:1px solid #F0F0F0;vertical-align:middle}
+.data-table tr:hover{background:#FAFAFA}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase}
+.badge-queued{background:#E3F2FD;color:#1565C0}
+.badge-in-progress{background:#FFF3E0;color:#E65100}
+.badge-testing{background:#F3E5F5;color:#7B1FA2}
+.badge-complete{background:#E8F5E9;color:#2E7D32}
+.badge-on-hold{background:#F5F5F5;color:#999}
+.badge-submitted{background:#E3F2FD;color:#1565C0}
+.badge-approved{background:#E8F5E9;color:#2E7D32}
+.badge-rejected{background:#FFEBEE;color:#C62828}
+.badge-pending{background:#FFF3E0;color:#E65100}
+.badge-returned{background:#FFF8E1;color:#F57F17}
+.priority-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.priority-1{background:#DC3545}.priority-2{background:#FF8C00}.priority-3{background:#1976D2}.priority-4{background:#28A745}.priority-5{background:#999}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:5000;justify-content:center;align-items:flex-start;padding-top:60px;overflow-y:auto}
+.modal-overlay.visible{display:flex}
+.modal{background:#fff;border-radius:var(--radius);padding:32px;width:540px;max-width:calc(100vw - 2rem);box-shadow:0 12px 48px rgba(0,0,0,0.18);margin-bottom:60px}
+.modal-title{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:1.5px;margin-bottom:1.25rem}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:5px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:9px 12px;border:1.5px solid #DDD;border-radius:6px;font-size:.88rem;font-family:'DM Sans',sans-serif;color:var(--text);transition:border-color .2s}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--primary)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.gantt-controls{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px}
+.week-nav{display:flex;align-items:center;gap:12px}
+.week-nav button{background:none;border:1.5px solid var(--border);border-radius:6px;width:32px;height:32px;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.week-nav button:hover{border-color:var(--primary);color:var(--primary)}
+.week-label{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:1px;min-width:200px;text-align:center}
+.gantt-wrapper{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:#fff}
+.gantt-grid{display:grid;grid-template-columns:180px repeat(5,1fr);min-width:800px}
+.gantt-header-cell{padding:10px 12px;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);background:#FAFAFA;border-bottom:2px solid var(--border);text-align:center}
+.gantt-header-cell:first-child{text-align:left}
+.gantt-header-cell+.gantt-header-cell{border-left:1px solid #F0F0F0}
+.gantt-employee-cell{padding:8px 12px;border-bottom:1px solid #F0F0F0;display:flex;flex-direction:column;justify-content:center;min-height:56px}
+.gantt-employee-name{font-weight:600;font-size:.84rem;margin-bottom:4px}
+.capacity-bar{height:6px;background:#ECECEC;border-radius:3px;overflow:hidden}
+.capacity-fill{height:100%;border-radius:3px;transition:width .3s}
+.capacity-green{background:#28A745}.capacity-yellow{background:#FFC107}.capacity-red{background:#DC3545}
+.gantt-day-cell{padding:4px;border-bottom:1px solid #F0F0F0;border-left:1px solid #F0F0F0;position:relative;min-height:56px}
+.gantt-block{position:relative;border-radius:4px;padding:4px 8px;font-size:.72rem;font-weight:600;color:#fff;cursor:grab;user-select:none;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gantt-block:active{cursor:grabbing}
+.gantt-block .block-info{display:block;font-weight:400;font-size:.68rem;opacity:.9}
+.gantt-block .resize-handle{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:ew-resize;background:rgba(0,0,0,0.1);border-radius:0 4px 4px 0}
+.gantt-block-ghost{opacity:.5;pointer-events:none}
+.toast-container{position:fixed;top:80px;right:20px;z-index:8000;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:8px;font-size:.85rem;font-weight:500;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,0.15);animation:toastIn .3s ease;max-width:360px}
+.toast-success{background:#28A745}.toast-error{background:#DC3545}.toast-info{background:#1976D2}
+@keyframes toastIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+.loading-spinner{display:inline-block;width:20px;height:20px;border:2.5px solid #E0E0E0;border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-row{text-align:center;padding:2rem;color:var(--text-muted)}
+.approvals-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+.approval-item{padding:14px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px}
+.approval-item-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.approval-item-name{font-weight:600;font-size:.9rem}
+.approval-item-details{font-size:.82rem;color:var(--text-muted);margin-bottom:10px}
+.approval-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.approval-actions input{flex:1;padding:6px 10px;border:1.5px solid #DDD;border-radius:4px;font-size:.8rem;font-family:'DM Sans',sans-serif;min-width:120px}
+.report-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+.report-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow)}
+.report-card-title{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:1px;margin-bottom:1rem}
+.report-filters{display:flex;gap:10px;margin-bottom:1rem;flex-wrap:wrap;align-items:flex-end}
+.report-filters .form-group{margin-bottom:0}
+.report-filters label{font-size:.72rem}
+.report-filters input{padding:6px 10px;font-size:.82rem}
+.bar-chart-row{display:flex;align-items:center;margin-bottom:6px;font-size:.82rem}
+.bar-chart-label{width:120px;text-align:right;padding-right:10px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-chart-track{flex:1;height:20px;background:#F0F0F0;border-radius:4px;overflow:hidden}
+.bar-chart-fill{height:100%;background:var(--primary);border-radius:4px;display:flex;align-items:center;padding-left:6px;font-size:.72rem;color:#fff;font-weight:600;min-width:fit-content;transition:width .3s}
+.footer{background:#FFF;border-top:1px solid var(--border);padding:1.25rem 2rem;text-align:center;font-size:.78rem;color:var(--text-muted);line-height:1.6}
+.footer a{color:var(--primary);text-decoration:none}
+@media(max-width:900px){.approvals-grid,.report-grid{grid-template-columns:1fr}}
+@media(max-width:640px){.header{padding:0 1rem;height:56px}.header-cert{display:none}.header-brand{font-size:1.4rem}.main{padding:1rem}.login-card{padding:28px 20px}.tab-btn{padding:8px 14px;font-size:.95rem}.form-row{grid-template-columns:1fr}.modal{padding:24px 18px}}
+</style>
+</head>
+<body>
+
+<script>
+(function(){try{var h=window.location.hash;if(h&&(h.indexOf('type=invite')!==-1||h.indexOf('type=recovery')!==-1)){window.location.replace('/estimator'+h);return;}}catch(e){}})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<!-- LOGIN OVERLAY -->
+<div id="login-overlay" class="visible">
+  <div class="login-card">
+    <img src="/static/aae_logo.jpg" alt="AAE Automation" onerror="this.style.display='none'">
+    <div class="login-logo-name">AAE AUTOMATION</div>
+    <div class="login-tagline">Enterprise Resource Planning</div>
+    <div id="signin-form">
+      <h2>Sign In</h2>
+      <div class="login-field"><label>Email</label><input type="email" id="login_email" placeholder="you@aaeautomation.com" autocomplete="username"></div>
+      <div class="login-field"><label>Password</label><input type="password" id="login_pass" placeholder="password" autocomplete="current-password"></div>
+      <div id="mfa-section"><div class="login-field"><label>MFA Code</label><input type="text" id="login_mfa" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" inputmode="numeric"></div></div>
+      <button class="login-submit" onclick="doLogin()">SIGN IN</button>
+      <div class="login-err" id="login_err"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<!-- HEADER -->
+<header class="header" id="app-header" style="display:none">
+  <div class="header-left">
+    <img src="/static/aae_logo.jpg" alt="AAE" class="header-logo" onerror="this.style.display='none'">
+    <div>
+      <div class="header-brand">AAE <span>AUTO</span>MATION</div>
+      <div class="header-cert">UL-508A CERTIFIED PANEL SHOP</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <a href="/" class="home-btn">Dashboard</a>
+    <span class="user-pill" id="user_pill"></span>
+    <button class="logout-btn" onclick="doLogout()">Sign Out</button>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main class="main" id="app-main" style="display:none">
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="schedule">Schedule</button>
+    <button class="tab-btn" data-tab="jobs">Jobs</button>
+    <button class="tab-btn" data-tab="employees">Employees</button>
+    <button class="tab-btn" data-tab="approvals">Approvals</button>
+    <button class="tab-btn" data-tab="reports">Reports</button>
+  </div>
+
+  <!-- SCHEDULE TAB -->
+  <div class="tab-content active" id="tab-schedule">
+    <div class="card">
+      <div class="gantt-controls">
+        <div class="week-nav">
+          <button onclick="changeWeek(-1)" title="Previous week">&#9664;</button>
+          <div class="week-label" id="week-label"></div>
+          <button onclick="changeWeek(1)" title="Next week">&#9654;</button>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="changeWeek(0)">Today</button>
+          <button class="btn btn-primary btn-sm" onclick="openAutoSuggest()">Auto-Suggest</button>
+          <button class="btn btn-primary btn-sm" onclick="openAssignmentModal()">+ Assignment</button>
+        </div>
+      </div>
+      <div class="gantt-wrapper"><div class="gantt-grid" id="gantt-grid"><div class="loading-row" style="grid-column:1/-1"><div class="loading-spinner"></div></div></div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;"><div class="card-title" style="margin-bottom:0">ASSIGNMENTS THIS WEEK</div></div>
+      <div style="overflow-x:auto;">
+        <table class="data-table" id="assignments-table">
+          <thead><tr><th>Employee</th><th>Job #</th><th>Panel</th><th>Type</th><th>Start</th><th>End</th><th>Hrs/Day</th><th>Actions</th></tr></thead>
+          <tbody id="assignments-tbody"><tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- JOBS TAB -->
+  <div class="tab-content" id="tab-jobs">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div class="card-title" style="margin-bottom:0">JOBS</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="jobs-status-filter" onchange="loadJobs()" style="padding:6px 10px;border:1.5px solid #DDD;border-radius:6px;font-size:.82rem;font-family:'DM Sans',sans-serif;">
+            <option value="">All Statuses</option><option value="queued">Queued</option><option value="in-progress">In Progress</option><option value="testing">Testing</option><option value="complete">Complete</option><option value="on-hold">On Hold</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="openJobModal()">+ New Job</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="data-table"><thead><tr><th>Job #</th><th>Customer</th><th>Description</th><th>Est. Hours</th><th>Due Date</th><th>Priority</th><th>Status</th><th>Panels</th><th>Actions</th></tr></thead>
+          <tbody id="jobs-tbody"><tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" id="panels-card" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div class="card-title" style="margin-bottom:0" id="panels-card-title">PANELS</div>
+        <div style="display:flex;gap:8px;"><button class="btn btn-secondary btn-sm" onclick="closePanelsCard()">Close</button><button class="btn btn-primary btn-sm" onclick="openPanelModal()">+ Add Panel</button></div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="data-table"><thead><tr><th>Order</th><th>Panel Name</th><th>Type</th><th>Est. Hours</th><th>Actions</th></tr></thead>
+          <tbody id="panels-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- EMPLOYEES TAB -->
+  <div class="tab-content" id="tab-employees">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div class="card-title" style="margin-bottom:0">EMPLOYEE ROSTER</div>
+        <button class="btn btn-primary btn-sm" onclick="openEmployeeModal()">+ Add Employee</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="data-table"><thead><tr><th>Number</th><th>Name</th><th>Role</th><th>Email</th><th>Phone</th><th>Default Hrs</th><th>Active</th><th>Hire Date</th><th>Actions</th></tr></thead>
+          <tbody id="employees-tbody"><tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div class="card-title" style="margin-bottom:0">PANEL EXPERIENCE</div>
+        <button class="btn btn-primary btn-sm" onclick="openExperienceModal()">+ Add Record</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="data-table"><thead><tr><th>Employee</th><th>Panel Type</th><th>Build Count</th><th>Avg Hours</th><th>Actions</th></tr></thead>
+          <tbody id="experience-tbody"><tr><td colspan="5" class="loading-row"><div class="loading-spinner"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPROVALS TAB -->
+  <div class="tab-content" id="tab-approvals">
+    <div class="approvals-grid">
+      <div class="card"><div class="card-title">TIMESHEET APPROVALS</div><div id="timesheet-approvals-list"><div class="loading-row"><div class="loading-spinner"></div></div></div></div>
+      <div class="card"><div class="card-title">PTO APPROVALS</div><div id="pto-approvals-list"><div class="loading-row"><div class="loading-spinner"></div></div></div></div>
+    </div>
+  </div>
+
+  <!-- REPORTS TAB -->
+  <div class="tab-content" id="tab-reports">
+    <div class="report-grid">
+      <div class="report-card">
+        <div class="report-card-title">HOURS BY JOB</div>
+        <div class="report-filters"><div class="form-group"><label>Start</label><input type="date" id="rpt-hbj-start"></div><div class="form-group"><label>End</label><input type="date" id="rpt-hbj-end"></div><button class="btn btn-secondary btn-sm" onclick="loadReportHoursByJob()">Run</button></div>
+        <div id="rpt-hbj-body"></div>
+      </div>
+      <div class="report-card">
+        <div class="report-card-title">HOURS BY EMPLOYEE</div>
+        <div class="report-filters"><div class="form-group"><label>Start</label><input type="date" id="rpt-hbe-start"></div><div class="form-group"><label>End</label><input type="date" id="rpt-hbe-end"></div><button class="btn btn-secondary btn-sm" onclick="loadReportHoursByEmployee()">Run</button></div>
+        <div id="rpt-hbe-body"></div>
+      </div>
+      <div class="report-card">
+        <div class="report-card-title">WEEKLY TOTALS</div>
+        <div class="report-filters"><div class="form-group"><label>Start</label><input type="date" id="rpt-wt-start"></div><div class="form-group"><label>End</label><input type="date" id="rpt-wt-end"></div><button class="btn btn-secondary btn-sm" onclick="loadReportWeeklyTotals()">Run</button></div>
+        <div id="rpt-wt-body"></div>
+      </div>
+      <div class="report-card">
+        <div class="report-card-title">ESTIMATED VS ACTUAL</div>
+        <div class="report-filters"><button class="btn btn-secondary btn-sm" onclick="loadReportEstVsActual()">Run</button></div>
+        <div id="rpt-eva-body"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="footer" id="app-footer" style="display:none">
+  AAE Automation Inc. &middot; 8528 SW 2nd St, OKC, OK 73128 &middot;
+  <a href="tel:4052101567">405-210-1567</a> &middot;
+  <a href="https://aaeok.com" target="_blank">aaeok.com</a><br>
+  UL-508A Certified Industrial Control Panel Shop
+</footer>
+
+<!-- ══════════════ MODALS ══════════════ -->
+
+<!-- Job Modal -->
+<div class="modal-overlay" id="modal-job"><div class="modal">
+  <div class="modal-title" id="modal-job-title">NEW JOB</div>
+  <input type="hidden" id="job-edit-id">
+  <div class="form-row"><div class="form-group"><label>Job Number</label><input type="text" id="job-number" placeholder="e.g. 2026-042"></div><div class="form-group"><label>Customer</label><input type="text" id="job-customer" placeholder="Customer name"></div></div>
+  <div class="form-group"><label>Description</label><textarea id="job-description" rows="2" placeholder="Job description" style="width:100%;padding:9px 12px;border:1.5px solid #DDD;border-radius:6px;font-size:.88rem;font-family:'DM Sans',sans-serif;color:var(--text);"></textarea></div>
+  <div class="form-row"><div class="form-group"><label>Est. Hours</label><input type="number" id="job-est-hours" step="0.5" min="0"></div><div class="form-group"><label>Due Date</label><input type="date" id="job-due-date"></div></div>
+  <div class="form-row">
+    <div class="form-group"><label>Priority</label><select id="job-priority"><option value="1">1 - Critical</option><option value="2">2 - High</option><option value="3" selected>3 - Normal</option><option value="4">4 - Low</option><option value="5">5 - Minimal</option></select></div>
+    <div class="form-group"><label>Status</label><select id="job-status"><option value="queued">Queued</option><option value="in-progress">In Progress</option><option value="testing">Testing</option><option value="complete">Complete</option><option value="on-hold">On Hold</option></select></div>
+  </div>
+  <div class="form-group"><label>Color (for Gantt)</label><input type="color" id="job-color" value="#1976D2" style="width:60px;height:36px;padding:2px;cursor:pointer;"></div>
+  <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-job')">Cancel</button><button class="btn btn-primary" onclick="saveJob()">Save Job</button></div>
+</div></div>
+
+<!-- Panel Modal -->
+<div class="modal-overlay" id="modal-panel"><div class="modal">
+  <div class="modal-title" id="modal-panel-title">ADD PANEL</div>
+  <input type="hidden" id="panel-edit-id"><input type="hidden" id="panel-job-id">
+  <div class="form-group"><label>Panel Name</label><input type="text" id="panel-name" placeholder="e.g. MCC-1A"></div>
+  <div class="form-row"><div class="form-group"><label>Panel Type</label><select id="panel-type"><option value="PLC">PLC</option><option value="MCC">MCC</option><option value="VFD">VFD</option><option value="Relay">Relay</option><option value="Junction Box">Junction Box</option><option value="Control">Control</option><option value="Custom">Custom</option></select></div><div class="form-group"><label>Est. Hours</label><input type="number" id="panel-est-hours" step="0.5" min="0"></div></div>
+  <div class="form-group"><label>Sort Order</label><input type="number" id="panel-sort-order" min="0" value="0"></div>
+  <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-panel')">Cancel</button><button class="btn btn-primary" onclick="savePanel()">Save Panel</button></div>
+</div></div>
+
+<!-- Employee Modal -->
+<div class="modal-overlay" id="modal-employee"><div class="modal">
+  <div class="modal-title" id="modal-employee-title">ADD EMPLOYEE</div>
+  <input type="hidden" id="emp-edit-id">
+  <div class="form-row"><div class="form-group"><label>Employee Number</label><input type="text" id="emp-number" placeholder="e.g. E-101"></div><div class="form-group"><label>Role</label><select id="emp-role"><option value="shop_employee">Shop Employee</option><option value="shop_lead">Shop Lead</option><option value="supervisor">Supervisor</option></select></div></div>
+  <div class="form-row"><div class="form-group"><label>First Name</label><input type="text" id="emp-first-name"></div><div class="form-group"><label>Last Name</label><input type="text" id="emp-last-name"></div></div>
+  <div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="emp-email"></div><div class="form-group"><label>Phone</label><input type="tel" id="emp-phone"></div></div>
+  <div class="form-row"><div class="form-group"><label>Hire Date</label><input type="date" id="emp-hire-date"></div><div class="form-group"><label>Default Hours/Week</label><input type="number" id="emp-default-hours" step="0.5" min="0" value="40"></div></div>
+  <div class="form-row"><div class="form-group"><label>Vacation Balance (hrs)</label><input type="number" id="emp-vacation" step="0.5" min="0" value="0"></div><div class="form-group"><label>Sick Balance (hrs)</label><input type="number" id="emp-sick" step="0.5" min="0" value="0"></div></div>
+  <div class="form-group"><label>Holiday Balance (hrs)</label><input type="number" id="emp-holiday" step="0.5" min="0" value="0" style="max-width:200px;"></div>
+  <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-employee')">Cancel</button><button class="btn btn-primary" onclick="saveEmployee()">Save Employee</button></div>
+</div></div>
+
+<!-- Assignment Modal -->
+<div class="modal-overlay" id="modal-assignment"><div class="modal">
+  <div class="modal-title" id="modal-assignment-title">NEW ASSIGNMENT</div>
+  <input type="hidden" id="asgn-edit-id">
+  <div class="form-group"><label>Employee</label><select id="asgn-employee"></select></div>
+  <div class="form-group"><label>Panel</label><select id="asgn-panel"></select></div>
+  <div class="form-row"><div class="form-group"><label>Start Date</label><input type="date" id="asgn-start"></div><div class="form-group"><label>End Date</label><input type="date" id="asgn-end"></div></div>
+  <div class="form-group"><label>Hours Per Day</label><input type="number" id="asgn-hours" step="0.5" min="0.5" value="8" style="max-width:150px;"></div>
+  <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-assignment')">Cancel</button><button class="btn btn-primary" onclick="saveAssignment()">Save Assignment</button></div>
+</div></div>
+
+<!-- Auto-Suggest Modal -->
+<div class="modal-overlay" id="modal-suggest"><div class="modal">
+  <div class="modal-title">AUTO-SUGGEST ASSIGNMENT</div>
+  <div class="form-group"><label>Panel Type</label><select id="suggest-panel-type"><option value="PLC">PLC</option><option value="MCC">MCC</option><option value="VFD">VFD</option><option value="Relay">Relay</option><option value="Junction Box">Junction Box</option><option value="Control">Control</option><option value="Custom">Custom</option></select></div>
+  <div class="form-row"><div class="form-group"><label>Start Date</label><input type="date" id="suggest-start"></div><div class="form-group"><label>End Date</label><input type="date" id="suggest-end"></div></div>
+  <button class="btn btn-primary" onclick="runAutoSuggest()" style="margin-bottom:1rem;">Find Best Employees</button>
+  <div id="suggest-results"></div>
+  <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-suggest')">Close</button></div>
+</div></div>
+
+<!-- Experience Modal -->
+<div class="modal-overlay" id="modal-experience"><div class="modal">
+  <div class="modal-title">ADD EXPERIENCE RECORD</div>
+  <input type="hidden" id="exp-edit-id">
+  <div class="form-group"><label>Employee</label><select id="exp-employee"></select></div>
+  <div class="form-group"><label>Panel Type</label><select id="exp-panel-type"><option value="PLC">PLC</option><option value="MCC">MCC</option><option value="VFD">VFD</option><option value="Relay">Relay</option><option value="Junction Box">Junction Box</option><option value="Control">Control</option><option value="Custom">Custom</option></select></div>
+  <div class="form-row"><div class="form-group"><label>Build Count</label><input type="number" id="exp-build-count" min="0" value="0"></div><div class="form-group"><label>Avg Hours</label><input type="number" id="exp-avg-hours" step="0.5" min="0" value="0"></div></div>
+  <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-experience')">Cancel</button><button class="btn btn-primary" onclick="saveExperience()">Save</button></div>
+</div></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH (same pattern as homepage.html)
+// ═══════════════════════════════════════════════════════════════════════════
+const SUPABASE_URL  = "{{ supabase_url }}";
+const SUPABASE_ANON = "{{ supabase_anon_key }}";
+const ALLOWED_ROLES = ["admin","supervisor","shop_lead"];
+
+let _sbClient = null, _accessToken = null, _pendingMfaFactorId = null, _userProfile = null;
+
+const SESSION_MAX_AGE_MS = 24*60*60*1000;
+function stampSessionLogin(){ localStorage.setItem("aae_session_start", Date.now().toString()); }
+function isSessionExpiredByAge(){ const s=parseInt(localStorage.getItem("aae_session_start")||"0",10); if(!s) return true; return (Date.now()-s)>SESSION_MAX_AGE_MS; }
+function clearSessionStamp(){ localStorage.removeItem("aae_session_start"); }
+
+if(SUPABASE_URL && SUPABASE_URL!=="None" && typeof window.supabase!=="undefined"){
+  _sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, { auth:{ persistSession:true, detectSessionInUrl:false } });
+  (async()=>{
+    try{
+      if(isSessionExpiredByAge()){ clearSessionStamp(); try{ await _sbClient.auth.signOut(); }catch(e){} _accessToken=null; document.getElementById("login-overlay").classList.add("visible"); return; }
+      const {data:{session}} = await _sbClient.auth.getSession();
+      if(session?.access_token){ _accessToken=session.access_token; const r=await fetch("/api/me",{headers:{"Authorization":"Bearer "+_accessToken}}); if(r.ok){ const p=await r.json(); if(!checkRole(p)) return; onLoginSuccess(p); return; } }
+    }catch(e){ console.warn("[auth] Session restore failed:",e.message); }
+    document.getElementById("login-overlay").classList.add("visible");
+  })();
+  _sbClient.auth.onAuthStateChange((ev,session)=>{ if(session?.access_token) _accessToken=session.access_token; });
+}
+
+function checkRole(profile){
+  const role = (profile.role||"").toLowerCase();
+  if(!ALLOWED_ROLES.includes(role)){
+    document.getElementById("login-overlay").classList.remove("visible");
+    document.getElementById("app-header").style.display="none";
+    document.getElementById("app-main").style.display="none";
+    document.getElementById("app-footer").style.display="none";
+    document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:DM Sans,sans-serif;"><div style="text-align:center;"><h2 style="color:#9B1B1B;font-family:Bebas Neue,sans-serif;letter-spacing:2px;">ACCESS DENIED</h2><p style="color:#666;margin-top:8px;">Your role (<strong>'+role+'</strong>) does not have access to the Scheduling module.</p><p style="margin-top:16px;"><a href="/" style="color:#9B1B1B;">Return to Dashboard</a></p></div></div>';
+    return false;
+  }
+  return true;
+}
+
+function showLoginErr(msg){ const el=document.getElementById("login_err"); el.textContent=msg; el.style.display="block"; }
+
+async function doLogin(){
+  const email=document.getElementById("login_email").value.trim(), pass=document.getElementById("login_pass").value, mfaCode=document.getElementById("login_mfa").value.trim();
+  const btn=document.querySelector("#signin-form .login-submit");
+  document.getElementById("login_err").style.display="none";
+  if(!_sbClient){ showLoginErr("Auth service not available."); return; }
+  btn.disabled=true; btn.textContent="SIGNING IN...";
+  try{
+    if(_pendingMfaFactorId){
+      if(!mfaCode){ showLoginErr("Enter your 6-digit MFA code."); return; }
+      const {error:ce}=await _sbClient.auth.mfa.challengeAndVerify({factorId:_pendingMfaFactorId,code:mfaCode});
+      if(ce) throw ce;
+      _pendingMfaFactorId=null;
+      const {data:sd}=await _sbClient.auth.getSession(); _accessToken=sd?.session?.access_token;
+    } else {
+      const {data,error}=await _sbClient.auth.signInWithPassword({email,password:pass});
+      if(error) throw error;
+      const {data:fd}=await _sbClient.auth.mfa.listFactors();
+      const vf=(fd?.totp||[]).filter(f=>f.status==='verified');
+      if(vf.length>0){ _pendingMfaFactorId=vf[0].id; document.getElementById("mfa-section").style.display="block"; btn.textContent="VERIFY MFA"; btn.disabled=false; document.getElementById("login_mfa").focus(); return; }
+      _accessToken=data.session?.access_token;
+    }
+    const r=await fetch("/api/me",{headers:{"Authorization":"Bearer "+_accessToken}});
+    if(!r.ok) throw new Error("Failed to load profile");
+    const profile=await r.json();
+    if(!checkRole(profile)) return;
+    stampSessionLogin();
+    onLoginSuccess(profile);
+  }catch(err){ _pendingMfaFactorId=null; document.getElementById("mfa-section").style.display="none"; showLoginErr(err.message||"Sign-in failed."); }
+  finally{ btn.disabled=false; if(!_pendingMfaFactorId) btn.textContent="SIGN IN"; }
+}
+
+function onLoginSuccess(profile){
+  _userProfile=profile;
+  document.getElementById("login-overlay").classList.remove("visible");
+  document.getElementById("app-header").style.display="flex";
+  document.getElementById("app-main").style.display="block";
+  document.getElementById("app-footer").style.display="block";
+  document.getElementById("user_pill").textContent=profile.display_name||profile.email||"User";
+  initApp();
+}
+
+async function doLogout(){
+  if(_sbClient){ try{ await _sbClient.auth.signOut(); }catch(e){} }
+  _accessToken=null; clearSessionStamp();
+  document.getElementById("app-header").style.display="none";
+  document.getElementById("app-main").style.display="none";
+  document.getElementById("app-footer").style.display="none";
+  document.getElementById("login-overlay").classList.add("visible");
+  document.getElementById("login_pass").value="";
+  document.getElementById("login_mfa").value="";
+  document.getElementById("login_err").style.display="none";
+  document.getElementById("mfa-section").style.display="none";
+  _pendingMfaFactorId=null;
+}
+
+["login_email","login_pass","login_mfa"].forEach(id=>{
+  document.getElementById(id)?.addEventListener("keydown",e=>{ if(e.key==="Enter") doLogin(); });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════
+function authHeaders(){ return {"Authorization":"Bearer "+_accessToken,"Content-Type":"application/json"}; }
+
+async function api(method, url, body){
+  const opts = { method, headers: authHeaders() };
+  if(body) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  if(!r.ok){
+    let msg = "Request failed ("+r.status+")";
+    try{ const j=await r.json(); msg=j.error||j.message||msg; }catch(e){}
+    throw new Error(msg);
+  }
+  if(r.status===204) return null;
+  return r.json();
+}
+
+function toast(msg, type){
+  const c=document.getElementById("toast-container");
+  const t=document.createElement("div");
+  t.className="toast toast-"+(type||"info");
+  t.textContent=msg;
+  c.appendChild(t);
+  setTimeout(()=>{ t.style.opacity="0"; t.style.transition="opacity .3s"; setTimeout(()=>t.remove(),300); },3500);
+}
+
+function openModal(id){ document.getElementById(id).classList.add("visible"); }
+function closeModal(id){ document.getElementById(id).classList.remove("visible"); }
+
+function fmtDate(d){ if(!d) return ""; const dt=new Date(d+"T00:00:00"); return dt.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); }
+function isoDate(d){ return d ? new Date(d+"T00:00:00").toISOString().split("T")[0] : ""; }
+
+function statusBadge(s){ const c={"queued":"queued","in-progress":"in-progress","testing":"testing","complete":"complete","on-hold":"on-hold","submitted":"submitted","approved":"approved","rejected":"rejected","pending":"pending","returned":"returned"}; return '<span class="badge badge-'+(c[s]||"queued")+'">'+(s||"unknown")+'</span>'; }
+function priorityDot(p){ return '<span class="priority-dot priority-'+(p||3)+'"></span>'+["","Critical","High","Normal","Low","Minimal"][p||3]; }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════════════════════
+document.querySelectorAll(".tab-btn").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(c=>c.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-"+btn.dataset.tab).classList.add("active");
+    const tab=btn.dataset.tab;
+    if(tab==="schedule") loadSchedule();
+    else if(tab==="jobs") loadJobs();
+    else if(tab==="employees"){ loadEmployees(); loadExperience(); }
+    else if(tab==="approvals"){ loadTimesheetApprovals(); loadPtoApprovals(); }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+let _weekStart = getMonday(new Date());
+let _employees = [];
+let _jobs = [];
+let _assignments = [];
+let _capacity = {};
+let _panels = [];
+let _currentJobId = null;
+let _allPanelsFlat = [];
+
+function getMonday(d){ const dt=new Date(d); const day=dt.getDay(); const diff=dt.getDate()-day+(day===0?-6:1); dt.setDate(diff); dt.setHours(0,0,0,0); return dt; }
+function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
+function dateStr(d){ return d.toISOString().split("T")[0]; }
+function dayNames(){ const days=[]; for(let i=0;i<5;i++){ const d=addDays(_weekStart,i); days.push({date:d,label:d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}); } return days; }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════
+let _inited=false;
+async function initApp(){
+  if(_inited) return;
+  _inited=true;
+  await loadEmployeesList();
+  await loadAllPanels();
+  loadSchedule();
+}
+
+async function loadEmployeesList(){
+  try{ _employees = await api("GET","/api/scheduling/employees?active_only=true"); }catch(e){ _employees=[]; }
+}
+async function loadAllPanels(){
+  try{
+    const jobs = await api("GET","/api/scheduling/jobs?status=");
+    _allPanelsFlat=[];
+    for(const j of (jobs||[])){
+      try{
+        const panels = await api("GET","/api/scheduling/jobs/"+j.id+"/panels");
+        (panels||[]).forEach(p=>{ p._job=j; _allPanelsFlat.push(p); });
+      }catch(e){}
+    }
+  }catch(e){ _allPanelsFlat=[]; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCHEDULE TAB
+// ═══════════════════════════════════════════════════════════════════════════
+function changeWeek(dir){
+  if(dir===0) _weekStart=getMonday(new Date());
+  else _weekStart=addDays(_weekStart,dir*7);
+  loadSchedule();
+}
+
+async function loadSchedule(){
+  const start=dateStr(_weekStart), end=dateStr(addDays(_weekStart,4));
+  document.getElementById("week-label").textContent="Week of "+_weekStart.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+  const grid=document.getElementById("gantt-grid");
+  grid.innerHTML='<div class="loading-row" style="grid-column:1/-1"><div class="loading-spinner"></div></div>';
+  const tbody=document.getElementById("assignments-tbody");
+  tbody.innerHTML='<tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div></td></tr>';
+  try{
+    const [emps, asgns, cap] = await Promise.all([
+      api("GET","/api/scheduling/employees?active_only=true"),
+      api("GET","/api/scheduling/assignments?start="+start+"&end="+end),
+      api("GET","/api/scheduling/capacity?start="+start+"&end="+end)
+    ]);
+    _employees=emps||[];
+    _assignments=asgns||[];
+    _capacity=cap||{};
+    renderGantt();
+    renderAssignmentsTable();
+  }catch(e){ toast("Failed to load schedule: "+e.message,"error"); grid.innerHTML='<div class="loading-row" style="grid-column:1/-1">Failed to load</div>'; tbody.innerHTML='<tr><td colspan="8" class="loading-row">Failed to load</td></tr>'; }
+}
+
+function renderGantt(){
+  const grid=document.getElementById("gantt-grid");
+  const days=dayNames();
+  let html='<div class="gantt-header-cell">Employee</div>';
+  days.forEach(d=>{ html+='<div class="gantt-header-cell">'+d.label+'</div>'; });
+  _employees.forEach(emp=>{
+    const empCap = (_capacity.employees||[]).find(c=>c.employee_id===emp.id)||{};
+    const util = empCap.utilization||0;
+    const capClass = util>100?'capacity-red':util>80?'capacity-yellow':'capacity-green';
+    const capPct = Math.min(util,100);
+    html+='<div class="gantt-employee-cell"><div class="gantt-employee-name">'+(emp.first_name||"")+' '+(emp.last_name||"")+'</div><div class="capacity-bar"><div class="capacity-fill '+capClass+'" style="width:'+capPct+'%"></div></div></div>';
+    const empAssignments = (_assignments||[]).filter(a=>a.employee_id===emp.id);
+    days.forEach(d=>{
+      const ds=dateStr(d.date);
+      const dayAssigns=empAssignments.filter(a=>a.start_date<=ds && a.end_date>=ds);
+      html+='<div class="gantt-day-cell" data-emp="'+emp.id+'" data-date="'+ds+'">';
+      dayAssigns.forEach(a=>{
+        const color=a.job_color||a.color||'#1976D2';
+        html+='<div class="gantt-block" style="background:'+color+'" data-asgn-id="'+a.id+'" data-emp-id="'+emp.id+'" data-start="'+a.start_date+'" data-end="'+a.end_date+'" onmousedown="ganttMouseDown(event,this)" onclick="editAssignment(\''+a.id+'\')">';
+        html+=(a.panel_name||'Panel');
+        html+='<span class="block-info">'+(a.job_number||'')+(a.hours_per_day?' '+a.hours_per_day+'h':'')+'</span>';
+        html+='<div class="resize-handle" onmousedown="resizeMouseDown(event,this.parentElement)"></div>';
+        html+='</div>';
+      });
+      html+='</div>';
+    });
+  });
+  if(_employees.length===0){ html+='<div class="loading-row" style="grid-column:1/-1">No employees found</div>'; }
+  grid.innerHTML=html;
+}
+
+function renderAssignmentsTable(){
+  const tbody=document.getElementById("assignments-tbody");
+  if(!_assignments||_assignments.length===0){ tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:1.5rem;color:#999;">No assignments this week</td></tr>'; return; }
+  let html='';
+  _assignments.forEach(a=>{
+    const emp=_employees.find(e=>e.id===a.employee_id);
+    const empName=emp?(emp.first_name+' '+emp.last_name):(a.employee_name||'Unknown');
+    html+='<tr>';
+    html+='<td>'+empName+'</td>';
+    html+='<td>'+(a.job_number||'')+'</td>';
+    html+='<td>'+(a.panel_name||'')+'</td>';
+    html+='<td>'+(a.panel_type||'')+'</td>';
+    html+='<td>'+fmtDate(a.start_date)+'</td>';
+    html+='<td>'+fmtDate(a.end_date)+'</td>';
+    html+='<td>'+(a.hours_per_day||8)+'</td>';
+    html+='<td><button class="btn btn-secondary btn-sm" onclick="editAssignment(\''+a.id+'\')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteAssignment(\''+a.id+'\')">Del</button></td>';
+    html+='</tr>';
+  });
+  tbody.innerHTML=html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GANTT DRAG & DROP
+// ═══════════════════════════════════════════════════════════════════════════
+let _dragState=null;
+
+function ganttMouseDown(e,el){
+  if(e.target.classList.contains('resize-handle')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const rect=el.getBoundingClientRect();
+  const grid=document.getElementById("gantt-grid");
+  const gridRect=grid.getBoundingClientRect();
+  const cells=Array.from(grid.querySelectorAll('.gantt-day-cell'));
+  _dragState={
+    el:el,
+    asgnId:el.dataset.asgnId,
+    origEmpId:el.dataset.empId,
+    origStart:el.dataset.start,
+    origEnd:el.dataset.end,
+    startX:e.clientX,
+    startY:e.clientY,
+    moved:false,
+    cells:cells,
+    gridRect:gridRect
+  };
+  el.style.opacity='0.7';
+  el.style.zIndex='100';
+  document.addEventListener('mousemove',ganttMouseMove);
+  document.addEventListener('mouseup',ganttMouseUp);
+}
+
+function ganttMouseMove(e){
+  if(!_dragState) return;
+  const dx=e.clientX-_dragState.startX;
+  const dy=e.clientY-_dragState.startY;
+  if(Math.abs(dx)>3||Math.abs(dy)>3) _dragState.moved=true;
+  if(!_dragState.moved) return;
+  _dragState.el.style.transform='translate('+dx+'px,'+dy+'px)';
+}
+
+async function ganttMouseUp(e){
+  document.removeEventListener('mousemove',ganttMouseMove);
+  document.removeEventListener('mouseup',ganttMouseUp);
+  if(!_dragState) return;
+  const ds=_dragState;
+  ds.el.style.opacity='';
+  ds.el.style.zIndex='';
+  ds.el.style.transform='';
+  if(!ds.moved){ _dragState=null; return; }
+  // Find which cell we dropped into
+  const dropX=e.clientX, dropY=e.clientY;
+  let targetCell=null;
+  for(const cell of ds.cells){
+    const r=cell.getBoundingClientRect();
+    if(dropX>=r.left && dropX<=r.right && dropY>=r.top && dropY<=r.bottom){ targetCell=cell; break; }
+  }
+  if(!targetCell){ _dragState=null; return; }
+  const newEmpId=targetCell.dataset.emp;
+  const newDate=targetCell.dataset.date;
+  if(!newEmpId||!newDate){ _dragState=null; return; }
+  // Calculate day offset
+  const origStartDate=new Date(ds.origStart+"T00:00:00");
+  const newStartDate=new Date(newDate+"T00:00:00");
+  const dayDiff=Math.round((newStartDate-origStartDate)/(86400000));
+  const origEndDate=new Date(ds.origEnd+"T00:00:00");
+  const adjEnd=addDays(origEndDate,dayDiff);
+  try{
+    await api("PUT","/api/scheduling/assignments/"+ds.asgnId,{
+      employee_id:newEmpId,
+      start_date:dateStr(newStartDate),
+      end_date:dateStr(adjEnd)
+    });
+    toast("Assignment moved","success");
+    loadSchedule();
+  }catch(err){ toast("Move failed: "+err.message,"error"); }
+  _dragState=null;
+}
+
+function resizeMouseDown(e,el){
+  e.preventDefault();
+  e.stopPropagation();
+  const startX=e.clientX;
+  const asgnId=el.dataset.asgnId;
+  const origEnd=el.dataset.end;
+  const grid=document.getElementById("gantt-grid");
+  const cells=Array.from(grid.querySelectorAll('.gantt-day-cell'));
+  // get column width
+  const firstCell=cells[0];
+  const colW=firstCell?firstCell.getBoundingClientRect().width:120;
+  function onMove(ev){
+    const dx=ev.clientX-startX;
+    const daysDelta=Math.round(dx/colW);
+    el.style.paddingRight=(8+Math.max(0,dx))+'px';
+    el._resizeDays=daysDelta;
+  }
+  async function onUp(ev){
+    document.removeEventListener('mousemove',onMove);
+    document.removeEventListener('mouseup',onUp);
+    el.style.paddingRight='';
+    const daysDelta=el._resizeDays||0;
+    if(daysDelta===0) return;
+    const newEnd=addDays(new Date(origEnd+"T00:00:00"),daysDelta);
+    try{
+      await api("PUT","/api/scheduling/assignments/"+asgnId,{ end_date:dateStr(newEnd) });
+      toast("Assignment resized","success");
+      loadSchedule();
+    }catch(err){ toast("Resize failed: "+err.message,"error"); }
+  }
+  document.addEventListener('mousemove',onMove);
+  document.addEventListener('mouseup',onUp);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSIGNMENTS CRUD
+// ═══════════════════════════════════════════════════════════════════════════
+function openAssignmentModal(data){
+  document.getElementById("asgn-edit-id").value=(data&&data.id)||"";
+  document.getElementById("modal-assignment-title").textContent=data?"EDIT ASSIGNMENT":"NEW ASSIGNMENT";
+  // Populate employee select
+  const empSel=document.getElementById("asgn-employee");
+  empSel.innerHTML=_employees.map(e=>'<option value="'+e.id+'">'+(e.first_name||"")+' '+(e.last_name||"")+'</option>').join("");
+  if(data&&data.employee_id) empSel.value=data.employee_id;
+  // Populate panel select
+  const panSel=document.getElementById("asgn-panel");
+  panSel.innerHTML=_allPanelsFlat.map(p=>'<option value="'+p.id+'">'+(p._job?p._job.job_number+' - ':'')+p.panel_name+'</option>').join("");
+  if(data&&data.panel_id) panSel.value=data.panel_id;
+  document.getElementById("asgn-start").value=(data&&data.start_date)||dateStr(_weekStart);
+  document.getElementById("asgn-end").value=(data&&data.end_date)||dateStr(addDays(_weekStart,4));
+  document.getElementById("asgn-hours").value=(data&&data.hours_per_day)||8;
+  openModal("modal-assignment");
+}
+
+async function editAssignment(id){
+  const a=(_assignments||[]).find(x=>x.id==id);
+  if(a) openAssignmentModal(a);
+}
+
+async function saveAssignment(){
+  const id=document.getElementById("asgn-edit-id").value;
+  const body={
+    employee_id:document.getElementById("asgn-employee").value,
+    panel_id:document.getElementById("asgn-panel").value,
+    start_date:document.getElementById("asgn-start").value,
+    end_date:document.getElementById("asgn-end").value,
+    hours_per_day:parseFloat(document.getElementById("asgn-hours").value)||8
+  };
+  try{
+    if(id) await api("PUT","/api/scheduling/assignments/"+id,body);
+    else await api("POST","/api/scheduling/assignments",body);
+    toast(id?"Assignment updated":"Assignment created","success");
+    closeModal("modal-assignment");
+    loadSchedule();
+  }catch(e){ toast("Save failed: "+e.message,"error"); }
+}
+
+async function deleteAssignment(id){
+  if(!confirm("Delete this assignment?")) return;
+  try{ await api("DELETE","/api/scheduling/assignments/"+id); toast("Assignment deleted","success"); loadSchedule(); }
+  catch(e){ toast("Delete failed: "+e.message,"error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-SUGGEST
+// ═══════════════════════════════════════════════════════════════════════════
+function openAutoSuggest(){
+  document.getElementById("suggest-start").value=dateStr(_weekStart);
+  document.getElementById("suggest-end").value=dateStr(addDays(_weekStart,4));
+  document.getElementById("suggest-results").innerHTML="";
+  openModal("modal-suggest");
+}
+
+async function runAutoSuggest(){
+  const body={
+    panel_type:document.getElementById("suggest-panel-type").value,
+    start_date:document.getElementById("suggest-start").value,
+    end_date:document.getElementById("suggest-end").value
+  };
+  const div=document.getElementById("suggest-results");
+  div.innerHTML='<div class="loading-row"><div class="loading-spinner"></div></div>';
+  try{
+    const results=await api("POST","/api/scheduling/suggest",body);
+    if(!results||results.length===0){ div.innerHTML='<p style="color:#999;text-align:center;">No suggestions available.</p>'; return; }
+    let html='<table class="data-table"><thead><tr><th>Rank</th><th>Employee</th><th>Experience</th><th>Capacity</th><th>Action</th></tr></thead><tbody>';
+    results.forEach((r,i)=>{
+      html+='<tr><td>'+(i+1)+'</td><td>'+(r.employee_name||r.first_name+' '+r.last_name)+'</td><td>'+(r.build_count||0)+' builds</td><td>'+(r.available_hours||'--')+' hrs avail</td>';
+      html+='<td><button class="btn btn-primary btn-sm" onclick="assignFromSuggest(\''+r.employee_id+'\')">Assign</button></td></tr>';
+    });
+    html+='</tbody></table>';
+    div.innerHTML=html;
+  }catch(e){ div.innerHTML='<p style="color:#DC3545;">'+e.message+'</p>'; }
+}
+
+function assignFromSuggest(empId){
+  closeModal("modal-suggest");
+  openAssignmentModal({employee_id:empId, start_date:document.getElementById("suggest-start").value, end_date:document.getElementById("suggest-end").value});
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// JOBS TAB
+// ═══════════════════════════════════════════════════════════════════════════
+async function loadJobs(){
+  const status=document.getElementById("jobs-status-filter").value;
+  const tbody=document.getElementById("jobs-tbody");
+  tbody.innerHTML='<tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div></td></tr>';
+  try{
+    _jobs=await api("GET","/api/scheduling/jobs?status="+status)||[];
+    if(_jobs.length===0){ tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:1.5rem;color:#999;">No jobs found</td></tr>'; return; }
+    let html='';
+    _jobs.forEach(j=>{
+      html+='<tr>';
+      html+='<td style="font-family:DM Mono,monospace;font-weight:600;">'+(j.job_number||'')+'</td>';
+      html+='<td>'+(j.customer||'')+'</td>';
+      html+='<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(j.description||'')+'</td>';
+      html+='<td>'+(j.estimated_hours||0)+'</td>';
+      html+='<td>'+fmtDate(j.due_date)+'</td>';
+      html+='<td>'+priorityDot(j.priority)+'</td>';
+      html+='<td>'+statusBadge(j.status)+'</td>';
+      html+='<td><button class="btn btn-secondary btn-sm" onclick="expandPanels(\''+j.id+'\',\''+((j.job_number||'').replace(/'/g,"\\'"))+'\')">'+(j.panel_count||0)+' panels</button></td>';
+      html+='<td><button class="btn btn-secondary btn-sm" onclick="openJobModal(\''+j.id+'\')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteJob(\''+j.id+'\')">Del</button></td>';
+      html+='</tr>';
+    });
+    tbody.innerHTML=html;
+  }catch(e){ toast("Failed to load jobs: "+e.message,"error"); tbody.innerHTML='<tr><td colspan="9" class="loading-row">Failed to load</td></tr>'; }
+}
+
+function openJobModal(editId){
+  const j=editId?_jobs.find(x=>x.id==editId):null;
+  document.getElementById("modal-job-title").textContent=j?"EDIT JOB":"NEW JOB";
+  document.getElementById("job-edit-id").value=editId||"";
+  document.getElementById("job-number").value=j?j.job_number:"";
+  document.getElementById("job-customer").value=j?j.customer:"";
+  document.getElementById("job-description").value=j?j.description:"";
+  document.getElementById("job-est-hours").value=j?j.estimated_hours:"";
+  document.getElementById("job-due-date").value=j?j.due_date:"";
+  document.getElementById("job-priority").value=j?j.priority:3;
+  document.getElementById("job-status").value=j?j.status:"queued";
+  document.getElementById("job-color").value=j&&j.color?j.color:"#1976D2";
+  openModal("modal-job");
+}
+
+async function saveJob(){
+  const id=document.getElementById("job-edit-id").value;
+  const body={
+    job_number:document.getElementById("job-number").value,
+    customer:document.getElementById("job-customer").value,
+    description:document.getElementById("job-description").value,
+    estimated_hours:parseFloat(document.getElementById("job-est-hours").value)||0,
+    due_date:document.getElementById("job-due-date").value,
+    priority:parseInt(document.getElementById("job-priority").value)||3,
+    status:document.getElementById("job-status").value,
+    color:document.getElementById("job-color").value
+  };
+  try{
+    if(id) await api("PUT","/api/scheduling/jobs/"+id,body);
+    else await api("POST","/api/scheduling/jobs",body);
+    toast(id?"Job updated":"Job created","success");
+    closeModal("modal-job");
+    loadJobs();
+    loadAllPanels();
+  }catch(e){ toast("Save failed: "+e.message,"error"); }
+}
+
+async function deleteJob(id){
+  if(!confirm("Delete this job?")) return;
+  try{ await api("DELETE","/api/scheduling/jobs/"+id); toast("Job deleted","success"); loadJobs(); loadAllPanels(); }
+  catch(e){ toast("Delete failed: "+e.message,"error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PANELS
+// ═══════════════════════════════════════════════════════════════════════════
+async function expandPanels(jobId, jobNumber){
+  _currentJobId=jobId;
+  document.getElementById("panels-card").style.display="block";
+  document.getElementById("panels-card-title").textContent="PANELS FOR "+jobNumber;
+  document.getElementById("panel-job-id").value=jobId;
+  const tbody=document.getElementById("panels-tbody");
+  tbody.innerHTML='<tr><td colspan="5" class="loading-row"><div class="loading-spinner"></div></td></tr>';
+  try{
+    _panels=await api("GET","/api/scheduling/jobs/"+jobId+"/panels")||[];
+    if(_panels.length===0){ tbody.innerHTML='<tr><td colspan="5" style="text-align:center;padding:1rem;color:#999;">No panels</td></tr>'; return; }
+    let html='';
+    _panels.forEach(p=>{
+      html+='<tr><td>'+(p.sort_order||0)+'</td><td>'+(p.panel_name||'')+'</td><td>'+(p.panel_type||'')+'</td><td>'+(p.estimated_hours||0)+'</td>';
+      html+='<td><button class="btn btn-secondary btn-sm" onclick="openPanelModal(\''+p.id+'\')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deletePanel(\''+p.id+'\')">Del</button></td></tr>';
+    });
+    tbody.innerHTML=html;
+  }catch(e){ toast("Failed to load panels: "+e.message,"error"); tbody.innerHTML='<tr><td colspan="5" class="loading-row">Failed</td></tr>'; }
+}
+
+function closePanelsCard(){ document.getElementById("panels-card").style.display="none"; _currentJobId=null; }
+
+function openPanelModal(editId){
+  const p=editId?_panels.find(x=>x.id==editId):null;
+  document.getElementById("modal-panel-title").textContent=p?"EDIT PANEL":"ADD PANEL";
+  document.getElementById("panel-edit-id").value=editId||"";
+  document.getElementById("panel-name").value=p?p.panel_name:"";
+  document.getElementById("panel-type").value=p?p.panel_type:"PLC";
+  document.getElementById("panel-est-hours").value=p?p.estimated_hours:"";
+  document.getElementById("panel-sort-order").value=p?p.sort_order:0;
+  openModal("modal-panel");
+}
+
+async function savePanel(){
+  const id=document.getElementById("panel-edit-id").value;
+  const jobId=document.getElementById("panel-job-id").value||_currentJobId;
+  const body={
+    panel_name:document.getElementById("panel-name").value,
+    panel_type:document.getElementById("panel-type").value,
+    estimated_hours:parseFloat(document.getElementById("panel-est-hours").value)||0,
+    sort_order:parseInt(document.getElementById("panel-sort-order").value)||0
+  };
+  try{
+    if(id) await api("PUT","/api/scheduling/panels/"+id,body);
+    else await api("POST","/api/scheduling/jobs/"+jobId+"/panels",body);
+    toast(id?"Panel updated":"Panel created","success");
+    closeModal("modal-panel");
+    expandPanels(jobId, document.getElementById("panels-card-title").textContent.replace("PANELS FOR ",""));
+    loadAllPanels();
+  }catch(e){ toast("Save failed: "+e.message,"error"); }
+}
+
+async function deletePanel(id){
+  if(!confirm("Delete this panel?")) return;
+  const jobId=_currentJobId;
+  try{ await api("DELETE","/api/scheduling/panels/"+id); toast("Panel deleted","success"); expandPanels(jobId,document.getElementById("panels-card-title").textContent.replace("PANELS FOR ","")); loadAllPanels(); }
+  catch(e){ toast("Delete failed: "+e.message,"error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMPLOYEES TAB
+// ═══════════════════════════════════════════════════════════════════════════
+async function loadEmployees(){
+  const tbody=document.getElementById("employees-tbody");
+  tbody.innerHTML='<tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div></td></tr>';
+  try{
+    const emps=await api("GET","/api/scheduling/employees?active_only=false")||[];
+    if(emps.length===0){ tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:1.5rem;color:#999;">No employees</td></tr>'; return; }
+    let html='';
+    emps.forEach(e=>{
+      html+='<tr>';
+      html+='<td style="font-family:DM Mono,monospace;">'+(e.employee_number||'')+'</td>';
+      html+='<td>'+(e.first_name||'')+' '+(e.last_name||'')+'</td>';
+      html+='<td>'+(e.role||'')+'</td>';
+      html+='<td>'+(e.email||'')+'</td>';
+      html+='<td>'+(e.phone||'')+'</td>';
+      html+='<td>'+(e.default_hours||8)+'</td>';
+      html+='<td>'+(e.active!==false?'<span class="badge badge-complete">Yes</span>':'<span class="badge badge-on-hold">No</span>')+'</td>';
+      html+='<td>'+fmtDate(e.hire_date)+'</td>';
+      html+='<td><button class="btn btn-secondary btn-sm" onclick="openEmployeeModal(\''+e.id+'\','+JSON.stringify(e).replace(/"/g,'&quot;')+')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteEmployee(\''+e.id+'\')">Del</button></td>';
+      html+='</tr>';
+    });
+    tbody.innerHTML=html;
+    // refresh cached list
+    _employees=emps.filter(e=>e.active!==false);
+  }catch(e){ toast("Failed to load employees: "+e.message,"error"); tbody.innerHTML='<tr><td colspan="9" class="loading-row">Failed</td></tr>'; }
+}
+
+function openEmployeeModal(editId, data){
+  const e=data||null;
+  document.getElementById("modal-employee-title").textContent=e?"EDIT EMPLOYEE":"ADD EMPLOYEE";
+  document.getElementById("emp-edit-id").value=editId||"";
+  document.getElementById("emp-number").value=e?e.employee_number:"";
+  document.getElementById("emp-role").value=e?e.role:"shop_employee";
+  document.getElementById("emp-first-name").value=e?e.first_name:"";
+  document.getElementById("emp-last-name").value=e?e.last_name:"";
+  document.getElementById("emp-email").value=e?e.email:"";
+  document.getElementById("emp-phone").value=e?e.phone:"";
+  document.getElementById("emp-hire-date").value=e?e.hire_date:"";
+  document.getElementById("emp-default-hours").value=e?e.default_hours:40;
+  document.getElementById("emp-vacation").value=e?e.vacation_balance_hrs:0;
+  document.getElementById("emp-sick").value=e?e.sick_balance_hrs:0;
+  document.getElementById("emp-holiday").value=e?e.holiday_balance_hrs:0;
+  openModal("modal-employee");
+}
+
+async function saveEmployee(){
+  const id=document.getElementById("emp-edit-id").value;
+  const body={
+    employee_number:document.getElementById("emp-number").value,
+    first_name:document.getElementById("emp-first-name").value,
+    last_name:document.getElementById("emp-last-name").value,
+    email:document.getElementById("emp-email").value,
+    phone:document.getElementById("emp-phone").value,
+    role:document.getElementById("emp-role").value,
+    hire_date:document.getElementById("emp-hire-date").value,
+    default_hours:parseFloat(document.getElementById("emp-default-hours").value)||40,
+    vacation_balance_hrs:parseFloat(document.getElementById("emp-vacation").value)||0,
+    sick_balance_hrs:parseFloat(document.getElementById("emp-sick").value)||0,
+    holiday_balance_hrs:parseFloat(document.getElementById("emp-holiday").value)||0
+  };
+  try{
+    if(id) await api("PUT","/api/scheduling/employees/"+id,body);
+    else await api("POST","/api/scheduling/employees",body);
+    toast(id?"Employee updated":"Employee created","success");
+    closeModal("modal-employee");
+    loadEmployees();
+    loadEmployeesList();
+  }catch(e){ toast("Save failed: "+e.message,"error"); }
+}
+
+async function deleteEmployee(id){
+  if(!confirm("Deactivate this employee?")) return;
+  try{ await api("DELETE","/api/scheduling/employees/"+id); toast("Employee deactivated","success"); loadEmployees(); loadEmployeesList(); }
+  catch(e){ toast("Delete failed: "+e.message,"error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PANEL EXPERIENCE
+// ═══════════════════════════════════════════════════════════════════════════
+async function loadExperience(){
+  const tbody=document.getElementById("experience-tbody");
+  tbody.innerHTML='<tr><td colspan="5" class="loading-row"><div class="loading-spinner"></div></td></tr>';
+  try{
+    const records=await api("GET","/api/scheduling/experience")||[];
+    if(records.length===0){ tbody.innerHTML='<tr><td colspan="5" style="text-align:center;padding:1rem;color:#999;">No experience records</td></tr>'; return; }
+    let html='';
+    records.forEach(r=>{
+      const emp=_employees.find(e=>e.id===r.employee_id);
+      html+='<tr><td>'+(emp?(emp.first_name+' '+emp.last_name):(r.employee_name||'Unknown'))+'</td><td>'+r.panel_type+'</td><td>'+r.build_count+'</td><td>'+r.avg_hours+'</td>';
+      html+='<td><button class="btn btn-secondary btn-sm" onclick="openExperienceModal(\''+r.id+'\','+JSON.stringify(r).replace(/"/g,'&quot;')+')">Edit</button></td></tr>';
+    });
+    tbody.innerHTML=html;
+  }catch(e){ toast("Failed to load experience: "+e.message,"error"); tbody.innerHTML='<tr><td colspan="5" class="loading-row">Failed</td></tr>'; }
+}
+
+function openExperienceModal(editId, data){
+  document.getElementById("exp-edit-id").value=editId||"";
+  const empSel=document.getElementById("exp-employee");
+  empSel.innerHTML=_employees.map(e=>'<option value="'+e.id+'">'+(e.first_name||"")+' '+(e.last_name||"")+'</option>').join("");
+  if(data){
+    empSel.value=data.employee_id;
+    document.getElementById("exp-panel-type").value=data.panel_type;
+    document.getElementById("exp-build-count").value=data.build_count;
+    document.getElementById("exp-avg-hours").value=data.avg_hours;
+  } else {
+    document.getElementById("exp-build-count").value=0;
+    document.getElementById("exp-avg-hours").value=0;
+  }
+  openModal("modal-experience");
+}
+
+async function saveExperience(){
+  const body={
+    employee_id:document.getElementById("exp-employee").value,
+    panel_type:document.getElementById("exp-panel-type").value,
+    build_count:parseInt(document.getElementById("exp-build-count").value)||0,
+    avg_hours:parseFloat(document.getElementById("exp-avg-hours").value)||0
+  };
+  try{
+    await api("POST","/api/scheduling/experience",body);
+    toast("Experience record saved","success");
+    closeModal("modal-experience");
+    loadExperience();
+  }catch(e){ toast("Save failed: "+e.message,"error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// APPROVALS TAB
+// ═══════════════════════════════════════════════════════════════════════════
+async function loadTimesheetApprovals(){
+  const div=document.getElementById("timesheet-approvals-list");
+  div.innerHTML='<div class="loading-row"><div class="loading-spinner"></div></div>';
+  try{
+    const items=await api("GET","/api/scheduling/approvals/timesheets?status=submitted")||[];
+    if(items.length===0){ div.innerHTML='<p style="text-align:center;color:#999;padding:1rem;">No pending timesheets.</p>'; return; }
+    let html='';
+    items.forEach(t=>{
+      html+='<div class="approval-item">';
+      html+='<div class="approval-item-header"><span class="approval-item-name">'+(t.employee_name||'Employee')+'</span>'+statusBadge(t.status)+'</div>';
+      html+='<div class="approval-item-details">Week: '+(t.week_start||'')+'  |  Total: '+(t.total_hours||0)+' hrs  |  OT: '+(t.overtime_hours||0)+' hrs</div>';
+      html+='<div class="approval-actions">';
+      html+='<input type="text" placeholder="Notes (optional)" id="ts-notes-'+t.id+'">';
+      html+='<button class="btn btn-success btn-sm" onclick="handleTimesheetAction(\''+t.id+'\',\'approve\')">Approve</button>';
+      html+='<button class="btn btn-warning btn-sm" onclick="handleTimesheetAction(\''+t.id+'\',\'return\')">Return</button>';
+      html+='<button class="btn btn-danger btn-sm" onclick="handleTimesheetAction(\''+t.id+'\',\'reject\')">Reject</button>';
+      html+='</div></div>';
+    });
+    div.innerHTML=html;
+  }catch(e){ div.innerHTML='<p style="color:#DC3545;">Failed to load: '+e.message+'</p>'; }
+}
+
+async function handleTimesheetAction(id, action){
+  const notes=document.getElementById("ts-notes-"+id)?.value||"";
+  try{
+    await api("PUT","/api/scheduling/approvals/timesheets/"+id,{action,notes});
+    toast("Timesheet "+action+"d","success");
+    loadTimesheetApprovals();
+  }catch(e){ toast("Action failed: "+e.message,"error"); }
+}
+
+async function loadPtoApprovals(){
+  const div=document.getElementById("pto-approvals-list");
+  div.innerHTML='<div class="loading-row"><div class="loading-spinner"></div></div>';
+  try{
+    const items=await api("GET","/api/scheduling/approvals/pto?status=pending")||[];
+    if(items.length===0){ div.innerHTML='<p style="text-align:center;color:#999;padding:1rem;">No pending PTO requests.</p>'; return; }
+    let html='';
+    items.forEach(p=>{
+      html+='<div class="approval-item">';
+      html+='<div class="approval-item-header"><span class="approval-item-name">'+(p.employee_name||'Employee')+'</span><span class="badge badge-pending">'+(p.pto_type||'PTO')+'</span></div>';
+      html+='<div class="approval-item-details">Dates: '+fmtDate(p.start_date)+' - '+fmtDate(p.end_date)+'  |  '+(p.hours||0)+' hrs'+(p.reason?'  |  Reason: '+p.reason:'')+'</div>';
+      html+='<div class="approval-actions">';
+      html+='<input type="text" placeholder="Notes (optional)" id="pto-notes-'+p.id+'">';
+      html+='<button class="btn btn-success btn-sm" onclick="handlePtoAction(\''+p.id+'\',\'approve\')">Approve</button>';
+      html+='<button class="btn btn-danger btn-sm" onclick="handlePtoAction(\''+p.id+'\',\'reject\')">Reject</button>';
+      html+='</div></div>';
+    });
+    div.innerHTML=html;
+  }catch(e){ div.innerHTML='<p style="color:#DC3545;">Failed to load: '+e.message+'</p>'; }
+}
+
+async function handlePtoAction(id, action){
+  const notes=document.getElementById("pto-notes-"+id)?.value||"";
+  try{
+    await api("PUT","/api/scheduling/approvals/pto/"+id,{action,notes});
+    toast("PTO request "+action+"d","success");
+    loadPtoApprovals();
+  }catch(e){ toast("Action failed: "+e.message,"error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REPORTS TAB
+// ═══════════════════════════════════════════════════════════════════════════
+function defaultReportDates(){
+  const end=new Date(); const start=new Date(); start.setDate(start.getDate()-30);
+  return {start:dateStr(start),end:dateStr(end)};
+}
+
+async function loadReportHoursByJob(){
+  const s=document.getElementById("rpt-hbj-start").value, e=document.getElementById("rpt-hbj-end").value;
+  const div=document.getElementById("rpt-hbj-body");
+  if(!s||!e){ const d=defaultReportDates(); document.getElementById("rpt-hbj-start").value=d.start; document.getElementById("rpt-hbj-end").value=d.end; return loadReportHoursByJob(); }
+  div.innerHTML='<div class="loading-row"><div class="loading-spinner"></div></div>';
+  try{
+    const data=await api("GET","/api/scheduling/reports/hours-by-job?start="+s+"&end="+e)||[];
+    if(data.length===0){ div.innerHTML='<p style="color:#999;text-align:center;">No data.</p>'; return; }
+    const maxH=Math.max(...data.map(d=>d.total_hours||0),1);
+    let html='';
+    data.forEach(d=>{
+      const pct=Math.round(((d.total_hours||0)/maxH)*100);
+      html+='<div class="bar-chart-row"><div class="bar-chart-label">'+(d.job_number||'?')+'</div><div class="bar-chart-track"><div class="bar-chart-fill" style="width:'+pct+'%">'+(d.total_hours||0)+' hrs</div></div></div>';
+    });
+    div.innerHTML=html;
+  }catch(err){ div.innerHTML='<p style="color:#DC3545;">'+err.message+'</p>'; }
+}
+
+async function loadReportHoursByEmployee(){
+  const s=document.getElementById("rpt-hbe-start").value, e=document.getElementById("rpt-hbe-end").value;
+  const div=document.getElementById("rpt-hbe-body");
+  if(!s||!e){ const d=defaultReportDates(); document.getElementById("rpt-hbe-start").value=d.start; document.getElementById("rpt-hbe-end").value=d.end; return loadReportHoursByEmployee(); }
+  div.innerHTML='<div class="loading-row"><div class="loading-spinner"></div></div>';
+  try{
+    const data=await api("GET","/api/scheduling/reports/hours-by-employee?start="+s+"&end="+e)||[];
+    if(data.length===0){ div.innerHTML='<p style="color:#999;text-align:center;">No data.</p>'; return; }
+    let html='<table class="data-table"><thead><tr><th>Employee</th><th>Total Hours</th></tr></thead><tbody>';
+    data.forEach(d=>{ html+='<tr><td>'+(d.employee_name||'?')+'</td><td>'+(d.total_hours||0)+'</td></tr>'; });
+    html+='</tbody></table>';
+    div.innerHTML=html;
+  }catch(err){ div.innerHTML='<p style="color:#DC3545;">'+err.message+'</p>'; }
+}
+
+async function loadReportWeeklyTotals(){
+  const s=document.getElementById("rpt-wt-start").value, e=document.getElementById("rpt-wt-end").value;
+  const div=document.getElementById("rpt-wt-body");
+  if(!s||!e){ const d=defaultReportDates(); document.getElementById("rpt-wt-start").value=d.start; document.getElementById("rpt-wt-end").value=d.end; return loadReportWeeklyTotals(); }
+  div.innerHTML='<div class="loading-row"><div class="loading-spinner"></div></div>';
+  try{
+    const data=await api("GET","/api/scheduling/reports/weekly-totals?start="+s+"&end="+e)||[];
+    if(data.length===0){ div.innerHTML='<p style="color:#999;text-align:center;">No data.</p>'; return; }
+    let html='<table class="data-table"><thead><tr><th>Week</th><th>Employee</th><th>Hours</th><th>Status</th></tr></thead><tbody>';
+    data.forEach(d=>{ html+='<tr><td>'+fmtDate(d.week_start)+'</td><td>'+(d.employee_name||'?')+'</td><td>'+(d.total_hours||0)+'</td><td>'+statusBadge(d.status)+'</td></tr>'; });
+    html+='</tbody></table>';
+    div.innerHTML=html;
+  }catch(err){ div.innerHTML='<p style="color:#DC3545;">'+err.message+'</p>'; }
+}
+
+async function loadReportEstVsActual(){
+  const div=document.getElementById("rpt-eva-body");
+  div.innerHTML='<div class="loading-row"><div class="loading-spinner"></div></div>';
+  try{
+    const data=await api("GET","/api/scheduling/reports/estimated-vs-actual")||[];
+    if(data.length===0){ div.innerHTML='<p style="color:#999;text-align:center;">No data.</p>'; return; }
+    let html='<table class="data-table"><thead><tr><th>Job #</th><th>Est.</th><th>Actual</th><th>Variance</th></tr></thead><tbody>';
+    data.sort((a,b)=>Math.abs(b.variance_pct||0)-Math.abs(a.variance_pct||0));
+    data.forEach(d=>{
+      const vPct=d.variance_pct||0;
+      const vColor=vPct>10?'#DC3545':vPct<-10?'#28A745':'#333';
+      html+='<tr><td>'+(d.job_number||'?')+'</td><td>'+(d.estimated_hours||0)+'</td><td>'+(d.actual_hours||0)+'</td><td style="color:'+vColor+';font-weight:600;">'+(vPct>=0?'+':'')+vPct.toFixed(1)+'%</td></tr>';
+    });
+    html+='</tbody></table>';
+    div.innerHTML=html;
+  }catch(err){ div.innerHTML='<p style="color:#DC3545;">'+err.message+'</p>'; }
+}
+</script>
+</body>
+</html>
