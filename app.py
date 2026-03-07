@@ -4349,8 +4349,15 @@ def delete_packing_slip(slip_id):
 @app.route("/api/packing-slips/debug-auth", methods=["GET"])
 @require_auth
 def debug_auth():
-    """Temporary: see what the app reads from your JWT."""
-    return jsonify(g.user)
+    """Temporary: see what the app reads from your JWT + what Supabase RLS sees."""
+    try:
+        sb = get_user_sb()
+        rls_check = sb.rpc("current_role", {}).execute()
+        org_check = sb.rpc("current_org_id", {}).execute()
+        rls_info = {"rls_role": rls_check.data, "rls_org_id": org_check.data}
+    except Exception as e:
+        rls_info = {"rls_error": str(e)}
+    return jsonify({**g.user, **rls_info})
 
 # ── API: Finalize packing slip ───────────────────────────────────────────────
 
