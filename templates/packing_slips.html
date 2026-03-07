@@ -523,7 +523,7 @@ a { color: var(--primary); text-decoration: none; }
     <div class="toolbar">
       <button class="btn btn-secondary btn-sm" onclick="addItemRow()">+ Add Item</button>
       <button class="btn btn-ghost btn-sm" onclick="everythingShipping()">Everything Shipping?</button>
-      <label><input type="checkbox" id="chk_show_proj" onchange="toggleProjectCols()"> Show Project/WBS</label>
+      <label><input type="checkbox" id="chk_show_proj" onchange="toggleProjectCols()"> Show Approver/Project/WBS</label>
     </div>
     <div style="overflow-x:auto">
       <table class="items-table" id="items-table">
@@ -534,8 +534,6 @@ a { color: var(--primary); text-decoration: none; }
             <th class="col-qty">Qty Shipped</th>
             <th class="col-part">Part Number</th>
             <th class="col-desc">Description</th>
-            <th class="col-proj proj-col" style="display:none">Project</th>
-            <th class="col-wbs proj-col" style="display:none">WBS</th>
             <th class="col-actions"></th>
           </tr>
         </thead>
@@ -1162,7 +1160,6 @@ function addItemRow(data) {
 
   const tbody = document.getElementById("items-body");
   const tr = document.createElement("tr");
-  const showProj = document.getElementById("chk_show_proj")?.checked;
 
   tr.innerHTML = `
     <td><input type="text" class="item-num" value="${String(num).padStart(5,'0')}" style="text-align:center"></td>
@@ -1170,8 +1167,6 @@ function addItemRow(data) {
     <td><input type="number" class="item-qty-ship" value="${data?.qty_shipped??''}" min="0" step="1"></td>
     <td><input type="text" class="item-part" value="${escHtml(data?.part_number||'')}"></td>
     <td><input type="text" class="item-desc" value="${escHtml(data?.description||'')}"></td>
-    <td class="proj-col" style="display:${showProj?'':'none'}"><input type="text" class="item-proj" value="${escHtml(data?.project_name||'')}"></td>
-    <td class="proj-col" style="display:${showProj?'':'none'}"><input type="text" class="item-wbs" value="${escHtml(data?.wbs||'')}"></td>
     <td><button class="remove-row-btn" onclick="this.closest('tr').remove()" title="Remove">&times;</button></td>
   `;
   tbody.appendChild(tr);
@@ -1181,7 +1176,6 @@ function escHtml(s) { const d=document.createElement("div"); d.textContent=s; re
 
 function toggleProjectCols() {
   const show = document.getElementById("chk_show_proj").checked;
-  document.querySelectorAll(".proj-col").forEach(el => el.style.display = show ? "" : "none");
   document.getElementById("proj-wbs-card").style.display = show ? "block" : "none";
 }
 
@@ -1205,8 +1199,6 @@ function getCustomFormData() {
       qty_shipped: parseFloat(tr.querySelector(".item-qty-ship")?.value) || null,
       part_number: tr.querySelector(".item-part")?.value || "",
       description: tr.querySelector(".item-desc")?.value || "",
-      project_name: tr.querySelector(".item-proj")?.value || "",
-      wbs: tr.querySelector(".item-wbs")?.value || "",
       sort_order: i + 1,
     });
   });
