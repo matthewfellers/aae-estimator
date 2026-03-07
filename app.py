@@ -3755,6 +3755,913 @@ def bom_convert_excel():
                      download_name=f"AAE_BOM_Converter_{safe_proj}.zip")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# PACKING SLIPS MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/packing-slips")
+def packing_slips_page():
+    return render_template(
+        "packing_slips.html",
+        supabase_url=os.environ.get("SUPABASE_URL", ""),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", ""),
+    )
+
+# ── Helper: save field values for smart dropdowns ────────────────────────────
+
+def _save_field_history(sb, fields_dict):
+    """Auto-save header field values to saved_field_history for future dropdown use."""
+    for field_name, field_value in fields_dict.items():
+        if not field_value or not field_value.strip():
+            continue
+        try:
+            # Try upsert: increment use_count if exists, insert if new
+            existing = sb.table("saved_field_history")\
+                .select("id,use_count")\
+                .eq("field_name", field_name)\
+                .eq("field_value", field_value.strip())\
+                .maybeSingle().execute()
+            if existing.data:
+                sb.table("saved_field_history").update({
+                    "use_count": existing.data["use_count"] + 1,
+                    "last_used_at": datetime.now().isoformat()
+                }).eq("id", existing.data["id"]).execute()
+            else:
+                sb.table("saved_field_history").insert({
+                    "field_name": field_name,
+                    "field_value": field_value.strip()
+                }).execute()
+        except Exception:
+            pass  # best-effort
+
+# ── Helper: generate next slip number ────────────────────────────────────────
+
+def _next_slip_number(sb):
+    today = datetime.now().strftime("%Y%m%d")
+    prefix = f"PS-{today}-"
+    try:
+        result = sb.table("packing_slips")\
+            .select("slip_number")\
+            .like("slip_number", f"{prefix}%")\
+            .order("slip_number", desc=True)\
+            .limit(1).execute()
+        if result.data:
+            last_num = int(result.data[0]["slip_number"].split("-")[-1])
+            return f"{prefix}{last_num + 1:04d}"
+    except Exception:
+        pass
+    return f"{prefix}0001"
+
+# ── Helper: generate packing slip Excel ──────────────────────────────────────
+
+def generate_packing_slip_excel(slip_data, items):
+    """Build a .xlsx matching AAE Blank Packing Slip.xls layout. Returns BytesIO."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Packing Slip"
+
+    # Column widths (A-G matching original)
+    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 24
+    ws.column_dimensions["E"].width = 8
+    ws.column_dimensions["F"].width = 40
+    ws.column_dimensions["G"].width = 16
+
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin")
+    )
+    header_font = Font(name="Arial", bold=True, size=11)
+    title_font = Font(name="Arial", bold=True, size=18)
+    company_font = Font(name="Arial", bold=True, size=14)
+    normal_font = Font(name="Arial", size=10)
+    small_font = Font(name="Arial", size=9)
+    label_font = Font(name="Arial", bold=True, size=10)
+
+    # ── Rows 1-5: Company header ──
+    ws.merge_cells("A1:E4")
+    cell_a1 = ws["A1"]
+    cell_a1.value = "AAE AUTOMATION"
+    cell_a1.font = company_font
+    cell_a1.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws["F1"] = "AAE Automation, Inc."
+    ws["F1"].font = Font(name="Arial", bold=True, size=10)
+    ws["F2"] = "Street: 8528 SW 2nd St., Oklahoma City, Oklahoma 73128"
+    ws["F2"].font = small_font
+    ws["F3"] = "Phone: 405-634-7900"
+    ws["F3"].font = small_font
+    ws["F4"] = "Email: tfellers@aaeok.com"
+    ws["F4"].font = small_font
+    ws["F5"] = "Website: www.aaeok.com"
+    ws["F5"].font = small_font
+
+    # ── Row 7: PACKING SLIP title ──
+    ws.merge_cells("A7:G7")
+    cell_title = ws["A7"]
+    cell_title.value = "PACKING SLIP"
+    cell_title.font = title_font
+    cell_title.alignment = Alignment(horizontal="center")
+
+    # ── Row 8: Slip number (right side) ──
+    ws["F8"] = f"Slip #: {slip_data.get('slip_number', '')}"
+    ws["F8"].font = label_font
+
+    # ── Rows 9-15: Sold To / Ship To / header fields ──
+    row_base = 9  # 0-indexed row 8 in Excel = row 9
+
+    ws[f"B{row_base+1}"] = "Sold To:"
+    ws[f"B{row_base+1}"].font = label_font
+    sold_to = slip_data.get("sold_to", "")
+    sold_to_lines = sold_to.split("\n") if sold_to else [""]
+    for i, line in enumerate(sold_to_lines):
+        ws[f"C{row_base+1+i}"] = line
+        ws[f"C{row_base+1+i}"].font = normal_font
+
+    ws[f"F{row_base+1}"] = "Sales Order#:"
+    ws[f"F{row_base+1}"].font = label_font
+    ws[f"G{row_base+1}"] = slip_data.get("sales_order", "")
+    ws[f"G{row_base+1}"].font = normal_font
+
+    ws[f"F{row_base+2}"] = "Order Date:"
+    ws[f"F{row_base+2}"].font = label_font
+    order_date = slip_data.get("order_date", "")
+    ws[f"G{row_base+2}"] = str(order_date) if order_date else ""
+    ws[f"G{row_base+2}"].font = normal_font
+
+    ws[f"F{row_base+3}"] = "Customer Order#:"
+    ws[f"F{row_base+3}"].font = label_font
+    ws[f"G{row_base+3}"] = slip_data.get("customer_order", "")
+    ws[f"G{row_base+3}"].font = normal_font
+
+    ws[f"F{row_base+4}"] = "Ship Date:"
+    ws[f"F{row_base+4}"].font = label_font
+    ship_date = slip_data.get("ship_date", "")
+    ws[f"G{row_base+4}"] = str(ship_date) if ship_date else ""
+    ws[f"G{row_base+4}"].font = normal_font
+
+    ws[f"G{row_base+5}"] = "F.O.B.:"
+    ws[f"G{row_base+5}"].font = label_font
+
+    fob_row = row_base + 5
+    ws.merge_cells(f"G{fob_row}:G{fob_row}")
+    ws[f"F{fob_row}"] = "F.O.B.:"
+    ws[f"F{fob_row}"].font = label_font
+    ws[f"G{fob_row}"] = slip_data.get("fob", "")
+    ws[f"G{fob_row}"].font = normal_font
+
+    terms_row = row_base + 6
+    ws[f"B{terms_row}"] = "Ship To:"
+    ws[f"B{terms_row}"].font = label_font
+    ship_to = slip_data.get("ship_to", "")
+    ship_to_lines = ship_to.split("\n") if ship_to else [""]
+    for i, line in enumerate(ship_to_lines):
+        ws[f"C{terms_row+i}"] = line
+        ws[f"C{terms_row+i}"].font = normal_font
+
+    ws[f"F{terms_row}"] = "Terms:"
+    ws[f"F{terms_row}"].font = label_font
+    ws[f"G{terms_row}"] = slip_data.get("terms", "")
+    ws[f"G{terms_row}"].font = normal_font
+
+    # ATTN row
+    attn = slip_data.get("attn", "")
+    if attn:
+        attn_row = terms_row + 2
+        ws[f"B{attn_row}"] = "ATTN:"
+        ws[f"B{attn_row}"].font = label_font
+        ws[f"C{attn_row}"] = attn
+        ws[f"C{attn_row}"].font = normal_font
+
+    # ── Column headers row ──
+    hdr_row = 20
+    headers = ["Item", "Qty Ordered", "Qty Shipped", "Part Number", "", "Description", ""]
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    for col_idx, hdr in enumerate(headers, 1):
+        cell = ws.cell(row=hdr_row, column=col_idx, value=hdr)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center")
+
+    # ── Line items ──
+    current_row = hdr_row + 2  # skip a blank row after headers
+    for item in sorted(items, key=lambda x: x.get("sort_order", 0) or x.get("item_number", 0)):
+        item_num = item.get("item_number", 0)
+        item_str = f"{item_num:05d}" if item_num else ""
+
+        ws.cell(row=current_row, column=1, value=item_str).font = normal_font
+        ws.cell(row=current_row, column=1).alignment = Alignment(horizontal="center")
+
+        qty_ord = item.get("qty_ordered")
+        ws.cell(row=current_row, column=2, value=qty_ord if qty_ord is not None else "").font = normal_font
+        ws.cell(row=current_row, column=2).alignment = Alignment(horizontal="center")
+
+        qty_ship = item.get("qty_shipped")
+        ws.cell(row=current_row, column=3, value=qty_ship if qty_ship is not None else "").font = normal_font
+        ws.cell(row=current_row, column=3).alignment = Alignment(horizontal="center")
+
+        ws.cell(row=current_row, column=4, value=item.get("part_number", "")).font = normal_font
+
+        desc = item.get("description", "")
+        ws.cell(row=current_row, column=6, value=desc).font = normal_font
+
+        current_row += 1
+
+        # Add JOB# / Project sub-lines if present
+        job_number = item.get("job_number", "")
+        if job_number:
+            ws.cell(row=current_row, column=6, value=f"JOB # = {job_number}").font = small_font
+            current_row += 1
+
+        item_project = item.get("project_name", "")
+        if item_project:
+            ws.cell(row=current_row, column=6, value=f"Project: {item_project}").font = small_font
+            current_row += 1
+
+        current_row += 1  # blank line between items
+
+    # ── Bottom: Project Name / WBS / Notes ──
+    current_row += 1
+    proj_name = slip_data.get("project_name", "")
+    if proj_name:
+        ws.cell(row=current_row, column=6, value=f"Project Name: {proj_name}").font = label_font
+        current_row += 1
+    wbs = slip_data.get("wbs", "")
+    if wbs:
+        ws.cell(row=current_row, column=6, value=f"WBS: {wbs}").font = label_font
+        current_row += 1
+    notes = slip_data.get("notes", "")
+    if notes:
+        current_row += 1
+        ws.cell(row=current_row, column=1, value="Notes:").font = label_font
+        current_row += 1
+        ws.cell(row=current_row, column=1, value=notes).font = normal_font
+
+    # ── Print setup ──
+    ws.print_area = f"A1:G{current_row + 2}"
+    ws.sheet_properties.pageSetUpPr = openpyxl.worksheet.properties.PageSetupProperties(fitToPage=True)
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_setup.orientation = "portrait"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+# ── API: List packing slips ──────────────────────────────────────────────────
+
+@app.route("/api/packing-slips", methods=["GET"])
+@require_auth
+def list_packing_slips():
+    try:
+        sb = get_user_sb()
+        result = sb.table("packing_slips")\
+            .select("id,slip_number,status,sold_to,ship_to,sales_order,ship_date,created_at,finalized_at")\
+            .eq("is_deleted", False)\
+            .order("created_at", desc=True)\
+            .execute()
+        return jsonify({"slips": result.data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Create packing slip ─────────────────────────────────────────────────
+
+@app.route("/api/packing-slips", methods=["POST"])
+@require_auth
+def create_packing_slip():
+    data = request.get_json()
+    try:
+        sb = get_user_sb()
+        slip_number = data.get("slip_number") or _next_slip_number(sb)
+
+        row = {
+            "slip_number":    slip_number,
+            "status":         data.get("status", "draft"),
+            "sold_to":        data.get("sold_to", ""),
+            "ship_to":        data.get("ship_to", ""),
+            "attn":           data.get("attn", ""),
+            "sales_order":    data.get("sales_order", ""),
+            "order_date":     data.get("order_date") or None,
+            "customer_order": data.get("customer_order", ""),
+            "ship_date":      data.get("ship_date") or None,
+            "fob":            data.get("fob", ""),
+            "terms":          data.get("terms", ""),
+            "project_name":   data.get("project_name", ""),
+            "wbs":            data.get("wbs", ""),
+            "notes":          data.get("notes", ""),
+            "template_id":    data.get("template_id") or None,
+        }
+        result = sb.table("packing_slips").insert(row).execute()
+        slip_id = result.data[0]["id"]
+
+        # Insert line items
+        items = data.get("items", [])
+        for item in items:
+            sb.table("packing_slip_items").insert({
+                "packing_slip_id": slip_id,
+                "item_number":     item.get("item_number", 0),
+                "qty_ordered":     item.get("qty_ordered"),
+                "qty_shipped":     item.get("qty_shipped"),
+                "part_number":     item.get("part_number", ""),
+                "description":     item.get("description", ""),
+                "project_name":    item.get("project_name", ""),
+                "wbs":             item.get("wbs", ""),
+                "sort_order":      item.get("sort_order", 0),
+            }).execute()
+
+        # Auto-save field history
+        _save_field_history(sb, {
+            "sold_to": data.get("sold_to"),
+            "ship_to": data.get("ship_to"),
+            "attn": data.get("attn"),
+            "fob": data.get("fob"),
+            "terms": data.get("terms"),
+            "sales_order": data.get("sales_order"),
+            "customer_order": data.get("customer_order"),
+        })
+
+        audit_log("create_packing_slip", "packing_slip", slip_id, {
+            "slip_number": slip_number,
+            "sold_to": data.get("sold_to", "")[:50],
+        })
+        return jsonify({"success": True, "id": slip_id, "slip_number": slip_number})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Get single packing slip with items ──────────────────────────────────
+
+@app.route("/api/packing-slips/<int:slip_id>", methods=["GET"])
+@require_auth
+def get_packing_slip(slip_id):
+    try:
+        sb = get_user_sb()
+        slip = sb.table("packing_slips").select("*").eq("id", slip_id).single().execute()
+        items = sb.table("packing_slip_items")\
+            .select("*")\
+            .eq("packing_slip_id", slip_id)\
+            .order("sort_order").execute()
+        return jsonify({"slip": slip.data, "items": items.data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Update draft packing slip ───────────────────────────────────────────
+
+@app.route("/api/packing-slips/<int:slip_id>", methods=["PUT"])
+@require_auth
+def update_packing_slip(slip_id):
+    data = request.get_json()
+    try:
+        sb = get_user_sb()
+
+        # Check slip exists and is draft
+        existing = sb.table("packing_slips").select("status").eq("id", slip_id).single().execute()
+        if existing.data["status"] != "draft":
+            return jsonify({"error": "Only draft slips can be edited"}), 400
+
+        updates = {
+            "sold_to":        data.get("sold_to", ""),
+            "ship_to":        data.get("ship_to", ""),
+            "attn":           data.get("attn", ""),
+            "sales_order":    data.get("sales_order", ""),
+            "order_date":     data.get("order_date") or None,
+            "customer_order": data.get("customer_order", ""),
+            "ship_date":      data.get("ship_date") or None,
+            "fob":            data.get("fob", ""),
+            "terms":          data.get("terms", ""),
+            "project_name":   data.get("project_name", ""),
+            "wbs":            data.get("wbs", ""),
+            "notes":          data.get("notes", ""),
+            "updated_at":     datetime.now().isoformat(),
+        }
+        sb.table("packing_slips").update(updates).eq("id", slip_id).execute()
+
+        # Replace items: delete old, insert new
+        sb.table("packing_slip_items").delete().eq("packing_slip_id", slip_id).execute()
+        items = data.get("items", [])
+        for item in items:
+            sb.table("packing_slip_items").insert({
+                "packing_slip_id": slip_id,
+                "item_number":     item.get("item_number", 0),
+                "qty_ordered":     item.get("qty_ordered"),
+                "qty_shipped":     item.get("qty_shipped"),
+                "part_number":     item.get("part_number", ""),
+                "description":     item.get("description", ""),
+                "project_name":    item.get("project_name", ""),
+                "wbs":             item.get("wbs", ""),
+                "sort_order":      item.get("sort_order", 0),
+            }).execute()
+
+        _save_field_history(sb, {
+            "sold_to": data.get("sold_to"),
+            "ship_to": data.get("ship_to"),
+            "attn": data.get("attn"),
+            "fob": data.get("fob"),
+            "terms": data.get("terms"),
+        })
+
+        audit_log("update_packing_slip", "packing_slip", slip_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Soft delete packing slip (admin only) ──────────────────────────────
+
+@app.route("/api/packing-slips/<int:slip_id>", methods=["DELETE"])
+@require_role("admin", require_mfa=True)
+def delete_packing_slip(slip_id):
+    try:
+        sb = get_user_sb()
+        sb.table("packing_slips").update({
+            "is_deleted": True,
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", slip_id).execute()
+        audit_log("delete_packing_slip", "packing_slip", slip_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Finalize packing slip ───────────────────────────────────────────────
+
+@app.route("/api/packing-slips/<int:slip_id>/finalize", methods=["POST"])
+@require_auth
+def finalize_packing_slip(slip_id):
+    try:
+        sb = get_user_sb()
+        slip = sb.table("packing_slips").select("*").eq("id", slip_id).single().execute()
+        if slip.data["status"] != "draft":
+            return jsonify({"error": "Only draft slips can be finalized"}), 400
+
+        items = sb.table("packing_slip_items")\
+            .select("*").eq("packing_slip_id", slip_id)\
+            .order("sort_order").execute()
+
+        # Freeze snapshot
+        frozen = {"slip": slip.data, "items": items.data}
+
+        sb.table("packing_slips").update({
+            "status": "finalized",
+            "frozen_data": json.dumps(frozen),
+            "finalized_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }).eq("id", slip_id).execute()
+
+        audit_log("finalize_packing_slip", "packing_slip", slip_id, {
+            "slip_number": slip.data.get("slip_number")
+        })
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Download packing slip Excel ─────────────────────────────────────────
+
+@app.route("/api/packing-slips/<int:slip_id>/excel", methods=["GET"])
+@require_auth
+def download_packing_slip_excel(slip_id):
+    try:
+        sb = get_user_sb()
+        slip = sb.table("packing_slips").select("*").eq("id", slip_id).single().execute()
+        items = sb.table("packing_slip_items")\
+            .select("*").eq("packing_slip_id", slip_id)\
+            .order("sort_order").execute()
+
+        buf = generate_packing_slip_excel(slip.data, items.data)
+        safe_num = (slip.data.get("slip_number") or "packing_slip").replace("/", "-")
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         as_attachment=True, download_name=f"AAE_{safe_num}.xlsx")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Field history for smart dropdowns ───────────────────────────────────
+
+@app.route("/api/packing-slips/field-history", methods=["GET"])
+@require_auth
+def get_field_history():
+    field = request.args.get("field", "")
+    if not field:
+        return jsonify({"error": "field parameter required"}), 400
+    try:
+        sb = get_user_sb()
+        result = sb.table("saved_field_history")\
+            .select("field_value,use_count")\
+            .eq("field_name", field)\
+            .order("use_count", desc=True)\
+            .limit(20).execute()
+        return jsonify({"values": [r["field_value"] for r in result.data]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Next slip number ────────────────────────────────────────────────────
+
+@app.route("/api/packing-slips/next-number", methods=["POST"])
+@require_auth
+def next_slip_number():
+    try:
+        sb = get_user_sb()
+        return jsonify({"slip_number": _next_slip_number(sb)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: List templates ──────────────────────────────────────────────────────
+
+@app.route("/api/packing-templates", methods=["GET"])
+@require_auth
+def list_packing_templates():
+    try:
+        sb = get_user_sb()
+        result = sb.table("packing_templates")\
+            .select("id,template_name,description,sold_to,ship_to,created_at")\
+            .eq("is_deleted", False)\
+            .order("template_name").execute()
+        return jsonify({"templates": result.data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Create template ─────────────────────────────────────────────────────
+
+@app.route("/api/packing-templates", methods=["POST"])
+@require_auth
+def create_packing_template():
+    data = request.get_json()
+    try:
+        sb = get_user_sb()
+        row = {
+            "template_name": data.get("template_name", "Untitled"),
+            "description":   data.get("description", ""),
+            "sold_to":       data.get("sold_to", ""),
+            "ship_to":       data.get("ship_to", ""),
+            "attn":          data.get("attn", ""),
+            "fob":           data.get("fob", ""),
+            "terms":         data.get("terms", ""),
+            "project_name":  data.get("project_name", ""),
+            "wbs":           data.get("wbs", ""),
+        }
+        result = sb.table("packing_templates").insert(row).execute()
+        tmpl_id = result.data[0]["id"]
+
+        for item in data.get("items", []):
+            sb.table("template_items").insert({
+                "template_id":  tmpl_id,
+                "item_number":  item.get("item_number", 0),
+                "qty_ordered":  item.get("qty_ordered"),
+                "part_number":  item.get("part_number", ""),
+                "description":  item.get("description", ""),
+                "project_name": item.get("project_name", ""),
+                "wbs":          item.get("wbs", ""),
+                "sort_order":   item.get("sort_order", 0),
+            }).execute()
+
+        audit_log("create_packing_template", "packing_template", tmpl_id, {
+            "template_name": data.get("template_name")
+        })
+        return jsonify({"success": True, "id": tmpl_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Get template with items ─────────────────────────────────────────────
+
+@app.route("/api/packing-templates/<int:tmpl_id>", methods=["GET"])
+@require_auth
+def get_packing_template(tmpl_id):
+    try:
+        sb = get_user_sb()
+        tmpl = sb.table("packing_templates").select("*").eq("id", tmpl_id).single().execute()
+        items = sb.table("template_items")\
+            .select("*").eq("template_id", tmpl_id)\
+            .order("sort_order").execute()
+        return jsonify({"template": tmpl.data, "items": items.data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Update template ─────────────────────────────────────────────────────
+
+@app.route("/api/packing-templates/<int:tmpl_id>", methods=["PUT"])
+@require_auth
+def update_packing_template(tmpl_id):
+    data = request.get_json()
+    try:
+        sb = get_user_sb()
+        updates = {
+            "template_name": data.get("template_name", "Untitled"),
+            "description":   data.get("description", ""),
+            "sold_to":       data.get("sold_to", ""),
+            "ship_to":       data.get("ship_to", ""),
+            "attn":          data.get("attn", ""),
+            "fob":           data.get("fob", ""),
+            "terms":         data.get("terms", ""),
+            "project_name":  data.get("project_name", ""),
+            "wbs":           data.get("wbs", ""),
+            "updated_at":    datetime.now().isoformat(),
+        }
+        sb.table("packing_templates").update(updates).eq("id", tmpl_id).execute()
+
+        # Replace items
+        sb.table("template_items").delete().eq("template_id", tmpl_id).execute()
+        for item in data.get("items", []):
+            sb.table("template_items").insert({
+                "template_id":  tmpl_id,
+                "item_number":  item.get("item_number", 0),
+                "qty_ordered":  item.get("qty_ordered"),
+                "part_number":  item.get("part_number", ""),
+                "description":  item.get("description", ""),
+                "project_name": item.get("project_name", ""),
+                "wbs":          item.get("wbs", ""),
+                "sort_order":   item.get("sort_order", 0),
+            }).execute()
+
+        audit_log("update_packing_template", "packing_template", tmpl_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Delete template (soft) ──────────────────────────────────────────────
+
+@app.route("/api/packing-templates/<int:tmpl_id>", methods=["DELETE"])
+@require_role("admin")
+def delete_packing_template(tmpl_id):
+    try:
+        sb = get_user_sb()
+        sb.table("packing_templates").update({
+            "is_deleted": True, "updated_at": datetime.now().isoformat()
+        }).eq("id", tmpl_id).execute()
+        audit_log("delete_packing_template", "packing_template", tmpl_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── API: Upload .xls → auto-parse into template ─────────────────────────────
+
+@app.route("/api/packing-templates/upload", methods=["POST"])
+@require_auth
+def upload_packing_template():
+    """Parse an uploaded .xls packing slip into a template. Uses xlrd for .xls files."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "No file selected"}), 400
+
+    try:
+        file_bytes = f.read()
+        parsed = _parse_packing_slip_xls(file_bytes)
+
+        sb = get_user_sb()
+        tmpl_name = request.form.get("template_name") or f.filename.rsplit(".", 1)[0]
+
+        row = {
+            "template_name": tmpl_name,
+            "description":   f"Uploaded from {f.filename}",
+            "sold_to":       parsed.get("sold_to", ""),
+            "ship_to":       parsed.get("ship_to", ""),
+            "attn":          parsed.get("attn", ""),
+            "fob":           parsed.get("fob", ""),
+            "terms":         parsed.get("terms", ""),
+        }
+        result = sb.table("packing_templates").insert(row).execute()
+        tmpl_id = result.data[0]["id"]
+
+        for item in parsed.get("items", []):
+            sb.table("template_items").insert({
+                "template_id":  tmpl_id,
+                "item_number":  item.get("item_number", 0),
+                "qty_ordered":  item.get("qty_ordered"),
+                "part_number":  item.get("part_number", ""),
+                "description":  item.get("description", ""),
+                "sort_order":   item.get("sort_order", 0),
+            }).execute()
+
+        audit_log("upload_packing_template", "packing_template", tmpl_id, {
+            "filename": f.filename
+        })
+        return jsonify({"success": True, "id": tmpl_id, "parsed": parsed})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def _parse_packing_slip_xls(file_bytes):
+    """Parse AAE packing slip .xls file into structured data.
+    Reads from known cell positions matching the AAE layout."""
+    import xlrd
+
+    wb = xlrd.open_workbook(file_contents=file_bytes)
+    ws = wb.sheet_by_index(0)
+
+    def cell(r, c):
+        try:
+            v = ws.cell_value(r, c)
+            return str(v).strip() if v else ""
+        except IndexError:
+            return ""
+
+    # Detect layout variant — some templates use row 8 for Sold To, some use row 9
+    sold_to_row = 8
+    if cell(9, 1).lower().startswith("sold"):
+        sold_to_row = 9
+
+    # Sold To: multi-line starting at row after "Sold To:" label
+    sold_to_lines = []
+    for r in range(sold_to_row, sold_to_row + 4):
+        val = cell(r, 2)
+        if val:
+            sold_to_lines.append(val)
+    sold_to = "\n".join(sold_to_lines)
+
+    # Ship To: find "Ship To:" label
+    ship_to_row = sold_to_row + 5
+    for r in range(sold_to_row + 3, sold_to_row + 8):
+        if cell(r, 1).lower().startswith("ship"):
+            ship_to_row = r
+            break
+    ship_to_lines = []
+    for r in range(ship_to_row, ship_to_row + 3):
+        val = cell(r, 2)
+        if val:
+            ship_to_lines.append(val)
+    ship_to = "\n".join(ship_to_lines)
+
+    # Right-side header fields
+    sales_order = ""
+    customer_order = ""
+    fob = ""
+    terms = ""
+    for r in range(sold_to_row, sold_to_row + 8):
+        for c in [5, 6]:
+            label = cell(r, c).lower()
+            if "sales order" in label:
+                sales_order = cell(r, 8) or cell(r, c + 1) or cell(r, c + 2)
+            elif "customer order" in label:
+                co = cell(r, 8) or cell(r, c + 1) or cell(r, c + 2)
+                # Handle numeric values
+                try:
+                    co_num = float(co)
+                    if co_num == int(co_num):
+                        co = str(int(co_num))
+                except (ValueError, TypeError):
+                    pass
+                customer_order = co
+            elif "f.o.b" in label or "fob" in label:
+                fob = cell(r, 8) or cell(r, c + 1) or cell(r, c + 2)
+            elif "terms" in label:
+                terms = cell(r, 8) or cell(r, c + 1) or cell(r, c + 2)
+
+    # Find header row (Item | Qty Ordered | ...)
+    hdr_row = 18
+    for r in range(15, 25):
+        if cell(r, 0).lower() == "item":
+            hdr_row = r
+            break
+
+    # Parse line items
+    items = []
+    sort = 0
+    r = hdr_row + 1
+    while r < ws.nrows:
+        item_val = cell(r, 0)
+        if item_val and item_val.replace("0", "").isdigit() and len(item_val) >= 4:
+            # This is an item row
+            sort += 1
+            try:
+                item_num = int(item_val)
+            except ValueError:
+                item_num = sort * 10
+
+            qty_ord = None
+            try:
+                qty_ord = float(ws.cell_value(r, 1)) if ws.cell_value(r, 1) else None
+            except (ValueError, TypeError):
+                pass
+
+            part = cell(r, 3)
+            desc = cell(r, 5)
+
+            items.append({
+                "item_number": item_num,
+                "qty_ordered": qty_ord,
+                "part_number": part,
+                "description": desc,
+                "sort_order":  sort,
+            })
+        elif cell(r, 0).upper() == "MISSING ITEMS":
+            break
+        r += 1
+
+    return {
+        "sold_to": sold_to,
+        "ship_to": ship_to,
+        "sales_order": sales_order,
+        "customer_order": customer_order,
+        "fob": fob,
+        "terms": terms,
+        "items": items,
+    }
+
+# ── API: Quick-ship from template (Common tab) ──────────────────────────────
+
+@app.route("/api/packing-slips/quick-ship", methods=["POST"])
+@require_auth
+def quick_ship():
+    """Create a packing slip from a template + quick-ship fields, return Excel directly."""
+    data = request.get_json()
+    template_id = data.get("template_id")
+    if not template_id:
+        return jsonify({"error": "template_id required"}), 400
+
+    try:
+        sb = get_user_sb()
+
+        # Load template
+        tmpl = sb.table("packing_templates").select("*").eq("id", template_id).single().execute()
+        tmpl_items = sb.table("template_items")\
+            .select("*").eq("template_id", template_id)\
+            .order("sort_order").execute()
+
+        slip_number = _next_slip_number(sb)
+        job_number = data.get("job_number", "")
+
+        # Build slip data from template + quick-ship overrides
+        slip_data = {
+            "slip_number":    slip_number,
+            "sold_to":        tmpl.data.get("sold_to", ""),
+            "ship_to":        tmpl.data.get("ship_to", ""),
+            "attn":           tmpl.data.get("attn", ""),
+            "sales_order":    data.get("sales_order", ""),
+            "order_date":     None,
+            "customer_order": data.get("customer_order", ""),
+            "ship_date":      data.get("ship_date") or None,
+            "fob":            tmpl.data.get("fob", ""),
+            "terms":          tmpl.data.get("terms", ""),
+            "project_name":   tmpl.data.get("project_name", ""),
+            "wbs":            tmpl.data.get("wbs", ""),
+            "notes":          "",
+        }
+
+        # Build items — all qty_shipped = qty_ordered, add job_number
+        excel_items = []
+        db_items = []
+        for ti in tmpl_items.data:
+            qty = ti.get("qty_ordered")
+            item = {
+                "item_number":  ti.get("item_number", 0),
+                "qty_ordered":  qty,
+                "qty_shipped":  qty,  # everything shipping
+                "part_number":  ti.get("part_number", ""),
+                "description":  ti.get("description", ""),
+                "project_name": ti.get("project_name", ""),
+                "wbs":          ti.get("wbs", ""),
+                "sort_order":   ti.get("sort_order", 0),
+                "job_number":   job_number,
+            }
+            excel_items.append(item)
+            db_items.append({k: v for k, v in item.items() if k != "job_number"})
+
+        # Save to DB
+        row = {
+            "slip_number":    slip_number,
+            "status":         "finalized",
+            "sold_to":        slip_data["sold_to"],
+            "ship_to":        slip_data["ship_to"],
+            "attn":           slip_data["attn"],
+            "sales_order":    slip_data["sales_order"],
+            "customer_order": slip_data["customer_order"],
+            "ship_date":      slip_data["ship_date"],
+            "fob":            slip_data["fob"],
+            "terms":          slip_data["terms"],
+            "project_name":   slip_data["project_name"],
+            "wbs":            slip_data["wbs"],
+            "template_id":    template_id,
+            "finalized_at":   datetime.now().isoformat(),
+        }
+        result = sb.table("packing_slips").insert(row).execute()
+        slip_id = result.data[0]["id"]
+
+        for di in db_items:
+            di["packing_slip_id"] = slip_id
+            sb.table("packing_slip_items").insert(di).execute()
+
+        # Freeze
+        frozen = {"slip": {**row, "id": slip_id}, "items": db_items}
+        sb.table("packing_slips").update({
+            "frozen_data": json.dumps(frozen),
+        }).eq("id", slip_id).execute()
+
+        audit_log("quick_ship_packing_slip", "packing_slip", slip_id, {
+            "slip_number": slip_number, "template_id": template_id
+        })
+
+        # Generate Excel
+        buf = generate_packing_slip_excel(slip_data, excel_items)
+        safe_num = slip_number.replace("/", "-")
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         as_attachment=True, download_name=f"AAE_{safe_num}.xlsx")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
