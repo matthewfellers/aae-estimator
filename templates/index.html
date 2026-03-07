@@ -1804,19 +1804,20 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
   });
 
   // Handle invite / password-recovery links.
-  // Parse the URL hash manually — avoids supabase-js auto-processing which
-  // can throw uncaught errors on expired/malformed tokens.
+  // Supports BOTH flows:
+  //   1) Legacy hash: #type=invite&access_token=...&refresh_token=...
+  //   2) PKCE (newer Supabase default): ?code=AUTH_CODE
   let _isInviteFlow = false;   // guards restoreSession from racing the invite handler
+
+  // ── Flow 1: Legacy hash tokens ──
   try {
     const _hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
     const _tokenType  = _hashParams.get('type');
     const _accessTok  = _hashParams.get('access_token');
     const _refreshTok = _hashParams.get('refresh_token');
     if ((_tokenType === 'invite' || _tokenType === 'recovery') && _accessTok) {
-      _isInviteFlow = true;    // set BEFORE any async work so restoreSession sees it
-      // Clean token from URL immediately so refresh doesn't re-trigger
+      _isInviteFlow = true;
       window.history.replaceState(null, '', window.location.pathname);
-      // Exchange token for a live session
       _sbClient.auth.setSession({ access_token: _accessTok, refresh_token: _refreshTok || '' })
         .then(({ data, error }) => {
           if (error) throw error;
@@ -1827,14 +1828,62 @@ if (SUPABASE_URL && SUPABASE_URL !== "None" && typeof window.supabase !== "undef
         })
         .catch(err => {
           console.warn('Invite token error:', err.message);
-          _isInviteFlow = false;  // allow normal login flow on error
-          // Token expired — just show normal login with a hint
+          _isInviteFlow = false;
           document.getElementById('login_err').textContent = 'Invite link expired. Please request a new one.';
           document.getElementById('login_err').style.display = 'block';
         });
     }
   } catch(e) {
     console.warn('Hash parse error:', e);
+  }
+
+  // ── Flow 2: PKCE code exchange (?code=...) ──
+  try {
+    const _urlParams = new URLSearchParams(window.location.search);
+    const _pkceCode = _urlParams.get('code');
+    if (_pkceCode && !_isInviteFlow) {
+      _isInviteFlow = true;
+      window.history.replaceState(null, '', window.location.pathname);
+      _sbClient.auth.exchangeCodeForSession(_pkceCode)
+        .then(({ data, error }) => {
+          if (error) throw error;
+          if (data && data.session) {
+            // Check if this user has never signed in (invited user needs to set password)
+            const user = data.session.user;
+            const lastSignIn = user.last_sign_in_at;
+            const createdAt  = user.created_at;
+            // If last_sign_in matches created_at (first ever login via invite), show set-password
+            // Also check if user has no password set (identities may indicate email invite)
+            const isFirstLogin = !lastSignIn || lastSignIn === createdAt
+              || (Date.parse(lastSignIn) - Date.parse(createdAt)) < 60000;
+            if (isFirstLogin) {
+              _inviteSession = data.session;
+              showSetPasswordScreen(user.email);
+            } else {
+              // Returning user — just restore their session normally
+              _isInviteFlow = false;
+              _accessToken = data.session.access_token;
+              fetch("/api/me", { headers: { "Authorization": "Bearer " + _accessToken } })
+                .then(r => r.json())
+                .then(profile => {
+                  currentUser = profile;
+                  onLoginSuccess(profile);
+                })
+                .catch(() => {
+                  document.getElementById("login-overlay").classList.add("visible");
+                });
+            }
+          }
+        })
+        .catch(err => {
+          console.warn('PKCE code exchange error:', err.message);
+          _isInviteFlow = false;
+          document.getElementById('login_err').textContent = 'Invite link expired. Please request a new one.';
+          document.getElementById('login_err').style.display = 'block';
+        });
+    }
+  } catch(e) {
+    console.warn('PKCE parse error:', e);
   }
 
   // Auto-restore session on page load (persisted from previous login)
