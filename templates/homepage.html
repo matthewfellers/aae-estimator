@@ -388,6 +388,22 @@ body {
       <div class="module-desc">Upload customer-specific DOCX templates with placeholders, fill in a form, and generate finished shipping documents for download.</div>
       <div class="module-badge badge-active">Active</div>
     </a>
+
+    <!-- Scheduling (role-gated: admin, supervisor, shop_lead) -->
+    <a href="/scheduling" class="module-card" id="card-scheduling" style="display:none">
+      <div class="module-icon">📅</div>
+      <div class="module-title">SCHEDULING</div>
+      <div class="module-desc">Gantt-based shop scheduling. Assign panels to employees, track capacity, auto-suggest assignments, and flag delivery risks.</div>
+      <div class="module-badge badge-active">Active</div>
+    </a>
+
+    <!-- Employee Portal (role-gated: all shop roles + admin) -->
+    <a href="/employee-portal" class="module-card" id="card-employee-portal" style="display:none">
+      <div class="module-icon">👷</div>
+      <div class="module-title">EMPLOYEE PORTAL</div>
+      <div class="module-desc">Timesheets, PTO requests, weekly approvals, and personal dashboard for shop floor employees.</div>
+      <div class="module-badge badge-active">Active</div>
+    </a>
   </div>
 </main>
 
@@ -544,6 +560,17 @@ function onLoginSuccess(profile) {
   document.getElementById("app-footer").style.display = "block";
   const name = profile.display_name || profile.email || "User";
   document.getElementById("user_pill").textContent = name;
+
+  // Role-gated module cards
+  const role = profile.role || "viewer";
+  const schedulingRoles = ["admin", "supervisor", "shop_lead"];
+  const portalRoles = ["admin", "supervisor", "shop_lead", "shop_employee"];
+  if (schedulingRoles.includes(role)) {
+    document.getElementById("card-scheduling").style.display = "";
+  }
+  if (portalRoles.includes(role)) {
+    document.getElementById("card-employee-portal").style.display = "";
+  }
 }
 
 async function doLogout() {
