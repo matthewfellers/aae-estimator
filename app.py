@@ -6311,26 +6311,35 @@ def portal_me():
         today = dt_date.today()
         monday = today - timedelta(days=today.weekday())
         week_start = monday.isoformat()
-        # Current week's timesheet entries
-        entries = sb.table("timesheets").select("*")\
-            .eq("employee_id", emp["id"])\
-            .eq("org_id", org_id)\
-            .gte("work_date", week_start)\
-            .lte("work_date", (monday + timedelta(days=6)).isoformat())\
-            .order("work_date").execute()
+        # Current week's timesheet entries (may be empty if RLS blocks)
+        try:
+            entries = sb.table("timesheets").select("*")\
+                .eq("employee_id", emp["id"])\
+                .eq("org_id", org_id)\
+                .gte("work_date", week_start)\
+                .lte("work_date", (monday + timedelta(days=6)).isoformat())\
+                .order("work_date").execute()
+        except Exception:
+            entries = type("R", (), {"data": []})()
         # Week status
-        week = sb.table("timesheet_weeks")\
-            .select("*")\
-            .eq("employee_id", emp["id"])\
-            .eq("org_id", org_id)\
-            .eq("week_start", week_start)\
-            .maybe_single().execute()
+        try:
+            week = sb.table("timesheet_weeks")\
+                .select("*")\
+                .eq("employee_id", emp["id"])\
+                .eq("org_id", org_id)\
+                .eq("week_start", week_start)\
+                .maybe_single().execute()
+        except Exception:
+            week = type("R", (), {"data": None})()
         # Pending PTO
-        pto = sb.table("pto_requests").select("*")\
-            .eq("employee_id", emp["id"])\
-            .eq("org_id", org_id)\
-            .eq("status", "pending")\
-            .execute()
+        try:
+            pto = sb.table("pto_requests").select("*")\
+                .eq("employee_id", emp["id"])\
+                .eq("org_id", org_id)\
+                .eq("status", "pending")\
+                .execute()
+        except Exception:
+            pto = type("R", (), {"data": []})()
         week_hours = sum(e.get("hours", 0) for e in (entries.data or []))
         return jsonify({
             "employee": emp,
