@@ -6038,6 +6038,20 @@ def sched_upsert_experience():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/scheduling/experience/<eid>", methods=["DELETE"])
+@require_role("admin")
+def sched_delete_experience(eid):
+    """Delete a panel experience record. Admin only."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        sb.table("panel_experience").delete()\
+            .eq("id", eid).eq("org_id", org_id).execute()
+        audit_log("delete_experience", "panel_experience", eid)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SCHEDULING API — Timesheet & PTO Approvals (Admin/Supervisor)
 # ══════════════════════════════════════════════════════════════════════════════

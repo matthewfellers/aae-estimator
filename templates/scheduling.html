@@ -1110,11 +1110,14 @@ async function loadExperience(){
       }
     });
     if(records.length===0){ tbody.innerHTML='<tr><td colspan="5" style="text-align:center;padding:1rem;color:#999;">No experience records</td></tr>'; return; }
+    const isAdmin=_userProfile&&_userProfile.role==='admin';
     let html='';
     records.forEach(r=>{
       const emp=_employees.find(e=>e.id===r.employee_id);
       html+='<tr><td>'+(emp?(emp.first_name+' '+emp.last_name):(r.employee_name||'Unknown'))+'</td><td>'+r.panel_type+'</td><td>'+r.build_count+'</td><td>'+r.avg_hours+'</td>';
-      html+='<td><button class="btn btn-secondary btn-sm" onclick="openExperienceModal(\''+r.id+'\','+JSON.stringify(r).replace(/"/g,'&quot;')+')">Edit</button></td></tr>';
+      html+='<td><button class="btn btn-secondary btn-sm" onclick="openExperienceModal(\''+r.id+'\','+JSON.stringify(r).replace(/"/g,'&quot;')+')">Edit</button>';
+      if(isAdmin) html+=' <button class="btn btn-danger btn-sm" onclick="deleteExperience(\''+r.id+'\')">Delete</button>';
+      html+='</td></tr>';
     });
     tbody.innerHTML=html;
   }catch(e){ toast("Failed to load experience: "+e.message,"error"); tbody.innerHTML='<tr><td colspan="5" class="loading-row">Failed</td></tr>'; }
@@ -1154,6 +1157,15 @@ async function saveExperience(){
     closeModal("modal-experience");
     loadExperience();
   }catch(e){ toast("Save failed: "+e.message,"error"); }
+}
+
+async function deleteExperience(id){
+  if(!confirm("Delete this experience record?")) return;
+  try{
+    await api("DELETE","/api/scheduling/experience/"+id);
+    toast("Experience record deleted","success");
+    loadExperience();
+  }catch(e){ toast("Delete failed: "+e.message,"error"); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
