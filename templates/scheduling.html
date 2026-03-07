@@ -382,7 +382,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="modal-title">ADD EXPERIENCE RECORD</div>
   <input type="hidden" id="exp-edit-id">
   <div class="form-group"><label>Employee</label><select id="exp-employee"></select></div>
-  <div class="form-group" style="position:relative"><label>Panel Type</label><input type="text" id="exp-panel-type" placeholder="Type to search or add new..." autocomplete="off" oninput="filterPanelTypes()" onclick="filterPanelTypes()" onfocus="filterPanelTypes()"><div id="exp-panel-type-list" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border);border-top:none;border-radius:0 0 8px 8px;max-height:200px;overflow-y:auto;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,0.15)"></div></div>
+  <div class="form-group"><label>Panel Type</label><div style="display:flex;gap:8px;align-items:center"><select id="exp-panel-type" style="flex:1"></select><button type="button" class="btn btn-secondary" onclick="promptAddPanelType()" style="padding:6px 12px;font-size:1.1rem;line-height:1;white-space:nowrap" title="Add custom panel type">+</button></div></div>
   <div class="form-row"><div class="form-group"><label>Build Count</label><input type="number" id="exp-build-count" min="0" value="0"></div><div class="form-group"><label>Avg Hours</label><input type="number" id="exp-avg-hours" step="0.5" min="0" value="0"></div></div>
   <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal('modal-experience')">Cancel</button><button class="btn btn-primary" onclick="saveExperience()">Save</button></div>
 </div></div>
@@ -1084,6 +1084,20 @@ async function deleteEmployee(id){
 const _defaultPanelTypes = ["PLC","MCC","VFD","Relay","Junction Box","Control","Custom"];
 let _allPanelTypes = [..._defaultPanelTypes];
 
+function rebuildPanelTypeDropdown(selectVal){
+  const sel=document.getElementById("exp-panel-type");
+  sel.innerHTML=_allPanelTypes.map(t=>'<option value="'+t+'">'+t+'</option>').join("");
+  if(selectVal) sel.value=selectVal;
+}
+
+function promptAddPanelType(){
+  const name=prompt("Enter new panel type name:");
+  if(!name||!name.trim()) return;
+  const val=name.trim();
+  if(!_allPanelTypes.includes(val)) _allPanelTypes.push(val);
+  rebuildPanelTypeDropdown(val);
+}
+
 async function loadExperience(){
   const tbody=document.getElementById("experience-tbody");
   tbody.innerHTML='<tr><td colspan="5" class="loading-row"><div class="loading-spinner"></div></td></tr>';
@@ -1106,67 +1120,28 @@ async function loadExperience(){
   }catch(e){ toast("Failed to load experience: "+e.message,"error"); tbody.innerHTML='<tr><td colspan="5" class="loading-row">Failed</td></tr>'; }
 }
 
-// ── Panel Type Typeahead ──
-function filterPanelTypes(){
-  const input=document.getElementById("exp-panel-type");
-  const list=document.getElementById("exp-panel-type-list");
-  const q=input.value.trim().toLowerCase();
-  // Filter matches — show all if empty, otherwise filter
-  let matches=_allPanelTypes.filter(t=>t.toLowerCase().includes(q));
-  // Sort: exact start matches first, then contains
-  matches.sort((a,b)=>{
-    const aStarts=a.toLowerCase().startsWith(q)?0:1;
-    const bStarts=b.toLowerCase().startsWith(q)?0:1;
-    if(aStarts!==bStarts) return aStarts-bStarts;
-    return a.localeCompare(b);
-  });
-  // If the user typed something that's not in the list, show "Add: <value>" option
-  const exactMatch=_allPanelTypes.some(t=>t.toLowerCase()===q);
-  let html='';
-  matches.forEach(t=>{
-    html+='<div style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;transition:background 0.1s" onmousedown="selectPanelType(\''+t.replace(/'/g,"\\'")+'\')" onmouseover="this.style.background=\'#f5f0f0\'" onmouseout="this.style.background=\'#fff\'">'+t+'</div>';
-  });
-  if(q && !exactMatch){
-    html+='<div style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--primary);font-weight:600;transition:background 0.1s" onmousedown="selectPanelType(\''+input.value.trim().replace(/'/g,"\\'")+'\')" onmouseover="this.style.background=\'#f5f0f0\'" onmouseout="this.style.background=\'#fff\'">+ Add: "'+input.value.trim()+'"</div>';
-  }
-  list.innerHTML=html;
-  list.style.display=html?'block':'none';
-}
-
-function selectPanelType(val){
-  const input=document.getElementById("exp-panel-type");
-  input.value=val;
-  document.getElementById("exp-panel-type-list").style.display='none';
-  // Add to known types if new
-  if(!_allPanelTypes.includes(val)) _allPanelTypes.push(val);
-}
-
-// Close dropdown on blur (slight delay so mousedown on list items fires first)
-document.getElementById("exp-panel-type").addEventListener("blur",function(){
-  setTimeout(function(){ document.getElementById("exp-panel-type-list").style.display='none'; }, 150);
-});
-
 function openExperienceModal(editId, data){
   document.getElementById("exp-edit-id").value=editId||"";
   const empSel=document.getElementById("exp-employee");
   empSel.innerHTML=_employees.map(e=>'<option value="'+e.id+'">'+(e.first_name||"")+' '+(e.last_name||"")+'</option>').join("");
   if(data){
     empSel.value=data.employee_id;
-    document.getElementById("exp-panel-type").value=data.panel_type;
+    // If editing, make sure the panel type is in the list
+    if(data.panel_type && !_allPanelTypes.includes(data.panel_type)) _allPanelTypes.push(data.panel_type);
+    rebuildPanelTypeDropdown(data.panel_type);
     document.getElementById("exp-build-count").value=data.build_count;
     document.getElementById("exp-avg-hours").value=data.avg_hours;
   } else {
-    document.getElementById("exp-panel-type").value="";
+    rebuildPanelTypeDropdown();
     document.getElementById("exp-build-count").value=0;
     document.getElementById("exp-avg-hours").value=0;
   }
-  document.getElementById("exp-panel-type-list").style.display='none';
   openModal("modal-experience");
 }
 
 async function saveExperience(){
-  const panelType=document.getElementById("exp-panel-type").value.trim();
-  if(!panelType){ toast("Please enter a panel type","error"); return; }
+  const panelType=document.getElementById("exp-panel-type").value;
+  if(!panelType){ toast("Please select a panel type","error"); return; }
   const body={
     employee_id:document.getElementById("exp-employee").value,
     panel_type:panelType,
@@ -1175,8 +1150,6 @@ async function saveExperience(){
   };
   try{
     await api("POST","/api/scheduling/experience",body);
-    // Add new type to known list
-    if(!_allPanelTypes.includes(panelType)) _allPanelTypes.push(panelType);
     toast("Experience record saved","success");
     closeModal("modal-experience");
     loadExperience();
