@@ -34,7 +34,8 @@ def _jwks_url() -> str:
 def _expected_issuer() -> str:
     return f"{_supabase_url()}/auth/v1"
 
-_VALID_ROLES = {"admin", "estimator", "purchasing", "accounting", "manufacturing", "viewer"}
+_VALID_ROLES = {"admin", "estimator", "purchasing", "accounting", "manufacturing", "viewer",
+                "shop_employee", "shop_lead", "supervisor"}
 
 _jwks_cache = {"ts": 0, "keys": None}
 
