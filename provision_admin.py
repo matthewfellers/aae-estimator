@@ -80,10 +80,13 @@ def verify_app_metadata(uid, role, org_id):
         print("       Is SUPABASE_SERVICE_ROLE_KEY correct (not the anon key)?"); sys.exit(1)
     return meta["role"], meta["org_id"]
 
-def upsert_profiles(uid, email, role, display_name):
+def upsert_profiles(uid, email, role, display_name, org_id=None):
+    row = {"user_id": uid, "email": email, "role": role, "display_name": display_name}
+    if org_id:
+        row["org_id"] = org_id
     r = requests.post(f"{SUPABASE_URL}/rest/v1/profiles",
                       headers={**svc(), "Prefer": "resolution=merge-duplicates"},
-                      json={"user_id": uid, "email": email, "role": role, "display_name": display_name},
+                      json=row,
                       timeout=15)
     if r.status_code not in (200, 201, 204):
         print(f"WARNING: profiles upsert {r.status_code}: {r.text}")
@@ -118,7 +121,7 @@ def main():
     print("Step 1/5 — Finding user..."); u = find_user(email); uid = u["id"]; print(f"          {uid}")
     print(f"Step 2/5 — Setting app_metadata..."); set_app_metadata(uid, role, org_id); print("          Done.")
     print(f"Step 3/5 — Verifying..."); r, o = verify_app_metadata(uid, role, org_id); print(f"          role='{r}', org_id='{o}' ✓")
-    print(f"Step 4/5 — Upserting profiles..."); ok = upsert_profiles(uid, email, role, display); ok and print("          Done. ✓")
+    print(f"Step 4/5 — Upserting profiles..."); ok = upsert_profiles(uid, email, role, display, org_id); ok and print("          Done. ✓")
     print(f"Step 5/5 — Upserting org_members..."); ok = upsert_org_member(uid, org_id, role); ok and print("          Done. ✓")
 
     print(f"\n── Done: {email} → role='{role}' org='{org_id}'")
