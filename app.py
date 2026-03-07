@@ -4103,31 +4103,38 @@ def generate_packing_slip_excel(slip_data, items):
             current_row += 1
 
     # ══════════════════════════════════════════════════════════════════════════
-    # BOTTOM SECTION: Project / WBS / Notes
+    # BOTTOM SECTION: Approver / Project / WBS / Notes
     # ══════════════════════════════════════════════════════════════════════════
-    # Red accent line above footer info
-    current_row += 1
+    # Approver line — 2 rows below last item, left-justified in description column
+    approver = slip_data.get("approver", "")
+    if approver:
+        current_row += 2
+        ws.merge_cells(f"E{current_row}:G{current_row}")
+        ws[f"E{current_row}"].value = f"Approver: {approver}"
+        ws[f"E{current_row}"].font = item_sub_font
+
+    # Project Name line
+    proj_name = slip_data.get("project_name", "")
+    if proj_name:
+        current_row += 1
+        ws.merge_cells(f"E{current_row}:G{current_row}")
+        ws[f"E{current_row}"].value = f"Project Name: {proj_name}"
+        ws[f"E{current_row}"].font = item_sub_font
+
+    # WBS / AFE / Cost Center line — dynamic label
+    wbs = slip_data.get("wbs", "")
+    wbs_label = slip_data.get("wbs_label", "WBS #")
+    if wbs:
+        current_row += 1
+        ws.merge_cells(f"E{current_row}:G{current_row}")
+        ws[f"E{current_row}"].value = f"{wbs_label}: {wbs}"
+        ws[f"E{current_row}"].font = item_sub_font
+
+    # Red accent line above notes
+    current_row += 2
     for c_idx in range(1, 9):
         ws.cell(row=current_row, column=c_idx).border = top_accent
     current_row += 1
-
-    proj_name = slip_data.get("project_name", "")
-    wbs = slip_data.get("wbs", "")
-    if proj_name or wbs:
-        if proj_name:
-            ws[f"A{current_row}"].value = "  PROJECT"
-            ws[f"A{current_row}"].font = label_font
-            ws.merge_cells(f"B{current_row}:D{current_row}")
-            ws[f"B{current_row}"].value = proj_name
-            ws[f"B{current_row}"].font = value_bold
-        if wbs:
-            ws[f"E{current_row}"].value = "WBS"
-            ws[f"E{current_row}"].font = label_font
-            ws[f"E{current_row}"].alignment = right_align
-            ws.merge_cells(f"F{current_row}:G{current_row}")
-            ws[f"F{current_row}"].value = wbs
-            ws[f"F{current_row}"].font = value_bold
-        current_row += 1
 
     notes = slip_data.get("notes", "")
     if notes:
@@ -4210,7 +4217,9 @@ def create_packing_slip():
             "ship_date":      data.get("ship_date") or None,
             "fob":            data.get("fob", ""),
             "terms":          data.get("terms", ""),
+            "approver":       data.get("approver", ""),
             "project_name":   data.get("project_name", ""),
+            "wbs_label":      data.get("wbs_label", "WBS #"),
             "wbs":            data.get("wbs", ""),
             "notes":          data.get("notes", ""),
             "template_id":    data.get("template_id") or None,
@@ -4242,6 +4251,7 @@ def create_packing_slip():
             "terms": data.get("terms"),
             "sales_order": data.get("sales_order"),
             "customer_order": data.get("customer_order"),
+            "approver": data.get("approver"),
         })
 
         audit_log("create_packing_slip", "packing_slip", slip_id, {
@@ -4292,7 +4302,9 @@ def update_packing_slip(slip_id):
             "ship_date":      data.get("ship_date") or None,
             "fob":            data.get("fob", ""),
             "terms":          data.get("terms", ""),
+            "approver":       data.get("approver", ""),
             "project_name":   data.get("project_name", ""),
+            "wbs_label":      data.get("wbs_label", "WBS #"),
             "wbs":            data.get("wbs", ""),
             "notes":          data.get("notes", ""),
             "updated_at":     datetime.now().isoformat(),
@@ -4792,8 +4804,10 @@ def quick_ship():
             "ship_date":      data.get("ship_date") or None,
             "fob":            tmpl.data.get("fob", ""),
             "terms":          tmpl.data.get("terms", ""),
-            "project_name":   tmpl.data.get("project_name", ""),
-            "wbs":            tmpl.data.get("wbs", ""),
+            "approver":       data.get("approver", ""),
+            "project_name":   data.get("project_name") or tmpl.data.get("project_name", ""),
+            "wbs_label":      data.get("wbs_label", "WBS #"),
+            "wbs":            data.get("wbs") or tmpl.data.get("wbs", ""),
             "notes":          "",
         }
 
@@ -4829,7 +4843,9 @@ def quick_ship():
             "ship_date":      slip_data["ship_date"],
             "fob":            slip_data["fob"],
             "terms":          slip_data["terms"],
+            "approver":       slip_data["approver"],
             "project_name":   slip_data["project_name"],
+            "wbs_label":      slip_data["wbs_label"],
             "wbs":            slip_data["wbs"],
             "template_id":    template_id,
             "finalized_at":   datetime.now().isoformat(),
