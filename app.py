@@ -4862,6 +4862,596 @@ def quick_ship():
         return jsonify({"error": str(e)}), 500
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SHIPPING DOCS MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/shipping-docs")
+def shipping_docs_page():
+    return render_template(
+        "shipping_docs.html",
+        supabase_url=os.environ.get("SUPABASE_URL", ""),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", ""),
+    )
+
+# ── DOCX Generation Engine ────────────────────────────────────────────────────
+
+def _detect_placeholders(file_bytes):
+    """Scan a DOCX for {PLACEHOLDER} patterns. Returns list of unique placeholders."""
+    from docx import Document as DocxDocument
+    doc = DocxDocument(io.BytesIO(file_bytes))
+    placeholders = set()
+    pattern = re.compile(r'\{[A-Z][A-Z0-9_]*\}')
+    for para in doc.paragraphs:
+        full_text = ''.join(run.text for run in para.runs)
+        for m in pattern.finditer(full_text):
+            placeholders.add(m.group())
+    # Also check tables
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    full_text = ''.join(run.text for run in para.runs)
+                    for m in pattern.finditer(full_text):
+                        placeholders.add(m.group())
+    return sorted(placeholders)
+
+
+def _replace_in_paragraph(paragraph, field_values):
+    """Replace {PLACEHOLDER} tags in a paragraph, handling runs that split placeholders."""
+    # Join all run texts
+    full_text = ''.join(run.text for run in paragraph.runs)
+    if '{' not in full_text:
+        return
+
+    # Check if any placeholder exists
+    new_text = full_text
+    changed = False
+    for key, value in field_values.items():
+        placeholder = '{' + key + '}'
+        if placeholder in new_text:
+            new_text = new_text.replace(placeholder, str(value))
+            changed = True
+
+    if not changed:
+        return
+
+    # Redistribute text across runs preserving formatting
+    runs = paragraph.runs
+    if len(runs) == 0:
+        return
+    if len(runs) == 1:
+        runs[0].text = new_text
+        return
+
+    # Put all new text in first run, clear the rest
+    runs[0].text = new_text
+    for run in runs[1:]:
+        run.text = ''
+
+
+def generate_shipping_doc(template_bytes, field_values):
+    """Generate a DOCX from template bytes by replacing {PLACEHOLDER} tags.
+    Returns BytesIO with the generated document."""
+    from docx import Document as DocxDocument
+    doc = DocxDocument(io.BytesIO(template_bytes))
+
+    # Replace in paragraphs
+    for para in doc.paragraphs:
+        _replace_in_paragraph(para, field_values)
+
+    # Replace in tables
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    _replace_in_paragraph(para, field_values)
+
+    # Replace in headers/footers
+    for section in doc.sections:
+        for header_footer in [section.header, section.footer]:
+            if header_footer and header_footer.paragraphs:
+                for para in header_footer.paragraphs:
+                    _replace_in_paragraph(para, field_values)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
+
+# ── Helper: save shipping field history ───────────────────────────────────────
+
+def _save_shipping_field_history(sb, fields_dict):
+    """Auto-save field values to shipping_field_history for smart dropdowns."""
+    for field_name, field_value in fields_dict.items():
+        if not field_value or not str(field_value).strip():
+            continue
+        try:
+            existing = sb.table("shipping_field_history")\
+                .select("id,use_count")\
+                .eq("field_name", field_name)\
+                .eq("field_value", str(field_value).strip())\
+                .maybeSingle().execute()
+            if existing.data:
+                sb.table("shipping_field_history").update({
+                    "use_count": existing.data["use_count"] + 1,
+                    "last_used_at": datetime.now().isoformat()
+                }).eq("id", existing.data["id"]).execute()
+            else:
+                sb.table("shipping_field_history").insert({
+                    "field_name": field_name,
+                    "field_value": str(field_value).strip()
+                }).execute()
+        except Exception:
+            pass  # best-effort
+
+
+# ── API: Customers ────────────────────────────────────────────────────────────
+
+@app.route("/api/shipping/customers", methods=["GET"])
+@require_auth
+def list_shipping_customers():
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_customers")\
+            .select("*")\
+            .eq("is_deleted", False)\
+            .order("display_order").execute()
+        customers = result.data or []
+        # Attach unit counts
+        for c in customers:
+            units = sb.table("shipping_units")\
+                .select("id")\
+                .eq("customer_id", c["id"])\
+                .eq("is_deleted", False).execute()
+            c["unit_count"] = len(units.data) if units.data else 0
+        return jsonify({"customers": customers})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/customers", methods=["POST"])
+@require_auth
+def create_shipping_customer():
+    data = request.get_json() or {}
+    if not data.get("customer_name"):
+        return jsonify({"error": "customer_name required"}), 400
+    try:
+        sb = get_user_sb()
+        row = {
+            "customer_name": data["customer_name"],
+            "display_order": data.get("display_order", 0),
+            "icon": data.get("icon"),
+        }
+        result = sb.table("shipping_customers").insert(row).execute()
+        audit_log("create_shipping_customer", "shipping_customer", result.data[0]["id"],
+                  {"customer_name": data["customer_name"]})
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/customers/<int:cid>", methods=["PUT"])
+@require_auth
+def update_shipping_customer(cid):
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        updates = {"updated_at": datetime.now().isoformat()}
+        if "customer_name" in data:
+            updates["customer_name"] = data["customer_name"]
+        if "display_order" in data:
+            updates["display_order"] = data["display_order"]
+        if "icon" in data:
+            updates["icon"] = data["icon"]
+        sb.table("shipping_customers").update(updates).eq("id", cid).execute()
+        audit_log("update_shipping_customer", "shipping_customer", cid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/customers/<int:cid>", methods=["DELETE"])
+@require_auth
+def delete_shipping_customer(cid):
+    try:
+        sb = get_user_sb()
+        sb.rpc("soft_delete_shipping_customer", {"p_customer_id": cid}).execute()
+        audit_log("delete_shipping_customer", "shipping_customer", cid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Units ────────────────────────────────────────────────────────────────
+
+@app.route("/api/shipping/customers/<int:cid>/units", methods=["GET"])
+@require_auth
+def list_shipping_units(cid):
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_units")\
+            .select("*")\
+            .eq("customer_id", cid)\
+            .eq("is_deleted", False)\
+            .order("display_order").execute()
+        return jsonify({"units": result.data or []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/customers/<int:cid>/units", methods=["POST"])
+@require_auth
+def create_shipping_unit(cid):
+    data = request.get_json() or {}
+    if not data.get("unit_name"):
+        return jsonify({"error": "unit_name required"}), 400
+    try:
+        sb = get_user_sb()
+        row = {
+            "customer_id": cid,
+            "unit_name": data["unit_name"],
+            "display_order": data.get("display_order", 0),
+        }
+        result = sb.table("shipping_units").insert(row).execute()
+        audit_log("create_shipping_unit", "shipping_unit", result.data[0]["id"],
+                  {"customer_id": cid, "unit_name": data["unit_name"]})
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/units/<int:uid>", methods=["PUT"])
+@require_auth
+def update_shipping_unit(uid):
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        updates = {"updated_at": datetime.now().isoformat()}
+        if "unit_name" in data:
+            updates["unit_name"] = data["unit_name"]
+        if "display_order" in data:
+            updates["display_order"] = data["display_order"]
+        sb.table("shipping_units").update(updates).eq("id", uid).execute()
+        audit_log("update_shipping_unit", "shipping_unit", uid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/units/<int:uid>", methods=["DELETE"])
+@require_auth
+def delete_shipping_unit(uid):
+    try:
+        sb = get_user_sb()
+        sb.rpc("soft_delete_shipping_unit", {"p_unit_id": uid}).execute()
+        audit_log("delete_shipping_unit", "shipping_unit", uid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Templates ────────────────────────────────────────────────────────────
+
+@app.route("/api/shipping/units/<int:uid>/templates", methods=["GET"])
+@require_auth
+def list_shipping_templates(uid):
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_templates")\
+            .select("id,template_name,description,file_name,placeholders,is_active,created_at")\
+            .eq("unit_id", uid)\
+            .eq("is_deleted", False)\
+            .order("created_at", desc=True).execute()
+        return jsonify({"templates": result.data or []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/units/<int:uid>/templates", methods=["POST"])
+@require_auth
+def upload_shipping_template(uid):
+    """Upload a DOCX template. Multipart form: file + template_name."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    file = request.files["file"]
+    if not file.filename or not file.filename.lower().endswith(".docx"):
+        return jsonify({"error": "Only .docx files are accepted"}), 400
+
+    template_name = request.form.get("template_name", file.filename.rsplit(".", 1)[0])
+    description = request.form.get("description", "")
+
+    try:
+        file_bytes = file.read()
+        placeholders = _detect_placeholders(file_bytes)
+
+        sb = get_user_sb()
+        row = {
+            "unit_id": uid,
+            "template_name": template_name,
+            "description": description,
+            "file_data": base64.b64encode(file_bytes).decode("ascii"),
+            "file_name": file.filename,
+            "placeholders": json.dumps(placeholders),
+        }
+        result = sb.table("shipping_templates").insert(row).execute()
+        audit_log("upload_shipping_template", "shipping_template", result.data[0]["id"],
+                  {"template_name": template_name, "placeholders": placeholders})
+        return jsonify({
+            "id": result.data[0]["id"],
+            "template_name": template_name,
+            "placeholders": placeholders,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/templates/<int:tid>", methods=["GET"])
+@require_auth
+def get_shipping_template(tid):
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_templates")\
+            .select("id,template_name,description,file_name,placeholders,is_active,unit_id,created_at")\
+            .eq("id", tid)\
+            .single().execute()
+        tmpl = result.data
+        # Parse placeholders if stored as string
+        if isinstance(tmpl.get("placeholders"), str):
+            tmpl["placeholders"] = json.loads(tmpl["placeholders"])
+        return jsonify({"template": tmpl})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/templates/<int:tid>", methods=["DELETE"])
+@require_auth
+def delete_shipping_template(tid):
+    try:
+        sb = get_user_sb()
+        sb.rpc("soft_delete_shipping_template", {"p_template_id": tid}).execute()
+        audit_log("delete_shipping_template", "shipping_template", tid)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/templates/<int:tid>/download", methods=["GET"])
+@require_auth
+def download_shipping_template(tid):
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_templates")\
+            .select("file_data,file_name")\
+            .eq("id", tid)\
+            .single().execute()
+        file_bytes = base64.b64decode(result.data["file_data"])
+        buf = io.BytesIO(file_bytes)
+        buf.seek(0)
+        return send_file(buf,
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                         as_attachment=True,
+                         download_name=result.data["file_name"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Generate Document ────────────────────────────────────────────────────
+
+@app.route("/api/shipping/templates/<int:tid>/generate", methods=["POST"])
+@require_auth
+def generate_shipping_document(tid):
+    data = request.get_json() or {}
+    field_values = data.get("field_values", {})
+    if not field_values:
+        return jsonify({"error": "field_values required"}), 400
+    try:
+        sb = get_user_sb()
+
+        # Get template
+        tmpl = sb.table("shipping_templates")\
+            .select("file_data,file_name,template_name,unit_id")\
+            .eq("id", tid)\
+            .single().execute()
+
+        # Get unit + customer names for history
+        unit = sb.table("shipping_units")\
+            .select("unit_name,customer_id")\
+            .eq("id", tmpl.data["unit_id"])\
+            .single().execute()
+        customer = sb.table("shipping_customers")\
+            .select("customer_name")\
+            .eq("id", unit.data["customer_id"])\
+            .single().execute()
+
+        template_bytes = base64.b64decode(tmpl.data["file_data"])
+        generated_buf = generate_shipping_doc(template_bytes, field_values)
+
+        # Build output filename
+        serial = field_values.get("SERIAL_NUMBER", "")
+        safe_serial = re.sub(r'[^\w\-]', '_', serial)[:30] if serial else ""
+        base_name = tmpl.data["file_name"].rsplit(".", 1)[0]
+        out_name = f"{base_name}_{safe_serial}.docx" if safe_serial else f"{base_name}_generated.docx"
+
+        # Save to history
+        generated_bytes = generated_buf.getvalue()
+        history_row = {
+            "template_id": tid,
+            "customer_name": customer.data["customer_name"],
+            "unit_name": unit.data["unit_name"],
+            "template_name": tmpl.data["template_name"],
+            "field_values": json.dumps(field_values),
+            "file_data": base64.b64encode(generated_bytes).decode("ascii"),
+            "file_name": out_name,
+        }
+        sb.table("shipping_generated_docs").insert(history_row).execute()
+
+        # Save field values to history for smart dropdowns
+        _save_shipping_field_history(sb, field_values)
+
+        audit_log("generate_shipping_doc", "shipping_template", tid,
+                  {"field_values": field_values, "output": out_name})
+
+        return send_file(io.BytesIO(generated_bytes),
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                         as_attachment=True,
+                         download_name=out_name)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Customer Defaults ────────────────────────────────────────────────────
+
+@app.route("/api/shipping/customers/<int:cid>/defaults", methods=["GET"])
+@require_auth
+def get_shipping_customer_defaults(cid):
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_customer_defaults")\
+            .select("field_key,field_value")\
+            .eq("customer_id", cid).execute()
+        defaults = {r["field_key"]: r["field_value"] for r in (result.data or [])}
+        return jsonify({"defaults": defaults})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/customers/<int:cid>/defaults", methods=["PUT"])
+@require_auth
+def set_shipping_customer_defaults(cid):
+    data = request.get_json() or {}
+    defaults = data.get("defaults", {})
+    try:
+        sb = get_user_sb()
+        # Delete existing, re-insert
+        sb.table("shipping_customer_defaults")\
+            .delete().eq("customer_id", cid).execute()
+        for key, value in defaults.items():
+            if value and str(value).strip():
+                sb.table("shipping_customer_defaults").insert({
+                    "customer_id": cid,
+                    "field_key": key,
+                    "field_value": str(value).strip(),
+                }).execute()
+        audit_log("set_shipping_defaults", "shipping_customer", cid, {"defaults": defaults})
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: History ──────────────────────────────────────────────────────────────
+
+@app.route("/api/shipping/history", methods=["GET"])
+@require_auth
+def list_shipping_history():
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_generated_docs")\
+            .select("id,customer_name,unit_name,template_name,field_values,file_name,generated_at,created_by")\
+            .eq("is_deleted", False)\
+            .order("generated_at", desc=True)\
+            .limit(100).execute()
+        return jsonify({"docs": result.data or []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/history/<int:doc_id>/download", methods=["GET"])
+@require_auth
+def download_shipping_history(doc_id):
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_generated_docs")\
+            .select("file_data,file_name")\
+            .eq("id", doc_id)\
+            .single().execute()
+        file_bytes = base64.b64decode(result.data["file_data"])
+        return send_file(io.BytesIO(file_bytes),
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                         as_attachment=True,
+                         download_name=result.data["file_name"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/history/<int:doc_id>", methods=["DELETE"])
+@require_auth
+def delete_shipping_history(doc_id):
+    try:
+        sb = get_user_sb()
+        sb.rpc("soft_delete_shipping_doc", {"p_doc_id": doc_id}).execute()
+        audit_log("delete_shipping_doc", "shipping_generated_doc", doc_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Field History (smart dropdowns) ──────────────────────────────────────
+
+@app.route("/api/shipping/field-history", methods=["GET"])
+@require_auth
+def get_shipping_field_history():
+    field = request.args.get("field", "")
+    if not field:
+        return jsonify({"error": "field parameter required"}), 400
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_field_history")\
+            .select("field_value,use_count")\
+            .eq("field_name", field)\
+            .order("use_count", desc=True)\
+            .limit(20).execute()
+        return jsonify({"values": [r["field_value"] for r in result.data]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/field-history", methods=["POST"])
+@require_auth
+def save_shipping_field_history():
+    data = request.get_json() or {}
+    field = data.get("field", "")
+    value = data.get("value", "")
+    if not field or not value:
+        return jsonify({"error": "field and value required"}), 400
+    try:
+        sb = get_user_sb()
+        existing = sb.table("shipping_field_history")\
+            .select("id")\
+            .eq("field_name", field)\
+            .eq("field_value", value.strip())\
+            .maybeSingle().execute()
+        if existing.data:
+            return jsonify({"success": True, "exists": True})
+        sb.table("shipping_field_history").insert({
+            "field_name": field,
+            "field_value": value.strip(),
+        }).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/field-history", methods=["DELETE"])
+@require_auth
+def delete_shipping_field_history():
+    data = request.get_json() or {}
+    field = data.get("field", "")
+    value = data.get("value", "")
+    if not field or not value:
+        return jsonify({"error": "field and value required"}), 400
+    try:
+        sb = get_user_sb()
+        sb.table("shipping_field_history")\
+            .delete()\
+            .eq("field_name", field)\
+            .eq("field_value", value).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
