@@ -3877,33 +3877,33 @@ def generate_packing_slip_excel(slip_data, items):
                 ws.cell(row=r, column=c).fill = fill
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ROW 1-4: BRAND HEADER — logo + company name + contact
+    # ROW 1-4: BRAND HEADER — logo left, company info right (no overlap)
     # ══════════════════════════════════════════════════════════════════════════
-    ws.row_dimensions[1].height = 18
-    ws.row_dimensions[2].height = 28
-    ws.row_dimensions[3].height = 13
-    ws.row_dimensions[4].height = 13
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 22
+    ws.row_dimensions[3].height = 16
+    ws.row_dimensions[4].height = 8
 
     fill_range(1, 1, 4, 8, white_fill)
 
-    # Logo image — 2:1 aspect ratio, span A1:B2
+    # Logo image — 2:1 aspect ratio, anchored in A1, sized to fit A1:B2
     logo_path = os.path.join(os.path.dirname(__file__), "static", "aae_logo.jpg")
     try:
         img = XlImage(logo_path)
-        img.width = 140
-        img.height = 70
+        img.width = 150
+        img.height = 75
         ws.add_image(img, "A1")
     except Exception:
         pass  # graceful if logo missing
 
-    # Company name
-    ws.merge_cells("B1:D2")
-    c = ws["B1"]
+    # Company name — starts at C to avoid logo overlap
+    ws.merge_cells("C1:D2")
+    c = ws["C1"]
     c.value = "AAE AUTOMATION"
     c.font = brand_font
     c.alignment = Alignment(horizontal="left", vertical="center")
 
-    # Contact info (right side)
+    # Contact info — right columns, clear of logo
     ws.merge_cells("E1:G1")
     ws["E1"].value = "8528 SW 2nd St., Oklahoma City, OK 73128"
     ws["E1"].font = sub_font
@@ -3914,10 +3914,10 @@ def generate_packing_slip_excel(slip_data, items):
     ws["E2"].font = sub_font
     ws["E2"].alignment = right_align
 
-    ws.merge_cells("B3:D3")
-    ws["B3"].value = "UL-508A Certified Industrial Control Panel Shop"
-    ws["B3"].font = Font(name="Calibri", italic=True, size=8, color=MID_GRAY)
-    ws["B3"].alignment = left_align
+    ws.merge_cells("C3:G3")
+    ws["C3"].value = "UL-508A Certified Industrial Control Panel Shop"
+    ws["C3"].font = Font(name="Calibri", italic=True, size=8, color=MID_GRAY)
+    ws["C3"].alignment = Alignment(horizontal="center", vertical="center")
 
     # Red accent line (row 4 bottom border)
     for c_idx in range(1, 9):
@@ -3926,6 +3926,9 @@ def generate_packing_slip_excel(slip_data, items):
     # ══════════════════════════════════════════════════════════════════════════
     # ROW 5: PACKING SLIP TITLE BAR
     # ══════════════════════════════════════════════════════════════════════════
+    # Packing slip number = sales order #
+    display_num = slip_data.get("sales_order", "") or slip_data.get("slip_number", "")
+
     ws.row_dimensions[5].height = 30
     ws.merge_cells("A5:E5")
     t = ws["A5"]
@@ -3936,8 +3939,6 @@ def generate_packing_slip_excel(slip_data, items):
     for c_idx in range(1, 6):
         ws.cell(row=5, column=c_idx).fill = header_fill
 
-    # Job / slip label in the title bar — prefer job_number, fall back to slip_number
-    display_num = slip_data.get("job_number", "") or slip_data.get("slip_number", "")
     ws.merge_cells("F5:G5")
     sn = ws["F5"]
     sn.value = display_num
@@ -4389,9 +4390,10 @@ def download_packing_slip_excel(slip_id):
             .order("sort_order").execute()
 
         buf = generate_packing_slip_excel(slip.data, items.data)
-        safe_num = (slip.data.get("slip_number") or "packing_slip").replace("/", "-")
+        sales_ord = (slip.data.get("sales_order") or slip.data.get("slip_number") or "packing_slip")
+        safe_name = sales_ord.replace("/", "-").replace("\\", "-")
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                         as_attachment=True, download_name=f"AAE_{safe_num}.xlsx")
+                         as_attachment=True, download_name=f"AAE Packing Slip {safe_name}.xlsx")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -4814,9 +4816,10 @@ def quick_ship():
 
         # Generate Excel
         buf = generate_packing_slip_excel(slip_data, excel_items)
-        safe_num = slip_number.replace("/", "-")
+        sales_ord = data.get("sales_order", "") or slip_number
+        safe_name = sales_ord.replace("/", "-").replace("\\", "-")
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                         as_attachment=True, download_name=f"AAE_{safe_num}.xlsx")
+                         as_attachment=True, download_name=f"AAE Packing Slip {safe_name}.xlsx")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
