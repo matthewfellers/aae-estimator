@@ -128,10 +128,20 @@ a { color: var(--primary); text-decoration: none; }
 }
 .dropdown-menu.show { display: block; }
 .dropdown-item {
-  padding: 8px 12px; cursor: pointer; font-size: 0.82rem; color: var(--text);
+  padding: 8px 12px; font-size: 0.82rem; color: var(--text);
   border-bottom: 1px solid #f0f0f0; white-space: pre-wrap;
+  display: flex; align-items: flex-start; gap: 8px;
 }
 .dropdown-item:hover { background: #FDECEA; }
+.dropdown-item-text {
+  flex: 1; cursor: pointer; white-space: pre-wrap;
+}
+.dropdown-item-del {
+  flex-shrink: 0; width: 20px; height: 20px; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+  color: #999; font-size: 1rem; border-radius: 3px; line-height: 1;
+}
+.dropdown-item-del:hover { color: #fff; background: var(--primary); }
 .dropdown-add-new {
   border-top: 2px solid var(--border); padding: 8px 12px; background: #fafafa;
 }
@@ -900,47 +910,73 @@ function toast(msg, type="success") {
 function initPage() {
   addItemRow(); // start with one empty row
   loadTemplatesForCommon();
+  initTypeToFilter();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SMART DROPDOWNS
 // ═══════════════════════════════════════════════════════════════════════════════
 const _ddCache = {};
+// Track which field maps to which input for type-to-filter
+const _ddFieldMap = {
+  sold_to: "ps_sold_to", ship_to: "ps_ship_to", attn: "ps_attn",
+  sales_order: "ps_sales_order", customer_order: "ps_customer_order",
+  fob: "ps_fob", terms: "ps_terms"
+};
 
-async function showFieldDropdown(fieldName, inputId, btnEl) {
-  const menu = document.getElementById("dd_" + fieldName);
-  if (!menu) return;
-
-  // Toggle
-  if (menu.classList.contains("show")) { menu.classList.remove("show"); return; }
-
-  // Close all other menus
-  document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
-
-  // Load from cache or API
-  let values = _ddCache[fieldName];
-  if (!values) {
+async function _ensureCache(fieldName) {
+  if (!_ddCache[fieldName]) {
     try {
       const resp = await fetch(`/api/packing-slips/field-history?field=${fieldName}`, { headers: authHeadersNoBody() });
       const data = await resp.json();
-      values = data.values || [];
-      _ddCache[fieldName] = values;
-    } catch(e) { values = []; }
+      _ddCache[fieldName] = data.values || [];
+    } catch(e) { _ddCache[fieldName] = []; }
+  }
+  return _ddCache[fieldName];
+}
+
+function _renderDropdown(fieldName, inputId, values, filter) {
+  const menu = document.getElementById("dd_" + fieldName);
+  if (!menu) return;
+  menu.innerHTML = "";
+
+  // Sort: matching items first if user is typing
+  let sorted = [...values];
+  if (filter) {
+    const f = filter.toLowerCase();
+    sorted.sort((a, b) => {
+      const aMatch = a.toLowerCase().includes(f) ? 0 : 1;
+      const bMatch = b.toLowerCase().includes(f) ? 0 : 1;
+      return aMatch - bMatch;
+    });
   }
 
-  menu.innerHTML = "";
-  if (values.length === 0) {
+  if (sorted.length === 0) {
     menu.innerHTML = '<div class="dropdown-item" style="color:var(--muted)">No saved values yet</div>';
   } else {
-    values.forEach(v => {
+    sorted.forEach(v => {
       const item = document.createElement("div");
       item.className = "dropdown-item";
-      item.textContent = v;
-      item.onclick = () => {
-        const el = document.getElementById(inputId);
-        el.value = v;
+
+      const textSpan = document.createElement("span");
+      textSpan.className = "dropdown-item-text";
+      textSpan.textContent = v;
+      textSpan.onclick = () => {
+        document.getElementById(inputId).value = v;
         menu.classList.remove("show");
       };
+
+      const delBtn = document.createElement("span");
+      delBtn.className = "dropdown-item-del";
+      delBtn.innerHTML = "&times;";
+      delBtn.title = "Delete from saved list";
+      delBtn.onclick = (e) => {
+        e.stopPropagation();
+        deleteFieldValue(fieldName, v, item);
+      };
+
+      item.appendChild(textSpan);
+      item.appendChild(delBtn);
       menu.appendChild(item);
     });
   }
@@ -965,8 +1001,72 @@ async function showFieldDropdown(fieldName, inputId, btnEl) {
     document.getElementById(`dd_add_input_${fieldName}`).focus();
   };
   menu.appendChild(addNewDiv);
+}
 
+async function showFieldDropdown(fieldName, inputId, btnEl) {
+  const menu = document.getElementById("dd_" + fieldName);
+  if (!menu) return;
+
+  // Toggle
+  if (menu.classList.contains("show")) { menu.classList.remove("show"); return; }
+
+  // Close all other menus
+  document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
+
+  const values = await _ensureCache(fieldName);
+  const el = document.getElementById(inputId);
+  const filter = (el.value || "").trim();
+  _renderDropdown(fieldName, inputId, values, filter);
   menu.classList.add("show");
+}
+
+// ── Type-to-filter: as user types, open dropdown with matches at top ──
+function initTypeToFilter() {
+  for (const [fieldName, inputId] of Object.entries(_ddFieldMap)) {
+    const el = document.getElementById(inputId);
+    if (!el) continue;
+    el.addEventListener("input", async () => {
+      const values = await _ensureCache(fieldName);
+      const filter = (el.value || "").trim();
+      if (!filter) {
+        // If field cleared, close dropdown
+        const menu = document.getElementById("dd_" + fieldName);
+        if (menu) menu.classList.remove("show");
+        return;
+      }
+      // Only show if there are matching values
+      const f = filter.toLowerCase();
+      const hasMatch = values.some(v => v.toLowerCase().includes(f));
+      if (hasMatch) {
+        document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
+        _renderDropdown(fieldName, inputId, values, filter);
+        const menu = document.getElementById("dd_" + fieldName);
+        if (menu) menu.classList.add("show");
+      }
+    });
+  }
+}
+
+async function deleteFieldValue(fieldName, value, itemEl) {
+  if (!confirm("Remove this from the saved list?")) return;
+  try {
+    const resp = await fetch("/api/packing-slips/field-history", {
+      method: "DELETE",
+      headers: authHeaders(),
+      body: JSON.stringify({ field: fieldName, value: value })
+    });
+    if (resp.ok) {
+      // Remove from cache
+      if (_ddCache[fieldName]) {
+        _ddCache[fieldName] = _ddCache[fieldName].filter(v => v !== value);
+      }
+      // Remove the item from the menu visually
+      itemEl.remove();
+      showToast("Removed from dropdown", "success");
+    } else {
+      showToast("Failed to delete", "error");
+    }
+  } catch(e) { showToast("Failed to delete", "error"); }
 }
 
 async function saveNewFieldValue(fieldName, inputId) {
@@ -980,11 +1080,8 @@ async function saveNewFieldValue(fieldName, inputId) {
       body: JSON.stringify({ field: fieldName, value: val })
     });
     if (resp.ok) {
-      // Fill the field with the new value
       document.getElementById(inputId).value = val;
-      // Clear cache so next open fetches fresh data
       delete _ddCache[fieldName];
-      // Close dropdown
       document.querySelectorAll(".dropdown-menu.show").forEach(m => m.classList.remove("show"));
       showToast("Saved to dropdown", "success");
     } else {
