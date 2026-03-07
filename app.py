@@ -3815,200 +3815,356 @@ def _next_slip_number(sb):
 # ── Helper: generate packing slip Excel ──────────────────────────────────────
 
 def generate_packing_slip_excel(slip_data, items):
-    """Build a .xlsx matching AAE Blank Packing Slip.xls layout. Returns BytesIO."""
+    """Build a modern, branded AAE packing slip .xlsx. Returns BytesIO."""
     import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
+    from openpyxl.drawing.image import Image as XlImage
+    from openpyxl.utils import get_column_letter
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Packing Slip"
 
-    # Column widths (A-G matching original)
-    ws.column_dimensions["A"].width = 10
-    ws.column_dimensions["B"].width = 16
-    ws.column_dimensions["C"].width = 16
-    ws.column_dimensions["D"].width = 24
-    ws.column_dimensions["E"].width = 8
-    ws.column_dimensions["F"].width = 40
-    ws.column_dimensions["G"].width = 16
+    # ── Brand colors ──
+    AAE_RED = "9B1B1B"
+    AAE_RED_LIGHT = "FDECEA"
+    DARK_TEXT = "1A0505"
+    MID_GRAY = "666666"
+    LIGHT_BG = "F8F9FA"
+    WHITE = "FFFFFF"
+    HEADER_BG = "2C2C2C"
 
-    thin_border = Border(
-        left=Side(style="thin"), right=Side(style="thin"),
-        top=Side(style="thin"), bottom=Side(style="thin")
-    )
-    header_font = Font(name="Arial", bold=True, size=11)
-    title_font = Font(name="Arial", bold=True, size=18)
-    company_font = Font(name="Arial", bold=True, size=14)
-    normal_font = Font(name="Arial", size=10)
-    small_font = Font(name="Arial", size=9)
-    label_font = Font(name="Arial", bold=True, size=10)
+    # ── Column widths (A-H) ──
+    col_widths = {"A": 10, "B": 15, "C": 15, "D": 26, "E": 36, "F": 16, "G": 16, "H": 2}
+    for c, w in col_widths.items():
+        ws.column_dimensions[c].width = w
 
-    # ── Rows 1-5: Company header ──
-    ws.merge_cells("A1:E4")
-    cell_a1 = ws["A1"]
-    cell_a1.value = "AAE AUTOMATION"
-    cell_a1.font = company_font
-    cell_a1.alignment = Alignment(horizontal="center", vertical="center")
+    # ── Reusable styles ──
+    no_border = Border()
+    thin_side = Side(style="thin", color="D0D0D0")
+    thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    bottom_accent = Border(bottom=Side(style="medium", color=AAE_RED))
+    top_accent = Border(top=Side(style="medium", color=AAE_RED))
 
-    ws["F1"] = "AAE Automation, Inc."
-    ws["F1"].font = Font(name="Arial", bold=True, size=10)
-    ws["F2"] = "Street: 8528 SW 2nd St., Oklahoma City, Oklahoma 73128"
-    ws["F2"].font = small_font
-    ws["F3"] = "Phone: 405-634-7900"
-    ws["F3"].font = small_font
-    ws["F4"] = "Email: tfellers@aaeok.com"
-    ws["F4"].font = small_font
-    ws["F5"] = "Website: www.aaeok.com"
-    ws["F5"].font = small_font
+    brand_font = Font(name="Calibri", bold=True, size=20, color=AAE_RED)
+    sub_font = Font(name="Calibri", size=9, color=MID_GRAY)
+    title_font = Font(name="Calibri", bold=True, size=16, color=WHITE)
+    slip_num_font = Font(name="Calibri", bold=True, size=11, color=AAE_RED)
+    label_font = Font(name="Calibri", bold=True, size=9, color=MID_GRAY)
+    value_font = Font(name="Calibri", size=10, color=DARK_TEXT)
+    value_bold = Font(name="Calibri", bold=True, size=10, color=DARK_TEXT)
+    col_hdr_font = Font(name="Calibri", bold=True, size=9, color=WHITE)
+    item_font = Font(name="Calibri", size=10, color=DARK_TEXT)
+    item_sub_font = Font(name="Calibri", italic=True, size=9, color=MID_GRAY)
+    section_font = Font(name="Calibri", bold=True, size=10, color=AAE_RED)
+    footer_font = Font(name="Calibri", size=8, color=MID_GRAY)
 
-    # ── Row 7: PACKING SLIP title ──
-    ws.merge_cells("A7:G7")
-    cell_title = ws["A7"]
-    cell_title.value = "PACKING SLIP"
-    cell_title.font = title_font
-    cell_title.alignment = Alignment(horizontal="center")
+    red_fill = PatternFill(start_color=AAE_RED, end_color=AAE_RED, fill_type="solid")
+    light_fill = PatternFill(start_color=LIGHT_BG, end_color=LIGHT_BG, fill_type="solid")
+    white_fill = PatternFill(start_color=WHITE, end_color=WHITE, fill_type="solid")
+    header_fill = PatternFill(start_color=HEADER_BG, end_color=HEADER_BG, fill_type="solid")
+    stripe_fill = PatternFill(start_color="F5F0F0", end_color="F5F0F0", fill_type="solid")
 
-    # ── Row 8: Slip number (right side) ──
-    ws["F8"] = f"Slip #: {slip_data.get('slip_number', '')}"
-    ws["F8"].font = label_font
+    left_align = Alignment(horizontal="left", vertical="center")
+    center_align = Alignment(horizontal="center", vertical="center")
+    right_align = Alignment(horizontal="right", vertical="center")
+    wrap_align = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
-    # ── Rows 9-15: Sold To / Ship To / header fields ──
-    row_base = 9  # 0-indexed row 8 in Excel = row 9
+    # ── Helper: fill a range with background ──
+    def fill_range(r1, c1, r2, c2, fill):
+        for r in range(r1, r2 + 1):
+            for c in range(c1, c2 + 1):
+                ws.cell(row=r, column=c).fill = fill
 
-    ws[f"B{row_base+1}"] = "Sold To:"
-    ws[f"B{row_base+1}"].font = label_font
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROW 1-4: BRAND HEADER — logo + company name + contact
+    # ══════════════════════════════════════════════════════════════════════════
+    ws.row_dimensions[1].height = 18
+    ws.row_dimensions[2].height = 28
+    ws.row_dimensions[3].height = 13
+    ws.row_dimensions[4].height = 13
+
+    fill_range(1, 1, 4, 8, white_fill)
+
+    # Logo image
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "aae_logo.jpg")
+    try:
+        img = XlImage(logo_path)
+        img.width = 62
+        img.height = 62
+        ws.add_image(img, "A1")
+    except Exception:
+        pass  # graceful if logo missing
+
+    # Company name
+    ws.merge_cells("B1:D2")
+    c = ws["B1"]
+    c.value = "AAE AUTOMATION"
+    c.font = brand_font
+    c.alignment = Alignment(horizontal="left", vertical="center")
+
+    # Contact info (right side)
+    ws.merge_cells("E1:G1")
+    ws["E1"].value = "8528 SW 2nd St., Oklahoma City, OK 73128"
+    ws["E1"].font = sub_font
+    ws["E1"].alignment = right_align
+
+    ws.merge_cells("E2:G2")
+    ws["E2"].value = "405-210-1567  |  contact@aaeautomation.com  |  aaeok.com"
+    ws["E2"].font = sub_font
+    ws["E2"].alignment = right_align
+
+    ws.merge_cells("B3:D3")
+    ws["B3"].value = "UL-508A Certified Industrial Control Panel Shop"
+    ws["B3"].font = Font(name="Calibri", italic=True, size=8, color=MID_GRAY)
+    ws["B3"].alignment = left_align
+
+    # Red accent line (row 4 bottom border)
+    for c_idx in range(1, 9):
+        ws.cell(row=4, column=c_idx).border = bottom_accent
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROW 5: PACKING SLIP TITLE BAR
+    # ══════════════════════════════════════════════════════════════════════════
+    ws.row_dimensions[5].height = 30
+    ws.merge_cells("A5:E5")
+    t = ws["A5"]
+    t.value = "    PACKING SLIP"
+    t.font = title_font
+    t.fill = header_fill
+    t.alignment = Alignment(horizontal="left", vertical="center")
+    for c_idx in range(1, 6):
+        ws.cell(row=5, column=c_idx).fill = header_fill
+
+    # Slip number in the title bar
+    ws.merge_cells("F5:G5")
+    sn = ws["F5"]
+    sn.value = slip_data.get("slip_number", "")
+    sn.font = Font(name="Calibri", bold=True, size=12, color=WHITE)
+    sn.fill = header_fill
+    sn.alignment = right_align
+    ws["H5"].fill = header_fill
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROW 6: spacer
+    # ══════════════════════════════════════════════════════════════════════════
+    ws.row_dimensions[6].height = 6
+    fill_range(6, 1, 6, 8, white_fill)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROWS 7-15: SHIPMENT DETAILS (two-column layout on light background)
+    # ══════════════════════════════════════════════════════════════════════════
+    fill_range(7, 1, 16, 8, light_fill)
+
+    # ── Left column: Sold To / Ship To / ATTN ──
+    ws.row_dimensions[7].height = 14
+    ws["A7"].value = "  SOLD TO"
+    ws["A7"].font = label_font
+    ws["A7"].fill = light_fill
+
     sold_to = slip_data.get("sold_to", "")
     sold_to_lines = sold_to.split("\n") if sold_to else [""]
-    for i, line in enumerate(sold_to_lines):
-        ws[f"C{row_base+1+i}"] = line
-        ws[f"C{row_base+1+i}"].font = normal_font
+    for i, line in enumerate(sold_to_lines[:4]):
+        r = 8 + i
+        ws.merge_cells(f"A{r}:C{r}")
+        cell = ws[f"A{r}"]
+        cell.value = f"  {line}"
+        cell.font = value_bold if i == 0 else value_font
+        cell.fill = light_fill
 
-    ws[f"F{row_base+1}"] = "Sales Order#:"
-    ws[f"F{row_base+1}"].font = label_font
-    ws[f"G{row_base+1}"] = slip_data.get("sales_order", "")
-    ws[f"G{row_base+1}"].font = normal_font
+    ws.row_dimensions[12].height = 14
+    ws["A12"].value = "  SHIP TO"
+    ws["A12"].font = label_font
+    ws["A12"].fill = light_fill
 
-    ws[f"F{row_base+2}"] = "Order Date:"
-    ws[f"F{row_base+2}"].font = label_font
-    order_date = slip_data.get("order_date", "")
-    ws[f"G{row_base+2}"] = str(order_date) if order_date else ""
-    ws[f"G{row_base+2}"].font = normal_font
-
-    ws[f"F{row_base+3}"] = "Customer Order#:"
-    ws[f"F{row_base+3}"].font = label_font
-    ws[f"G{row_base+3}"] = slip_data.get("customer_order", "")
-    ws[f"G{row_base+3}"].font = normal_font
-
-    ws[f"F{row_base+4}"] = "Ship Date:"
-    ws[f"F{row_base+4}"].font = label_font
-    ship_date = slip_data.get("ship_date", "")
-    ws[f"G{row_base+4}"] = str(ship_date) if ship_date else ""
-    ws[f"G{row_base+4}"].font = normal_font
-
-    ws[f"G{row_base+5}"] = "F.O.B.:"
-    ws[f"G{row_base+5}"].font = label_font
-
-    fob_row = row_base + 5
-    ws.merge_cells(f"G{fob_row}:G{fob_row}")
-    ws[f"F{fob_row}"] = "F.O.B.:"
-    ws[f"F{fob_row}"].font = label_font
-    ws[f"G{fob_row}"] = slip_data.get("fob", "")
-    ws[f"G{fob_row}"].font = normal_font
-
-    terms_row = row_base + 6
-    ws[f"B{terms_row}"] = "Ship To:"
-    ws[f"B{terms_row}"].font = label_font
     ship_to = slip_data.get("ship_to", "")
     ship_to_lines = ship_to.split("\n") if ship_to else [""]
-    for i, line in enumerate(ship_to_lines):
-        ws[f"C{terms_row+i}"] = line
-        ws[f"C{terms_row+i}"].font = normal_font
+    for i, line in enumerate(ship_to_lines[:3]):
+        r = 13 + i
+        ws.merge_cells(f"A{r}:C{r}")
+        cell = ws[f"A{r}"]
+        cell.value = f"  {line}"
+        cell.font = value_bold if i == 0 else value_font
+        cell.fill = light_fill
 
-    ws[f"F{terms_row}"] = "Terms:"
-    ws[f"F{terms_row}"].font = label_font
-    ws[f"G{terms_row}"] = slip_data.get("terms", "")
-    ws[f"G{terms_row}"].font = normal_font
-
-    # ATTN row
     attn = slip_data.get("attn", "")
     if attn:
-        attn_row = terms_row + 2
-        ws[f"B{attn_row}"] = "ATTN:"
-        ws[f"B{attn_row}"].font = label_font
-        ws[f"C{attn_row}"] = attn
-        ws[f"C{attn_row}"].font = normal_font
+        ws["A16"].value = "  ATTN"
+        ws["A16"].font = label_font
+        ws["A16"].fill = light_fill
+        ws.merge_cells("B16:C16")
+        ws["B16"].value = attn
+        ws["B16"].font = value_bold
+        ws["B16"].fill = light_fill
 
-    # ── Column headers row ──
-    hdr_row = 20
-    headers = ["Item", "Qty Ordered", "Qty Shipped", "Part Number", "", "Description", ""]
-    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-    for col_idx, hdr in enumerate(headers, 1):
+    # ── Right column: Order details ──
+    detail_rows = [
+        (7, "SALES ORDER #", slip_data.get("sales_order", "")),
+        (8, "CUSTOMER ORDER #", slip_data.get("customer_order", "")),
+        (9, "ORDER DATE", str(slip_data.get("order_date", "")) if slip_data.get("order_date") else ""),
+        (10, "SHIP DATE", str(slip_data.get("ship_date", "")) if slip_data.get("ship_date") else ""),
+        (11, "F.O.B.", slip_data.get("fob", "")),
+        (12, "TERMS", slip_data.get("terms", "")),
+    ]
+    for r, lbl, val in detail_rows:
+        ws[f"E{r}"].value = lbl
+        ws[f"E{r}"].font = label_font
+        ws[f"E{r}"].fill = light_fill
+        ws[f"E{r}"].alignment = right_align
+        ws.merge_cells(f"F{r}:G{r}")
+        ws[f"F{r}"].value = val
+        ws[f"F{r}"].font = value_bold
+        ws[f"F{r}"].fill = light_fill
+        ws[f"F{r}"].alignment = left_align
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROW 17: spacer
+    # ══════════════════════════════════════════════════════════════════════════
+    ws.row_dimensions[17].height = 6
+    fill_range(17, 1, 17, 8, white_fill)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROW 18: COLUMN HEADERS (dark bar)
+    # ══════════════════════════════════════════════════════════════════════════
+    hdr_row = 18
+    ws.row_dimensions[hdr_row].height = 22
+    headers = [
+        ("Item", center_align),
+        ("Qty Ordered", center_align),
+        ("Qty Shipped", center_align),
+        ("Part Number", left_align),
+        ("Description", left_align),
+        ("", center_align),
+        ("", center_align),
+    ]
+    for col_idx, (hdr, align) in enumerate(headers, 1):
         cell = ws.cell(row=hdr_row, column=col_idx, value=hdr)
-        cell.font = header_font
+        cell.font = col_hdr_font
         cell.fill = header_fill
-        cell.border = thin_border
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = align
+    ws.cell(row=hdr_row, column=8).fill = header_fill
 
-    # ── Line items ──
-    current_row = hdr_row + 2  # skip a blank row after headers
-    for item in sorted(items, key=lambda x: x.get("sort_order", 0) or x.get("item_number", 0)):
+    # ══════════════════════════════════════════════════════════════════════════
+    # LINE ITEMS — zebra-striped rows
+    # ══════════════════════════════════════════════════════════════════════════
+    current_row = hdr_row + 1
+    sorted_items = sorted(items, key=lambda x: x.get("sort_order", 0) or x.get("item_number", 0))
+
+    for idx, item in enumerate(sorted_items):
+        row_fill = stripe_fill if idx % 2 == 0 else white_fill
+
         item_num = item.get("item_number", 0)
         item_str = f"{item_num:05d}" if item_num else ""
 
-        ws.cell(row=current_row, column=1, value=item_str).font = normal_font
-        ws.cell(row=current_row, column=1).alignment = Alignment(horizontal="center")
+        ws.cell(row=current_row, column=1, value=item_str).font = item_font
+        ws.cell(row=current_row, column=1).alignment = center_align
 
         qty_ord = item.get("qty_ordered")
-        ws.cell(row=current_row, column=2, value=qty_ord if qty_ord is not None else "").font = normal_font
-        ws.cell(row=current_row, column=2).alignment = Alignment(horizontal="center")
+        ws.cell(row=current_row, column=2, value=qty_ord if qty_ord is not None else "").font = item_font
+        ws.cell(row=current_row, column=2).alignment = center_align
 
         qty_ship = item.get("qty_shipped")
-        ws.cell(row=current_row, column=3, value=qty_ship if qty_ship is not None else "").font = normal_font
-        ws.cell(row=current_row, column=3).alignment = Alignment(horizontal="center")
+        ws.cell(row=current_row, column=3, value=qty_ship if qty_ship is not None else "").font = item_font
+        ws.cell(row=current_row, column=3).alignment = center_align
 
-        ws.cell(row=current_row, column=4, value=item.get("part_number", "")).font = normal_font
+        ws.cell(row=current_row, column=4, value=item.get("part_number", "")).font = value_bold
+        ws.cell(row=current_row, column=4).alignment = left_align
 
-        desc = item.get("description", "")
-        ws.cell(row=current_row, column=6, value=desc).font = normal_font
+        ws.merge_cells(f"E{current_row}:G{current_row}")
+        ws.cell(row=current_row, column=5, value=item.get("description", "")).font = item_font
+        ws.cell(row=current_row, column=5).alignment = left_align
+
+        # Apply fill to whole row
+        for c in range(1, 9):
+            ws.cell(row=current_row, column=c).fill = row_fill
+        # Subtle bottom border
+        for c in range(1, 9):
+            ws.cell(row=current_row, column=c).border = Border(bottom=Side(style="hair", color="D0D0D0"))
 
         current_row += 1
 
-        # Add JOB# / Project sub-lines if present
+        # JOB# sub-line
         job_number = item.get("job_number", "")
         if job_number:
-            ws.cell(row=current_row, column=6, value=f"JOB # = {job_number}").font = small_font
+            ws.merge_cells(f"E{current_row}:G{current_row}")
+            ws.cell(row=current_row, column=5, value=f"JOB # = {job_number}").font = item_sub_font
+            for c in range(1, 9):
+                ws.cell(row=current_row, column=c).fill = row_fill
             current_row += 1
 
+        # Project sub-line
         item_project = item.get("project_name", "")
         if item_project:
-            ws.cell(row=current_row, column=6, value=f"Project: {item_project}").font = small_font
+            ws.merge_cells(f"E{current_row}:G{current_row}")
+            ws.cell(row=current_row, column=5, value=f"Project: {item_project}").font = item_sub_font
+            for c in range(1, 9):
+                ws.cell(row=current_row, column=c).fill = row_fill
             current_row += 1
 
-        current_row += 1  # blank line between items
-
-    # ── Bottom: Project Name / WBS / Notes ──
+    # ══════════════════════════════════════════════════════════════════════════
+    # BOTTOM SECTION: Project / WBS / Notes
+    # ══════════════════════════════════════════════════════════════════════════
+    # Red accent line above footer info
     current_row += 1
+    for c_idx in range(1, 9):
+        ws.cell(row=current_row, column=c_idx).border = top_accent
+    current_row += 1
+
     proj_name = slip_data.get("project_name", "")
-    if proj_name:
-        ws.cell(row=current_row, column=6, value=f"Project Name: {proj_name}").font = label_font
-        current_row += 1
     wbs = slip_data.get("wbs", "")
-    if wbs:
-        ws.cell(row=current_row, column=6, value=f"WBS: {wbs}").font = label_font
+    if proj_name or wbs:
+        if proj_name:
+            ws[f"A{current_row}"].value = "  PROJECT"
+            ws[f"A{current_row}"].font = label_font
+            ws.merge_cells(f"B{current_row}:D{current_row}")
+            ws[f"B{current_row}"].value = proj_name
+            ws[f"B{current_row}"].font = value_bold
+        if wbs:
+            ws[f"E{current_row}"].value = "WBS"
+            ws[f"E{current_row}"].font = label_font
+            ws[f"E{current_row}"].alignment = right_align
+            ws.merge_cells(f"F{current_row}:G{current_row}")
+            ws[f"F{current_row}"].value = wbs
+            ws[f"F{current_row}"].font = value_bold
         current_row += 1
+
     notes = slip_data.get("notes", "")
     if notes:
         current_row += 1
-        ws.cell(row=current_row, column=1, value="Notes:").font = label_font
+        ws[f"A{current_row}"].value = "  NOTES"
+        ws[f"A{current_row}"].font = section_font
         current_row += 1
-        ws.cell(row=current_row, column=1, value=notes).font = normal_font
+        ws.merge_cells(f"A{current_row}:G{current_row}")
+        ws[f"A{current_row}"].value = f"  {notes}"
+        ws[f"A{current_row}"].font = value_font
+        ws[f"A{current_row}"].alignment = wrap_align
+        current_row += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # FOOTER
+    # ══════════════════════════════════════════════════════════════════════════
+    current_row += 2
+    ws.merge_cells(f"A{current_row}:G{current_row}")
+    ws[f"A{current_row}"].value = "AAE Automation, Inc.  |  8528 SW 2nd St, OKC, OK 73128  |  405-210-1567  |  aaeok.com"
+    ws[f"A{current_row}"].font = footer_font
+    ws[f"A{current_row}"].alignment = center_align
+
+    current_row += 1
+    ws.merge_cells(f"A{current_row}:G{current_row}")
+    ws[f"A{current_row}"].value = "UL-508A Certified Industrial Control Panel Shop"
+    ws[f"A{current_row}"].font = Font(name="Calibri", italic=True, size=8, color=MID_GRAY)
+    ws[f"A{current_row}"].alignment = center_align
 
     # ── Print setup ──
-    ws.print_area = f"A1:G{current_row + 2}"
+    ws.print_area = f"A1:H{current_row + 1}"
     ws.sheet_properties.pageSetUpPr = openpyxl.worksheet.properties.PageSetupProperties(fitToPage=True)
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.orientation = "portrait"
+    ws.page_margins.left = 0.5
+    ws.page_margins.right = 0.5
+    ws.page_margins.top = 0.4
+    ws.page_margins.bottom = 0.4
 
     buf = io.BytesIO()
     wb.save(buf)
