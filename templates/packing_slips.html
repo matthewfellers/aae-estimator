@@ -595,10 +595,14 @@ a { color: var(--primary); text-decoration: none; }
           <input type="text" id="qs_sales_order" placeholder="e.g. 25-7900.00">
         </div>
       </div>
-      <div class="form-grid">
+      <div class="form-grid-3">
         <div class="field">
           <label>Customer Order #</label>
           <input type="text" id="qs_customer_order" placeholder="PO number">
+        </div>
+        <div class="field">
+          <label>Order Date</label>
+          <input type="date" id="qs_order_date">
         </div>
         <div class="field">
           <label>Ship Date</label>
@@ -1182,6 +1186,7 @@ async function quickShipDownload() {
     job_number: document.getElementById("qs_job_number").value,
     sales_order: document.getElementById("qs_sales_order").value,
     customer_order: document.getElementById("qs_customer_order").value,
+    order_date: document.getElementById("qs_order_date").value || null,
     ship_date: document.getElementById("qs_ship_date").value || null,
   };
 
