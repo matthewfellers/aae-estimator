@@ -4349,20 +4349,25 @@ def delete_packing_slip(slip_id):
 @app.route("/api/packing-slips/debug-auth", methods=["GET"])
 @require_auth
 def debug_auth():
-    """Temporary: see what the app reads from your JWT + what Supabase RLS sees."""
+    """Temporary: test the actual UPDATE that fails."""
     try:
         sb = get_user_sb()
-        rls_check = sb.rpc("current_role", {}).execute()
-        org_check = sb.rpc("current_org_id", {}).execute()
-        admin_check = sb.rpc("is_admin", {}).execute()
-        rls_info = {"rls_role": rls_check.data, "rls_org_id": org_check.data, "rls_is_admin": admin_check.data}
-        # Try a harmless read to see if RLS lets us see slip 1
-        slip_test = sb.table("packing_slips").select("id,org_id,status,is_deleted").eq("id", 1).execute()
-        rls_info["slip_visible"] = len(slip_test.data) > 0
-        rls_info["slip_data"] = slip_test.data
+        # Try the exact same update the delete endpoint does
+        result = sb.table("packing_slips").update({
+            "is_deleted": True,
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", 1).execute()
+        return jsonify({"update_ok": True, "result": str(result.data)})
     except Exception as e:
-        rls_info = {"rls_error": str(e)}
-    return jsonify({**g.user, **rls_info})
+        # Try without is_deleted - maybe that column has a trigger or constraint
+        try:
+            sb2 = get_user_sb()
+            result2 = sb2.table("packing_slips").update({
+                "notes": "test update"
+            }).eq("id", 1).execute()
+            return jsonify({"is_deleted_update_failed": str(e), "notes_update_ok": True})
+        except Exception as e2:
+            return jsonify({"is_deleted_update_failed": str(e), "notes_update_also_failed": str(e2)})
 
 # ── API: Finalize packing slip ───────────────────────────────────────────────
 
