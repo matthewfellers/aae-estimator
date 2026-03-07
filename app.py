@@ -4432,6 +4432,27 @@ def save_field_history():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/packing-slips/field-history", methods=["DELETE"])
+@require_auth
+def delete_field_history():
+    """Delete a saved value from the field history dropdown."""
+    data = request.get_json() or {}
+    field = data.get("field", "").strip()
+    value = data.get("value", "").strip()
+    if not field or not value:
+        return jsonify({"error": "field and value required"}), 400
+    try:
+        sb = get_user_sb()
+        sb.table("saved_field_history")\
+            .delete()\
+            .eq("field_name", field)\
+            .eq("field_value", value)\
+            .execute()
+        audit_log("field_history_delete", {"field": field, "value": value[:80]})
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ── API: Next slip number ────────────────────────────────────────────────────
 
 @app.route("/api/packing-slips/next-number", methods=["POST"])
