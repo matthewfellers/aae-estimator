@@ -1133,9 +1133,6 @@ a { color: var(--primary); text-decoration: none; }
       <button class="btn btn-primary btn-sm" onclick="document.getElementById('sticker-lib-file-input').click()">
         + Upload DOCX Template
       </button>
-      <button class="btn btn-secondary btn-sm" onclick="createStickerFolder()">
-        + New Folder
-      </button>
     </div>
 
     <div id="sticker-lib-container"></div>
@@ -2926,25 +2923,12 @@ async function uploadStickerTemplate(input) {
   } catch(e) { toast(e.message, "error"); }
 }
 
-function createStickerFolder() {
-  const name = prompt("New folder name:");
-  if (!name || !name.trim()) return;
-  if (_stickerLibFolders.includes(name.trim())) {
-    toast("Folder already exists", "error");
-    return;
-  }
-  // Folder is created implicitly when a template is moved into it
-  toast(`Folder "${name.trim()}" created. Upload or move templates into it.`);
-  _stickerLibFolders.push(name.trim());
-  loadStickerLibrary();
-}
-
 async function moveStickerTemplate(id, name) {
   let folderPrompt = `Move "${name}" to folder:\n\n  0. Unfiled (no folder)`;
   _stickerLibFolders.forEach((f, i) => {
     folderPrompt += `\n  ${i+1}. ${f}`;
   });
-  folderPrompt += "\n\nType a number or a new folder name:";
+  folderPrompt += "\n\nType a number or a new folder name to create one:";
 
   let input = prompt(folderPrompt);
   if (input === null) return;
