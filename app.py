@@ -6994,6 +6994,28 @@ def qb_sync_status():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/scheduling/qb/sync-now", methods=["POST"])
+@require_role("admin", "supervisor")
+def qb_sync_now():
+    """Set a flag that tells the polling service to run immediately."""
+    try:
+        sb = get_user_sb()
+        from datetime import datetime as dt, timezone as tz
+        record = {
+            "org_id": g.user["org_id"],
+            "sync_type": "incremental",
+            "started_at": dt.now(tz.utc).isoformat(),
+            "status": "requested",
+            "company_file": "triggered by " + g.user["email"],
+        }
+        result = sb.table("qb_sync_log").insert(record).execute()
+        audit_log("create", "qb_sync_request", result.data[0]["id"] if result.data else None,
+                  {"triggered_by": g.user["email"]})
+        return jsonify({"message": "Sync requested — poller will pick it up within 15 minutes", "id": result.data[0]["id"] if result.data else None})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/scheduling/qb/request-job", methods=["POST"])
 @require_role("admin", "supervisor", "manufacturing")
 def qb_request_job():

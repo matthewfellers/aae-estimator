@@ -10,10 +10,14 @@
     "service_role_key": "eyJ..."
   },
   "sync": {
-    "full_sync_day": "sunday",
+    "full_sync_time": "02:00",
     "incremental": true,
     "lookback_days": 365,
-    "batch_size": 100
+    "batch_size": 100,
+    "business_hours_start": 7,
+    "business_hours_end": 18,
+    "poll_interval_minutes": 30,
+    "check_sync_now_flag": true
   },
   "org_id": "your-org-uuid-here",
   "logging": {

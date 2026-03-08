@@ -146,6 +146,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
   <div class="header-right">
     <div id="sync-badge" class="sync-info"></div>
+    <button class="btn btn-sm btn-primary" onclick="syncNow()" id="sync-now-btn" title="Trigger immediate QB sync">SYNC NOW</button>
     <span class="user-pill" id="user-pill"></span>
     <a href="/" class="home-btn">HOME</a>
     <a href="/scheduling" class="home-btn">GANTT</a>
@@ -753,6 +754,25 @@ async function deleteOverride(oid) {
     loadPartsStatus();
     loadUpcoming();
   } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function syncNow() {
+  const btn = document.getElementById('sync-now-btn');
+  btn.disabled = true;
+  btn.textContent = 'REQUESTING...';
+  try {
+    const data = await apiFetch('/api/scheduling/qb/sync-now', { method: 'POST' });
+    btn.textContent = 'REQUESTED';
+    btn.style.background = 'var(--green)';
+    // Reset after 30 seconds
+    setTimeout(() => { btn.disabled = false; btn.textContent = 'SYNC NOW'; btn.style.background = ''; }, 30000);
+    // Refresh data after a short delay to show the request in sync log
+    setTimeout(() => loadSyncStatus(), 2000);
+  } catch (e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'SYNC NOW';
+  }
 }
 
 async function downloadReport() {

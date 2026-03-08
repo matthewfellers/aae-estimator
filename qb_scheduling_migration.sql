@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS public.qb_sync_log (
   started_at        timestamptz NOT NULL,
   completed_at      timestamptz,
   status            text        NOT NULL DEFAULT 'running'
-                                CHECK (status IN ('running','success','error')),
+                                CHECK (status IN ('running','success','error','requested','picked_up')),
   records_synced    jsonb       DEFAULT '{}',       -- {"sales_orders": 15, "item_receipts": 8, ...}
   error_message     text,
   company_file      text,                           -- which QB file was synced

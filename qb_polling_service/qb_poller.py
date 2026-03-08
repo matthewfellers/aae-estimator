@@ -9,6 +9,7 @@ Usage:
     python qb_poller.py                  # Run incremental sync
     python qb_poller.py --full           # Force full sync
     python qb_poller.py --test           # Test QB connection only
+    python qb_poller.py --daemon         # Run continuously (every 15 min during business hours)
     python qb_poller.py --config path    # Use custom config file
 
 Architecture:
@@ -23,6 +24,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -77,11 +79,54 @@ def load_config(config_path: str = None) -> dict:
     return config
 
 
-def should_full_sync(config: dict) -> bool:
-    """Check if today is the configured full sync day."""
-    full_sync_day = config.get("sync", {}).get("full_sync_day", "sunday").lower()
-    today = datetime.now().strftime("%A").lower()
-    return today == full_sync_day
+def is_business_hours(config: dict) -> bool:
+    """Check if current time is within business hours."""
+    sync_config = config.get("sync", {})
+    start = sync_config.get("business_hours_start", 7)
+    end = sync_config.get("business_hours_end", 18)
+    current_hour = datetime.now().hour
+    return start <= current_hour < end
+
+
+def is_full_sync_time(config: dict) -> bool:
+    """Check if it's time for the nightly full sync (2 AM by default)."""
+    full_sync_time = config.get("sync", {}).get("full_sync_time", "02:00")
+    now = datetime.now()
+    hour, minute = map(int, full_sync_time.split(":"))
+    # Within a 15-minute window of the full sync time
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return abs((now - target).total_seconds()) < 900  # 15-minute window
+
+
+def check_sync_now_flag(pusher: SupabasePusher) -> bool:
+    """
+    Check if someone pressed "Sync Now" in the ERP dashboard.
+
+    Looks for a record in qb_sync_log with status='requested'.
+    If found, clears the flag and returns True.
+    """
+    try:
+        result = (
+            pusher.client.table("qb_sync_log")
+            .select("id")
+            .eq("org_id", pusher.org_id)
+            .eq("status", "requested")
+            .limit(1)
+            .execute()
+        )
+
+        if result.data:
+            # Clear the flag
+            flag_id = result.data[0]["id"]
+            pusher.client.table("qb_sync_log").update(
+                {"status": "picked_up"}
+            ).eq("id", flag_id).execute()
+            logger.info("Sync Now flag detected — running immediate sync")
+            return True
+    except Exception as e:
+        logger.warning(f"Could not check sync flag: {e}")
+
+    return False
 
 
 def run_sync(config: dict, force_full: bool = False):
@@ -109,7 +154,7 @@ def run_sync(config: dict, force_full: bool = False):
     )
 
     # Determine sync type
-    is_full = force_full or should_full_sync(config)
+    is_full = force_full or is_full_sync_time(config)
     sync_type = "full" if is_full else "incremental"
     logger.info(f"Starting {sync_type} sync...")
 
@@ -209,6 +254,61 @@ def run_sync(config: dict, force_full: bool = False):
         return True
 
 
+def run_daemon(config: dict):
+    """
+    Run continuously — polls every 15 minutes during business hours.
+
+    - During business hours (7 AM - 6 PM): incremental sync every 15 min
+    - Checks for "Sync Now" flag every cycle
+    - At 2 AM: full sync
+    - Outside business hours: sleeps, only wakes for full sync time
+    """
+    sync_config = config.get("sync", {})
+    interval = sync_config.get("poll_interval_minutes", 15) * 60  # seconds
+    check_flag = sync_config.get("check_sync_now_flag", True)
+
+    sb_config = config["supabase"]
+    pusher = SupabasePusher(
+        url=sb_config["url"],
+        service_role_key=sb_config["service_role_key"],
+        org_id=config["org_id"],
+    )
+
+    logger.info(f"Daemon mode started — polling every {interval // 60} min during business hours")
+
+    while True:
+        try:
+            should_sync = False
+            force_full = False
+
+            # Check for "Sync Now" button press
+            if check_flag and check_sync_now_flag(pusher):
+                should_sync = True
+                logger.info("Sync Now triggered by user")
+
+            # Check if it's full sync time (2 AM)
+            elif is_full_sync_time(config):
+                should_sync = True
+                force_full = True
+                logger.info("Nightly full sync time")
+
+            # During business hours, run incremental
+            elif is_business_hours(config):
+                should_sync = True
+
+            if should_sync:
+                run_sync(config, force_full=force_full)
+            else:
+                logger.debug("Outside business hours — sleeping")
+
+        except Exception as e:
+            logger.error(f"Daemon cycle error: {e}", exc_info=True)
+
+        # Sleep until next cycle
+        logger.debug(f"Sleeping {interval // 60} minutes...")
+        time.sleep(interval)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AAE ERP — QuickBooks Desktop Polling Service"
@@ -224,6 +324,10 @@ def main():
     parser.add_argument(
         "--test", action="store_true",
         help="Test QB Desktop connection only (no sync)"
+    )
+    parser.add_argument(
+        "--daemon", action="store_true",
+        help="Run continuously — polls every 15 min during business hours"
     )
     args = parser.parse_args()
 
@@ -252,9 +356,13 @@ def main():
             logger.error("Connection test FAILED")
         sys.exit(0 if success else 1)
 
-    # Run sync
-    success = run_sync(config, force_full=args.full)
-    sys.exit(0 if success else 1)
+    if args.daemon:
+        # Run continuously
+        run_daemon(config)
+    else:
+        # Single run
+        success = run_sync(config, force_full=args.full)
+        sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":
