@@ -6748,6 +6748,413 @@ def sched_report_est_vs_actual():
         return jsonify({"error": str(e)}), 500
 
 # ══════════════════════════════════════════════════════════════════════════════
+# QB SCHEDULING API — QuickBooks-driven scheduling dashboard
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/scheduling-qb")
+def scheduling_qb_page():
+    return render_template(
+        "scheduling_qb.html",
+        supabase_url=os.environ.get("SUPABASE_URL", ""),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", ""),
+    )
+
+
+@app.route("/api/scheduling/qb/dashboard", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead", "manufacturing", "accounting")
+def qb_dashboard():
+    """Job readiness overview — parts status for all open sales orders."""
+    try:
+        sb = get_user_sb()
+        result = sb.table("v_job_readiness").select("*").execute()
+        return jsonify(result.data or [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/upcoming-jobs", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead", "manufacturing", "accounting")
+def qb_upcoming_jobs():
+    """Jobs due in the next N weeks (default 3) plus manually requested jobs."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        weeks = request.args.get("weeks", 3, type=int)
+
+        from datetime import date as dt_date, timedelta
+        today = dt_date.today()
+        cutoff = (today + timedelta(weeks=weeks)).isoformat()
+
+        # Open sales orders with ship_date within the window
+        so_result = sb.table("qb_sales_orders").select("*")\
+            .eq("org_id", org_id)\
+            .eq("status", "open")\
+            .lte("ship_date", cutoff)\
+            .order("ship_date")\
+            .execute()
+
+        orders = so_result.data or []
+
+        # Get readiness data for these orders
+        readiness = sb.table("v_job_readiness").select("*")\
+            .eq("org_id", org_id)\
+            .execute()
+        readiness_map = {r["sales_order_id"]: r for r in (readiness.data or [])}
+
+        # Get manually requested jobs
+        requests_result = sb.table("scheduling_job_requests").select("*")\
+            .eq("org_id", org_id)\
+            .eq("status", "pending")\
+            .execute()
+
+        # Enrich orders with readiness info
+        upcoming = []
+        for so in orders:
+            r = readiness_map.get(so["id"], {})
+            upcoming.append({
+                **so,
+                "total_parts": r.get("total_parts", 0),
+                "parts_ready": r.get("parts_ready", 0),
+                "readiness_pct": r.get("readiness_pct", 0),
+                "readiness_status": r.get("readiness_status", "unknown"),
+            })
+
+        return jsonify({
+            "upcoming": upcoming,
+            "manual_requests": requests_result.data or [],
+            "window_weeks": weeks,
+            "as_of": today.isoformat(),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/sales-orders", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead", "manufacturing", "accounting")
+def qb_sales_orders():
+    """All synced sales orders, optionally filtered by status."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        status = request.args.get("status")
+
+        query = sb.table("qb_sales_orders").select("*")\
+            .eq("org_id", org_id)\
+            .order("ship_date")
+
+        if status:
+            query = query.eq("status", status)
+
+        result = query.execute()
+        return jsonify(result.data or [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/parts-status/<so_id>", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead", "manufacturing", "accounting")
+def qb_parts_status(so_id):
+    """Parts received vs required for a specific sales order."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+
+        # Get sales order lines
+        lines = sb.table("qb_sales_order_lines").select("*")\
+            .eq("org_id", org_id)\
+            .eq("sales_order_id", so_id)\
+            .order("line_number")\
+            .execute()
+
+        # Get all item receipts for matching parts
+        item_refs = [l["item_ref"] for l in (lines.data or []) if l.get("item_ref")]
+
+        received = {}
+        if item_refs:
+            ir_lines = sb.table("qb_item_receipt_lines").select("item_ref, quantity")\
+                .eq("org_id", org_id)\
+                .in_("item_ref", item_refs)\
+                .execute()
+            for irl in (ir_lines.data or []):
+                ref = irl["item_ref"]
+                received[ref] = received.get(ref, 0) + (irl.get("quantity") or 0)
+
+        # Get manual overrides
+        overrides = sb.table("scheduling_part_overrides").select("*")\
+            .eq("org_id", org_id)\
+            .eq("sales_order_id", so_id)\
+            .execute()
+        override_map = {o["item_ref"]: o for o in (overrides.data or [])}
+
+        # Get QB inventory levels
+        inventory = {}
+        if item_refs:
+            items = sb.table("qb_items").select("full_name, qty_on_hand")\
+                .eq("org_id", org_id)\
+                .in_("full_name", item_refs)\
+                .execute()
+            for item in (items.data or []):
+                inventory[item["full_name"]] = item.get("qty_on_hand") or 0
+
+        # Build enriched parts list
+        parts = []
+        for line in (lines.data or []):
+            ref = line.get("item_ref", "")
+            override = override_map.get(ref)
+            qty_received = received.get(ref, 0)
+            qty_on_hand = inventory.get(ref, 0)
+
+            is_ready = (
+                qty_received > 0
+                or (override and override["override_type"] in ("available", "not_needed"))
+                or qty_on_hand > 0
+            )
+
+            parts.append({
+                **line,
+                "qty_received": qty_received,
+                "qty_on_hand": qty_on_hand,
+                "override": override,
+                "is_ready": is_ready,
+            })
+
+        total = len(parts)
+        ready = sum(1 for p in parts if p["is_ready"])
+
+        return jsonify({
+            "parts": parts,
+            "total_parts": total,
+            "parts_ready": ready,
+            "readiness_pct": round(ready / total * 100, 1) if total > 0 else 0,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/part-override", methods=["POST"])
+@require_role("admin", "supervisor", "manufacturing")
+def qb_create_part_override():
+    """Mark a part as available, not needed, or substitute."""
+    try:
+        sb = get_user_sb()
+        data = request.get_json()
+        record = {
+            "org_id": g.user["org_id"],
+            "sales_order_id": data.get("sales_order_id"),
+            "item_ref": data["item_ref"],
+            "override_type": data["override_type"],
+            "substitute_ref": data.get("substitute_ref"),
+            "notes": data.get("notes"),
+            "created_by": g.user["id"],
+        }
+        result = sb.table("scheduling_part_overrides")\
+            .upsert(record, on_conflict="org_id,sales_order_id,item_ref")\
+            .execute()
+        audit_log("create", "scheduling_part_override",
+                  result.data[0]["id"] if result.data else None,
+                  {"item_ref": data["item_ref"], "type": data["override_type"]})
+        return jsonify(result.data[0] if result.data else {}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/part-override/<oid>", methods=["DELETE"])
+@require_role("admin", "supervisor", "manufacturing")
+def qb_delete_part_override(oid):
+    """Remove a manual part availability override."""
+    try:
+        sb = get_user_sb()
+        result = sb.table("scheduling_part_overrides")\
+            .delete()\
+            .eq("id", oid)\
+            .eq("org_id", g.user["org_id"])\
+            .execute()
+        audit_log("delete", "scheduling_part_override", oid, {})
+        return jsonify({"deleted": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/sync-status", methods=["GET"])
+@require_role("admin", "supervisor")
+def qb_sync_status():
+    """Latest sync log entries."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        limit = request.args.get("limit", 5, type=int)
+
+        result = sb.table("qb_sync_log").select("*")\
+            .eq("org_id", org_id)\
+            .order("started_at", desc=True)\
+            .limit(limit)\
+            .execute()
+        return jsonify(result.data or [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/request-job", methods=["POST"])
+@require_role("admin", "supervisor", "manufacturing")
+def qb_request_job():
+    """Manually flag a job/sales order for scheduling attention."""
+    try:
+        sb = get_user_sb()
+        data = request.get_json()
+        record = {
+            "org_id": g.user["org_id"],
+            "sales_order_id": data.get("sales_order_id"),
+            "job_id": data.get("job_id"),
+            "reason": data.get("reason"),
+            "priority": data.get("priority", 3),
+            "requested_by": g.user["id"],
+            "status": "pending",
+        }
+        result = sb.table("scheduling_job_requests").insert(record).execute()
+        audit_log("create", "scheduling_job_request",
+                  result.data[0]["id"] if result.data else None, data)
+        return jsonify(result.data[0] if result.data else {}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/request-job/<rid>", methods=["PUT"])
+@require_role("admin", "supervisor")
+def qb_update_job_request(rid):
+    """Update status of a manual job request (schedule or dismiss)."""
+    try:
+        sb = get_user_sb()
+        data = request.get_json()
+        result = sb.table("scheduling_job_requests")\
+            .update({"status": data["status"]})\
+            .eq("id", rid)\
+            .eq("org_id", g.user["org_id"])\
+            .execute()
+        audit_log("update", "scheduling_job_request", rid, data)
+        return jsonify(result.data[0] if result.data else {})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/rack-mappings", methods=["GET"])
+@require_role("admin", "supervisor", "manufacturing")
+def qb_rack_mappings():
+    """Get all rack → panel mappings."""
+    try:
+        sb = get_user_sb()
+        result = sb.table("rack_panel_mappings").select("*")\
+            .eq("org_id", g.user["org_id"])\
+            .order("rack_item_ref, sort_order")\
+            .execute()
+        return jsonify(result.data or [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/rack-mappings", methods=["POST"])
+@require_role("admin", "supervisor")
+def qb_create_rack_mapping():
+    """Create or update a rack → panel mapping."""
+    try:
+        sb = get_user_sb()
+        data = request.get_json()
+        record = {
+            "org_id": g.user["org_id"],
+            "rack_item_ref": data["rack_item_ref"],
+            "panel_name": data["panel_name"],
+            "panel_type": data.get("panel_type", "Custom"),
+            "estimated_hours": data.get("estimated_hours"),
+            "sort_order": data.get("sort_order", 0),
+            "notes": data.get("notes"),
+        }
+        result = sb.table("rack_panel_mappings")\
+            .upsert(record, on_conflict="org_id,rack_item_ref,panel_name")\
+            .execute()
+        audit_log("create", "rack_panel_mapping",
+                  result.data[0]["id"] if result.data else None, data)
+        return jsonify(result.data[0] if result.data else {}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/rack-mappings/<mid>", methods=["DELETE"])
+@require_role("admin", "supervisor")
+def qb_delete_rack_mapping(mid):
+    """Delete a rack → panel mapping."""
+    try:
+        sb = get_user_sb()
+        result = sb.table("rack_panel_mappings")\
+            .delete()\
+            .eq("id", mid)\
+            .eq("org_id", g.user["org_id"])\
+            .execute()
+        audit_log("delete", "rack_panel_mapping", mid, {})
+        return jsonify({"deleted": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduling/qb/weekly-report", methods=["GET"])
+@require_role("admin", "supervisor", "shop_lead", "manufacturing", "accounting")
+def qb_weekly_report():
+    """Generate weekly scheduling report data (3-week lookahead + manual requests)."""
+    try:
+        sb = get_user_sb()
+        org_id = g.user["org_id"]
+        weeks = request.args.get("weeks", 3, type=int)
+
+        from datetime import date as dt_date, timedelta
+        today = dt_date.today()
+        cutoff = (today + timedelta(weeks=weeks)).isoformat()
+
+        # Open sales orders with ship_date within window
+        so_result = sb.table("qb_sales_orders").select("*")\
+            .eq("org_id", org_id)\
+            .eq("status", "open")\
+            .lte("ship_date", cutoff)\
+            .order("ship_date")\
+            .execute()
+
+        # Readiness data
+        readiness = sb.table("v_job_readiness").select("*")\
+            .eq("org_id", org_id)\
+            .execute()
+        readiness_map = {r["sales_order_id"]: r for r in (readiness.data or [])}
+
+        # Manual requests
+        manual = sb.table("scheduling_job_requests").select("*, qb_sales_orders(*)")\
+            .eq("org_id", org_id)\
+            .eq("status", "pending")\
+            .execute()
+
+        # Build report
+        report_items = []
+        for so in (so_result.data or []):
+            r = readiness_map.get(so["id"], {})
+            report_items.append({
+                "ref_number": so.get("ref_number"),
+                "customer_name": so.get("customer_name"),
+                "ship_date": so.get("ship_date"),
+                "po_number": so.get("po_number"),
+                "total_amount": so.get("total_amount"),
+                "total_parts": r.get("total_parts", 0),
+                "parts_ready": r.get("parts_ready", 0),
+                "readiness_pct": r.get("readiness_pct", 0),
+                "readiness_status": r.get("readiness_status", "unknown"),
+                "source": "upcoming",
+            })
+
+        return jsonify({
+            "report_items": report_items,
+            "manual_requests": manual.data or [],
+            "generated_at": today.isoformat(),
+            "window_weeks": weeks,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # EMPLOYEE PORTAL API
 # ══════════════════════════════════════════════════════════════════════════════
 

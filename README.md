@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/25473445/README.md)
 # AAE Automation — Panel Estimating System
 
 ## Files in this folder

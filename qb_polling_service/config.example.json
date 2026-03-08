@@ -1,0 +1,23 @@
+{
+  "quickbooks": {
+    "company_file": "C:\\QuickBooks\\AAE_Company.QBW",
+    "app_name": "AAE ERP Poller",
+    "app_id": "",
+    "qbxml_version": "16.0"
+  },
+  "supabase": {
+    "url": "https://your-project.supabase.co",
+    "service_role_key": "eyJ..."
+  },
+  "sync": {
+    "full_sync_day": "sunday",
+    "incremental": true,
+    "lookback_days": 365,
+    "batch_size": 100
+  },
+  "org_id": "your-org-uuid-here",
+  "logging": {
+    "file": "qb_sync.log",
+    "level": "INFO"
+  }
+}

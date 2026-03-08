@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAE Automation — QB Scheduling</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F8F9FA;--card-bg:#FFFFFF;--primary:#9B1B1B;--primary-dark:#7A1010;--text:#333333;--text-muted:#666666;--border:#E0E0E0;--shadow:0 2px 12px rgba(0,0,0,0.08);--shadow-hover:0 6px 24px rgba(0,0,0,0.12);--radius:12px;--green:#28A745;--yellow:#FFC107;--red:#DC3545;--blue:#1976D2}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+.header{background:#FFF;border-bottom:3px solid var(--primary);padding:0 2rem;display:flex;align-items:center;justify-content:space-between;height:68px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.header-left{display:flex;align-items:center;gap:12px}
+.header-logo{height:40px;border-radius:4px}
+.header-brand{font-family:'Bebas Neue',sans-serif;font-size:1.8rem;letter-spacing:2px;color:var(--text)}
+.header-brand span{color:var(--primary)}
+.header-right{display:flex;align-items:center;gap:16px}
+.user-pill{background:#F5F0F0;color:var(--text);padding:6px 14px;border-radius:20px;font-size:.82rem;font-weight:500}
+.logout-btn,.home-btn{background:none;border:1.5px solid var(--primary);color:var(--primary);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;padding:6px 16px;border-radius:6px;cursor:pointer;transition:all .2s;text-decoration:none}
+.logout-btn:hover,.home-btn:hover{background:var(--primary);color:#fff}
+.home-btn{border-color:var(--border);color:var(--text-muted)}
+.home-btn:hover{border-color:var(--primary);color:var(--primary);background:none}
+#login-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;justify-content:center;align-items:center}
+#login-overlay.visible{display:flex}
+.login-card{background:#fff;border-radius:12px;padding:40px 36px;width:380px;max-width:calc(100vw - 2rem);text-align:center;box-shadow:0 12px 48px rgba(0,0,0,0.18)}
+.login-card img{width:140px;margin-bottom:6px;border-radius:4px}
+.login-logo-name{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:3px;color:#333;margin-bottom:2px}
+.login-tagline{font-size:11px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-bottom:28px}
+.login-card h2{font-family:'Bebas Neue',sans-serif;font-size:20px;color:#2C2C2C;margin-bottom:20px}
+.login-field{text-align:left;margin-bottom:14px}
+.login-field label{display:block;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#666;margin-bottom:5px}
+.login-field input{width:100%;padding:9px 12px;border:1.5px solid #DDD;border-radius:4px;font-size:14px;color:#333;transition:border-color .2s}
+.login-field input:focus{outline:none;border-color:#9B1B1B}
+.login-submit{width:100%;padding:12px;background:#9B1B1B;color:#fff;border:none;border-radius:4px;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;cursor:pointer;margin-top:6px;transition:background .2s}
+.login-submit:hover{background:#7A1010}
+.login-err{color:#9B1B1B;font-size:12px;margin-top:8px;display:none}
+#mfa-section{display:none}
+.main{flex:1;width:100%;max-width:1400px;margin:0 auto;padding:1.5rem 2rem}
+.tab-bar{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:1.5rem}
+.tab-btn{padding:10px 24px;background:none;border:none;border-bottom:3px solid transparent;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:1.5px;color:var(--text-muted);cursor:pointer;transition:all .2s;margin-bottom:-2px}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--primary);border-bottom-color:var(--primary)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow);margin-bottom:1.5rem}
+.card-title{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:1.5px;color:var(--text);margin-bottom:1rem}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border:none;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-secondary{background:#F5F5F5;color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--primary);color:var(--primary)}
+.btn-sm{padding:5px 12px;font-size:.76rem}
+.btn-danger{background:#DC3545;color:#fff}
+.btn-danger:hover{background:#B02A37}
+.btn-success{background:#28A745;color:#fff}
+.btn-success:hover{background:#1E7E34}
+.data-table{width:100%;border-collapse:collapse;font-size:.85rem}
+.data-table th{text-align:left;padding:10px 12px;border-bottom:2px solid var(--border);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);cursor:pointer;user-select:none;white-space:nowrap}
+.data-table th:hover{color:var(--primary)}
+.data-table td{padding:9px 12px;border-bottom:1px solid #F0F0F0;vertical-align:middle}
+.data-table tr:hover{background:#FAFAFA}
+.data-table tr.clickable{cursor:pointer}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase}
+.badge-ready{background:#E8F5E9;color:#2E7D32}
+.badge-partial{background:#FFF3E0;color:#E65100}
+.badge-waiting{background:#FFEBEE;color:#C62828}
+.badge-unknown{background:#F5F5F5;color:#999}
+.badge-open{background:#E3F2FD;color:#1565C0}
+.badge-closed{background:#E8F5E9;color:#2E7D32}
+.badge-pending{background:#FFF3E0;color:#E65100}
+.badge-scheduled{background:#E3F2FD;color:#1565C0}
+.badge-dismissed{background:#F5F5F5;color:#999}
+.readiness-bar{width:120px;height:8px;background:#ECECEC;border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:8px}
+.readiness-fill{height:100%;border-radius:4px;transition:width .3s}
+.readiness-fill.green{background:var(--green)}
+.readiness-fill.yellow{background:var(--yellow)}
+.readiness-fill.red{background:var(--red)}
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;text-align:center;box-shadow:var(--shadow)}
+.stat-value{font-family:'Bebas Neue',sans-serif;font-size:2.2rem;letter-spacing:1px}
+.stat-value.green{color:var(--green)}
+.stat-value.yellow{color:#E65100}
+.stat-value.red{color:var(--red)}
+.stat-value.blue{color:var(--blue)}
+.stat-label{font-size:.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.sync-info{font-size:.78rem;color:var(--text-muted);text-align:right;margin-bottom:.5rem}
+.sync-info .sync-status{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.sync-info .sync-status.ok{background:var(--green)}
+.sync-info .sync-status.error{background:var(--red)}
+.sync-info .sync-status.running{background:var(--yellow)}
+.parts-detail{margin-top:.5rem;padding:1rem;background:#FAFAFA;border-radius:8px;border:1px solid #EEE}
+.parts-detail .part-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F0F0F0;font-size:.82rem}
+.parts-detail .part-row:last-child{border-bottom:none}
+.part-status-icon{width:20px;text-align:center;margin-right:8px}
+.part-actions{display:flex;gap:6px}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:5000;justify-content:center;align-items:flex-start;padding-top:60px;overflow-y:auto}
+.modal-overlay.visible{display:flex}
+.modal{background:#fff;border-radius:var(--radius);padding:32px;width:600px;max-width:calc(100vw - 2rem);box-shadow:0 12px 48px rgba(0,0,0,0.18);margin-bottom:60px}
+.modal-title{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:1.5px;margin-bottom:1.25rem}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:5px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:9px 12px;border:1.5px solid #DDD;border-radius:6px;font-size:.88rem;font-family:'DM Sans',sans-serif;color:var(--text);transition:border-color .2s}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--primary)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.empty-state{text-align:center;padding:3rem 1rem;color:var(--text-muted)}
+.empty-state h3{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:1px;margin-bottom:.5rem;color:var(--text)}
+.empty-state p{font-size:.88rem}
+.overdue-flag{color:var(--red);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.5px}
+.toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px}
+.toolbar-left{display:flex;align-items:center;gap:10px}
+.toolbar-right{display:flex;align-items:center;gap:10px}
+.filter-select{padding:6px 12px;border:1.5px solid var(--border);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:.82rem;color:var(--text)}
+.filter-select:focus{outline:none;border-color:var(--primary)}
+</style>
+</head>
+<body>
+
+<!-- ═══ LOGIN OVERLAY ═══ -->
+<div id="login-overlay">
+  <div class="login-card">
+    <img src="/static/aae_logo.png" alt="AAE" onerror="this.style.display='none'">
+    <div class="login-logo-name">AAE AUTOMATION</div>
+    <div class="login-tagline">UL 508A Certified Panel Shop</div>
+    <h2>QB Scheduling Portal</h2>
+    <div id="login-form">
+      <div class="login-field"><label>EMAIL</label><input type="email" id="login-email"></div>
+      <div class="login-field"><label>PASSWORD</label><input type="password" id="login-pass"></div>
+      <button class="login-submit" onclick="doLogin()">SIGN IN</button>
+      <p class="login-err" id="login-err"></p>
+    </div>
+    <div id="mfa-section">
+      <div class="login-field"><label>MFA CODE</label><input id="mfa-code" maxlength="6" placeholder="6-digit code"></div>
+      <button class="login-submit" onclick="verifyMfa()">VERIFY</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ HEADER ═══ -->
+<div class="header">
+  <div class="header-left">
+    <img src="/static/aae_logo.png" class="header-logo" alt="AAE" onerror="this.style.display='none'">
+    <div>
+      <div class="header-brand">AAE <span>QB SCHEDULING</span></div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div id="sync-badge" class="sync-info"></div>
+    <span class="user-pill" id="user-pill"></span>
+    <a href="/" class="home-btn">HOME</a>
+    <a href="/scheduling" class="home-btn">GANTT</a>
+    <button class="logout-btn" onclick="doLogout()">SIGN OUT</button>
+  </div>
+</div>
+
+<!-- ═══ MAIN CONTENT ═══ -->
+<div class="main" id="main-content" style="display:none">
+
+  <!-- Stats row -->
+  <div class="stats-row" id="stats-row">
+    <div class="stat-card"><div class="stat-value blue" id="stat-total">-</div><div class="stat-label">Open Orders</div></div>
+    <div class="stat-card"><div class="stat-value green" id="stat-ready">-</div><div class="stat-label">Ready (80%+)</div></div>
+    <div class="stat-card"><div class="stat-value yellow" id="stat-partial">-</div><div class="stat-label">Partial (50-79%)</div></div>
+    <div class="stat-card"><div class="stat-value red" id="stat-waiting">-</div><div class="stat-label">Waiting (&lt;50%)</div></div>
+    <div class="stat-card"><div class="stat-value red" id="stat-overdue">-</div><div class="stat-label">Start Overdue</div></div>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="upcoming">Upcoming Jobs</button>
+    <button class="tab-btn" data-tab="parts">Parts Status</button>
+    <button class="tab-btn" data-tab="racks">Rack Mappings</button>
+    <button class="tab-btn" data-tab="sync">Sync Status</button>
+  </div>
+
+  <!-- ═══ TAB 1: UPCOMING JOBS ═══ -->
+  <div class="tab-content active" id="tab-upcoming">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <select class="filter-select" id="filter-readiness" onchange="renderUpcoming()">
+          <option value="all">All Readiness</option>
+          <option value="ready">Ready (80%+)</option>
+          <option value="partial">Partial (50-79%)</option>
+          <option value="waiting">Waiting (&lt;50%)</option>
+        </select>
+        <select class="filter-select" id="filter-weeks" onchange="loadUpcoming()">
+          <option value="3">Next 3 Weeks</option>
+          <option value="4">Next 4 Weeks</option>
+          <option value="6">Next 6 Weeks</option>
+          <option value="8">Next 8 Weeks</option>
+          <option value="12">Next 12 Weeks</option>
+        </select>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn btn-primary" onclick="showRequestModal()">Flag Job</button>
+        <button class="btn btn-secondary" onclick="downloadReport()">Weekly Report</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <table class="data-table" id="upcoming-table">
+        <thead>
+          <tr>
+            <th>SO #</th>
+            <th>Customer</th>
+            <th>Ship Date</th>
+            <th>PO #</th>
+            <th>Parts Readiness</th>
+            <th>Status</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody id="upcoming-body"></tbody>
+      </table>
+      <div class="empty-state" id="upcoming-empty" style="display:none">
+        <h3>No Upcoming Jobs</h3>
+        <p>No open sales orders found within the selected window. Check your QB sync status.</p>
+      </div>
+    </div>
+
+    <!-- Manual requests section -->
+    <div class="card" id="requests-card" style="display:none">
+      <div class="card-title">Manually Flagged Jobs</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>SO #</th><th>Reason</th><th>Priority</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="requests-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══ TAB 2: PARTS STATUS ═══ -->
+  <div class="tab-content" id="tab-parts">
+    <div class="card">
+      <div class="card-title">Select a Sales Order to View Parts</div>
+      <select class="filter-select" id="parts-so-select" onchange="loadPartsStatus()" style="width:100%;margin-bottom:1rem">
+        <option value="">-- Select Sales Order --</option>
+      </select>
+      <div id="parts-detail-area"></div>
+    </div>
+  </div>
+
+  <!-- ═══ TAB 3: RACK MAPPINGS ═══ -->
+  <div class="tab-content" id="tab-racks">
+    <div class="toolbar">
+      <div class="toolbar-left"><div class="card-title" style="margin:0">Rack to Panel Breakdown</div></div>
+      <div class="toolbar-right">
+        <button class="btn btn-primary" onclick="showRackModal()">Add Mapping</button>
+      </div>
+    </div>
+    <div class="card">
+      <table class="data-table">
+        <thead>
+          <tr><th>Rack Item</th><th>Panel Name</th><th>Panel Type</th><th>Est. Hours</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="racks-body"></tbody>
+      </table>
+      <div class="empty-state" id="racks-empty" style="display:none">
+        <h3>No Rack Mappings</h3>
+        <p>Add mappings to define which panels make up each rack assembly.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ TAB 4: SYNC STATUS ═══ -->
+  <div class="tab-content" id="tab-sync">
+    <div class="card">
+      <div class="card-title">QuickBooks Sync History</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>Started</th><th>Type</th><th>Status</th><th>Records</th><th>Duration</th><th>File</th></tr>
+        </thead>
+        <tbody id="sync-body"></tbody>
+      </table>
+      <div class="empty-state" id="sync-empty" style="display:none">
+        <h3>No Sync History</h3>
+        <p>The QB polling service has not run yet. Check that it's configured on the QB server.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ REQUEST JOB MODAL ═══ -->
+<div class="modal-overlay" id="request-modal">
+  <div class="modal">
+    <div class="modal-title">Flag Job for Scheduling</div>
+    <div class="form-group">
+      <label>Sales Order</label>
+      <select id="req-so-select"><option value="">-- Select --</option></select>
+    </div>
+    <div class="form-group">
+      <label>Priority</label>
+      <select id="req-priority">
+        <option value="1">1 - Critical</option>
+        <option value="2">2 - High</option>
+        <option value="3" selected>3 - Normal</option>
+        <option value="4">4 - Low</option>
+        <option value="5">5 - Informational</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Reason</label>
+      <textarea id="req-reason" rows="3" placeholder="Why should this job be scheduled now?"></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeModal('request-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitRequest()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ RACK MAPPING MODAL ═══ -->
+<div class="modal-overlay" id="rack-modal">
+  <div class="modal">
+    <div class="modal-title">Add Rack to Panel Mapping</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Rack Item Ref</label>
+        <input id="rack-item-ref" placeholder="e.g., RACK-1000">
+      </div>
+      <div class="form-group">
+        <label>Panel Name</label>
+        <input id="rack-panel-name" placeholder="e.g., PNL-VFD-001">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Panel Type</label>
+        <select id="rack-panel-type">
+          <option>PLC</option><option>MCC</option><option>VFD</option>
+          <option>Relay</option><option>Junction Box</option><option>Control</option>
+          <option selected>Custom</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Estimated Hours</label>
+        <input id="rack-est-hours" type="number" step="0.5" placeholder="0">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Notes</label>
+      <textarea id="rack-notes" rows="2"></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeModal('rack-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitRackMapping()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PART OVERRIDE MODAL ═══ -->
+<div class="modal-overlay" id="override-modal">
+  <div class="modal">
+    <div class="modal-title">Mark Part Availability</div>
+    <div class="form-group">
+      <label>Part</label>
+      <input id="ovr-item-ref" readonly style="background:#F5F5F5">
+    </div>
+    <div class="form-group">
+      <label>Override Type</label>
+      <select id="ovr-type">
+        <option value="available">Available (In Stock)</option>
+        <option value="not_needed">Not Needed</option>
+        <option value="substitute">Substitute Available</option>
+      </select>
+    </div>
+    <div class="form-group" id="ovr-sub-group" style="display:none">
+      <label>Substitute Part #</label>
+      <input id="ovr-substitute" placeholder="Substitute part number">
+    </div>
+    <div class="form-group">
+      <label>Notes</label>
+      <textarea id="ovr-notes" rows="2"></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeModal('override-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitOverride()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "{{ supabase_url }}";
+const SUPABASE_ANON_KEY = "{{ supabase_anon_key }}";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentUser = null;
+let upcomingData = [];
+let allSalesOrders = [];
+let currentOverrideSO = null;
+
+// ═══ AUTH ═══
+async function checkAuth() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { document.getElementById('login-overlay').classList.add('visible'); return; }
+  currentUser = session.user;
+  document.getElementById('user-pill').textContent = currentUser.email;
+  document.getElementById('main-content').style.display = '';
+  loadAll();
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value;
+  const pass = document.getElementById('login-pass').value;
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+  if (error) { showLoginErr(error.message); return; }
+  if (data.session) { location.reload(); }
+}
+
+async function verifyMfa() {
+  const code = document.getElementById('mfa-code').value;
+  const { data: factors } = await sb.auth.mfa.listFactors();
+  if (!factors?.totp?.length) return;
+  const { data: challenge } = await sb.auth.mfa.challenge({ factorId: factors.totp[0].id });
+  const { error } = await sb.auth.mfa.verify({ factorId: factors.totp[0].id, challengeId: challenge.id, code });
+  if (error) { showLoginErr(error.message); return; }
+  location.reload();
+}
+
+async function doLogout() { await sb.auth.signOut(); location.reload(); }
+function showLoginErr(msg) { const el = document.getElementById('login-err'); el.textContent = msg; el.style.display = 'block'; }
+
+async function apiFetch(url, opts = {}) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { location.reload(); return null; }
+  const res = await fetch(url, {
+    ...opts,
+    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json', ...opts.headers }
+  });
+  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || res.statusText); }
+  return res.json();
+}
+
+// ═══ TABS ═══
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ═══ LOAD ALL ═══
+async function loadAll() {
+  await Promise.all([loadUpcoming(), loadSyncStatus(), loadRackMappings(), loadSalesOrdersList()]);
+}
+
+// ═══ UPCOMING JOBS ═══
+async function loadUpcoming() {
+  try {
+    const weeks = document.getElementById('filter-weeks').value;
+    const data = await apiFetch(`/api/scheduling/qb/upcoming-jobs?weeks=${weeks}`);
+    upcomingData = data.upcoming || [];
+    renderUpcoming();
+    renderRequests(data.manual_requests || []);
+    updateStats();
+  } catch (e) { console.error('loadUpcoming:', e); }
+}
+
+function renderUpcoming() {
+  const filter = document.getElementById('filter-readiness').value;
+  let items = upcomingData;
+  if (filter !== 'all') items = items.filter(i => i.readiness_status === filter);
+
+  const tbody = document.getElementById('upcoming-body');
+  const empty = document.getElementById('upcoming-empty');
+
+  if (!items.length) { tbody.innerHTML = ''; empty.style.display = ''; return; }
+  empty.style.display = 'none';
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  tbody.innerHTML = items.map(so => {
+    const pct = so.readiness_pct || 0;
+    const colorClass = pct >= 80 ? 'green' : pct >= 50 ? 'yellow' : 'red';
+    const statusBadge = `badge-${so.readiness_status || 'unknown'}`;
+    const isOverdue = so.ship_date && so.ship_date < today;
+
+    return `<tr class="clickable" onclick="viewParts('${so.id}')">
+      <td><strong>${so.ref_number || '-'}</strong></td>
+      <td>${so.customer_name || ''}</td>
+      <td>${so.ship_date || '-'} ${isOverdue ? '<span class="overdue-flag">OVERDUE</span>' : ''}</td>
+      <td>${so.po_number || ''}</td>
+      <td>
+        <div class="readiness-bar"><div class="readiness-fill ${colorClass}" style="width:${pct}%"></div></div>
+        <span style="font-size:.78rem">${so.parts_ready || 0}/${so.total_parts || 0} (${pct}%)</span>
+      </td>
+      <td><span class="badge ${statusBadge}">${so.readiness_status || 'unknown'}</span></td>
+      <td>$${(so.total_amount || 0).toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateStats() {
+  const total = upcomingData.length;
+  const ready = upcomingData.filter(i => i.readiness_status === 'ready').length;
+  const partial = upcomingData.filter(i => i.readiness_status === 'partial').length;
+  const waiting = upcomingData.filter(i => i.readiness_status === 'waiting').length;
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = upcomingData.filter(i => i.ship_date && i.ship_date < today).length;
+
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-ready').textContent = ready;
+  document.getElementById('stat-partial').textContent = partial;
+  document.getElementById('stat-waiting').textContent = waiting;
+  document.getElementById('stat-overdue').textContent = overdue;
+}
+
+function renderRequests(requests) {
+  const card = document.getElementById('requests-card');
+  const tbody = document.getElementById('requests-body');
+  if (!requests.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  tbody.innerHTML = requests.map(r => `<tr>
+    <td>${r.sales_order_id ? r.sales_order_id.slice(0, 8) + '...' : '-'}</td>
+    <td>${r.reason || '-'}</td>
+    <td><span class="priority-dot priority-${r.priority}"></span>${r.priority}</td>
+    <td><span class="badge badge-${r.status}">${r.status}</span></td>
+    <td>
+      <button class="btn btn-sm btn-success" onclick="updateRequest('${r.id}','scheduled')">Schedule</button>
+      <button class="btn btn-sm btn-secondary" onclick="updateRequest('${r.id}','dismissed')">Dismiss</button>
+    </td>
+  </tr>`).join('');
+}
+
+// ═══ PARTS STATUS ═══
+async function loadSalesOrdersList() {
+  try {
+    const orders = await apiFetch('/api/scheduling/qb/sales-orders?status=open');
+    allSalesOrders = orders || [];
+    const select = document.getElementById('parts-so-select');
+    const reqSelect = document.getElementById('req-so-select');
+    select.innerHTML = '<option value="">-- Select Sales Order --</option>';
+    reqSelect.innerHTML = '<option value="">-- Select --</option>';
+    orders.forEach(so => {
+      const opt = `<option value="${so.id}">${so.ref_number || so.qb_txn_id} — ${so.customer_name} (Ship: ${so.ship_date || 'N/A'})</option>`;
+      select.innerHTML += opt;
+      reqSelect.innerHTML += opt;
+    });
+  } catch (e) { console.error('loadSalesOrdersList:', e); }
+}
+
+function viewParts(soId) {
+  // Switch to parts tab and select this SO
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector('[data-tab="parts"]').classList.add('active');
+  document.getElementById('tab-parts').classList.add('active');
+  document.getElementById('parts-so-select').value = soId;
+  loadPartsStatus();
+}
+
+async function loadPartsStatus() {
+  const soId = document.getElementById('parts-so-select').value;
+  const area = document.getElementById('parts-detail-area');
+  if (!soId) { area.innerHTML = ''; return; }
+
+  try {
+    const data = await apiFetch(`/api/scheduling/qb/parts-status/${soId}`);
+    currentOverrideSO = soId;
+
+    const pct = data.readiness_pct || 0;
+    const colorClass = pct >= 80 ? 'green' : pct >= 50 ? 'yellow' : 'red';
+
+    area.innerHTML = `
+      <div style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">
+        <div class="readiness-bar" style="width:200px"><div class="readiness-fill ${colorClass}" style="width:${pct}%"></div></div>
+        <strong>${data.parts_ready}/${data.total_parts} parts ready (${pct}%)</strong>
+      </div>
+      <div class="parts-detail">
+        ${(data.parts || []).map(p => `
+          <div class="part-row">
+            <div style="display:flex;align-items:center;flex:1">
+              <span class="part-status-icon">${p.is_ready ? '<span style="color:var(--green)">&#10003;</span>' : '<span style="color:var(--red)">&#10007;</span>'}</span>
+              <div>
+                <strong>${p.item_ref || 'Unknown'}</strong>
+                <div style="font-size:.72rem;color:var(--text-muted)">${p.description || ''}</div>
+              </div>
+            </div>
+            <div style="text-align:right;font-size:.78rem;margin-right:1rem">
+              Qty: ${p.quantity || 0}
+              ${p.qty_received > 0 ? `<br>Recv: ${p.qty_received}` : ''}
+              ${p.qty_on_hand > 0 ? `<br>Stock: ${p.qty_on_hand}` : ''}
+              ${p.override ? `<br><span class="badge badge-ready">${p.override.override_type}</span>` : ''}
+            </div>
+            <div class="part-actions">
+              ${!p.is_ready ? `<button class="btn btn-sm btn-success" onclick="showOverrideModal('${p.item_ref}')">Mark Available</button>` : ''}
+              ${p.override ? `<button class="btn btn-sm btn-danger" onclick="deleteOverride('${p.override.id}')">Remove</button>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (e) { area.innerHTML = `<p style="color:var(--red)">Error: ${e.message}</p>`; }
+}
+
+// ═══ RACK MAPPINGS ═══
+async function loadRackMappings() {
+  try {
+    const data = await apiFetch('/api/scheduling/rack-mappings');
+    const tbody = document.getElementById('racks-body');
+    const empty = document.getElementById('racks-empty');
+    if (!data.length) { tbody.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    tbody.innerHTML = data.map(m => `<tr>
+      <td><strong>${m.rack_item_ref}</strong></td>
+      <td>${m.panel_name}</td>
+      <td>${m.panel_type || 'Custom'}</td>
+      <td>${m.estimated_hours || '-'}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="deleteRackMapping('${m.id}')">Delete</button></td>
+    </tr>`).join('');
+  } catch (e) { console.error('loadRackMappings:', e); }
+}
+
+// ═══ SYNC STATUS ═══
+async function loadSyncStatus() {
+  try {
+    const data = await apiFetch('/api/scheduling/qb/sync-status?limit=10');
+    const tbody = document.getElementById('sync-body');
+    const empty = document.getElementById('sync-empty');
+    const badge = document.getElementById('sync-badge');
+
+    if (!data.length) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+      badge.innerHTML = '<span class="sync-status error"></span>No sync data';
+      return;
+    }
+    empty.style.display = 'none';
+
+    // Update header badge with latest sync
+    const latest = data[0];
+    const statusClass = latest.status === 'success' ? 'ok' : latest.status === 'running' ? 'running' : 'error';
+    const ago = latest.completed_at ? timeSince(new Date(latest.completed_at)) : 'in progress';
+    badge.innerHTML = `<span class="sync-status ${statusClass}"></span>Last sync: ${ago}`;
+
+    tbody.innerHTML = data.map(s => {
+      const duration = s.completed_at && s.started_at
+        ? Math.round((new Date(s.completed_at) - new Date(s.started_at)) / 1000) + 's'
+        : '-';
+      const records = s.records_synced || {};
+      const recordStr = Object.entries(records).map(([k, v]) => `${k}: ${v}`).join(', ') || '-';
+      return `<tr>
+        <td>${new Date(s.started_at).toLocaleString()}</td>
+        <td>${s.sync_type}</td>
+        <td><span class="badge badge-${s.status === 'success' ? 'ready' : s.status === 'running' ? 'partial' : 'waiting'}">${s.status}</span></td>
+        <td style="font-size:.76rem">${recordStr}</td>
+        <td>${duration}</td>
+        <td style="font-size:.72rem;max-width:200px;overflow:hidden;text-overflow:ellipsis">${s.company_file || '-'}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    // User may not have admin/supervisor role
+    document.getElementById('sync-body').innerHTML = '';
+    document.getElementById('sync-empty').innerHTML = '<h3>Access Restricted</h3><p>Sync status is only visible to admin and supervisor roles.</p>';
+    document.getElementById('sync-empty').style.display = '';
+  }
+}
+
+// ═══ MODALS & ACTIONS ═══
+function showModal(id) { document.getElementById(id).classList.add('visible'); }
+function closeModal(id) { document.getElementById(id).classList.remove('visible'); }
+function showRequestModal() { showModal('request-modal'); }
+function showRackModal() { showModal('rack-modal'); }
+function showOverrideModal(itemRef) {
+  document.getElementById('ovr-item-ref').value = itemRef;
+  document.getElementById('ovr-type').value = 'available';
+  document.getElementById('ovr-notes').value = '';
+  document.getElementById('ovr-substitute').value = '';
+  document.getElementById('ovr-sub-group').style.display = 'none';
+  showModal('override-modal');
+}
+
+document.getElementById('ovr-type').addEventListener('change', function() {
+  document.getElementById('ovr-sub-group').style.display = this.value === 'substitute' ? '' : 'none';
+});
+
+async function submitRequest() {
+  try {
+    await apiFetch('/api/scheduling/qb/request-job', {
+      method: 'POST',
+      body: JSON.stringify({
+        sales_order_id: document.getElementById('req-so-select').value || null,
+        priority: parseInt(document.getElementById('req-priority').value),
+        reason: document.getElementById('req-reason').value,
+      })
+    });
+    closeModal('request-modal');
+    loadUpcoming();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function updateRequest(rid, status) {
+  try {
+    await apiFetch(`/api/scheduling/qb/request-job/${rid}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status })
+    });
+    loadUpcoming();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function submitRackMapping() {
+  try {
+    await apiFetch('/api/scheduling/rack-mappings', {
+      method: 'POST',
+      body: JSON.stringify({
+        rack_item_ref: document.getElementById('rack-item-ref').value,
+        panel_name: document.getElementById('rack-panel-name').value,
+        panel_type: document.getElementById('rack-panel-type').value,
+        estimated_hours: parseFloat(document.getElementById('rack-est-hours').value) || null,
+        notes: document.getElementById('rack-notes').value,
+      })
+    });
+    closeModal('rack-modal');
+    loadRackMappings();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function deleteRackMapping(mid) {
+  if (!confirm('Delete this rack mapping?')) return;
+  try {
+    await apiFetch(`/api/scheduling/rack-mappings/${mid}`, { method: 'DELETE' });
+    loadRackMappings();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function submitOverride() {
+  try {
+    await apiFetch('/api/scheduling/qb/part-override', {
+      method: 'POST',
+      body: JSON.stringify({
+        sales_order_id: currentOverrideSO,
+        item_ref: document.getElementById('ovr-item-ref').value,
+        override_type: document.getElementById('ovr-type').value,
+        substitute_ref: document.getElementById('ovr-substitute').value || null,
+        notes: document.getElementById('ovr-notes').value,
+      })
+    });
+    closeModal('override-modal');
+    loadPartsStatus();
+    loadUpcoming();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function deleteOverride(oid) {
+  if (!confirm('Remove this override?')) return;
+  try {
+    await apiFetch(`/api/scheduling/qb/part-override/${oid}`, { method: 'DELETE' });
+    loadPartsStatus();
+    loadUpcoming();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function downloadReport() {
+  try {
+    const weeks = document.getElementById('filter-weeks').value;
+    const data = await apiFetch(`/api/scheduling/qb/weekly-report?weeks=${weeks}`);
+    // Create a simple text report for download
+    let report = `AAE AUTOMATION — WEEKLY SCHEDULING REPORT\n`;
+    report += `Generated: ${data.generated_at}\n`;
+    report += `Window: Next ${data.window_weeks} weeks\n`;
+    report += `${'='.repeat(80)}\n\n`;
+    report += `${'SO #'.padEnd(12)}${'Customer'.padEnd(25)}${'Ship Date'.padEnd(12)}${'Readiness'.padEnd(12)}${'Status'.padEnd(10)}\n`;
+    report += `${'-'.repeat(80)}\n`;
+    (data.report_items || []).forEach(item => {
+      report += `${(item.ref_number || '-').padEnd(12)}${(item.customer_name || '').padEnd(25)}${(item.ship_date || '-').padEnd(12)}${(item.readiness_pct + '%').padEnd(12)}${(item.readiness_status || '').padEnd(10)}\n`;
+    });
+
+    if (data.manual_requests?.length) {
+      report += `\n\nMANUALLY FLAGGED JOBS\n${'='.repeat(40)}\n`;
+      data.manual_requests.forEach(r => {
+        report += `Priority ${r.priority}: ${r.reason || 'No reason given'}\n`;
+      });
+    }
+
+    const blob = new Blob([report], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `AAE_Weekly_Schedule_${data.generated_at}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ═══ HELPERS ═══
+function timeSince(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// ═══ INIT ═══
+checkAuth();
+</script>
+</body>
+</html>
