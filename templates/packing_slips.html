@@ -860,6 +860,17 @@ a { color: var(--primary); text-decoration: none; }
           </div>
         </div>
       </div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div class="field">
+          <label>Equipment Name</label>
+          <div class="dropdown-wrap">
+            <input type="text" id="pkg_equipment_name" placeholder="e.g. DBBU-Wellhead-Kit">
+            <button class="dropdown-btn" onclick="showFieldDropdown('pkg_equipment_name','pkg_equipment_name',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_pkg_equipment_name"></div>
+          </div>
+        </div>
+        <div class="field"></div>
+      </div>
     </div>
 
     <!-- Packing Slip Details (main) -->
@@ -2363,7 +2374,8 @@ async function generateBulkPackage() {
     WBS: document.getElementById("pkg_wbs").value.trim(),
     FACILITY_NAME: document.getElementById("pkg_facility_name").value.trim(),
     PROJECT_NAME: document.getElementById("pkg_project_name").value.trim(),
-    OWNERSHIP_TEXT: document.getElementById("pkg_ownership_text").value.trim()
+    OWNERSHIP_TEXT: document.getElementById("pkg_ownership_text").value.trim(),
+    EQUIPMENT_NAME: document.getElementById("pkg_equipment_name").value.trim()
   };
 
   const packingSlipData = {
@@ -2444,6 +2456,7 @@ function clearPackageForm() {
   document.getElementById("pkg_facility_name").value = "";
   document.getElementById("pkg_project_name").value = "";
   document.getElementById("pkg_ownership_text").value = "";
+  document.getElementById("pkg_equipment_name").value = "";
   document.getElementById("pkg_ps_sold_to").value = "";
   document.getElementById("pkg_ps_ship_to").value = "";
   document.getElementById("pkg_ps_attn").value = "";
