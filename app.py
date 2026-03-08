@@ -5461,14 +5461,31 @@ def delete_shipping_field_history():
 @app.route("/api/shipping/all-templates", methods=["GET"])
 @require_auth
 def list_all_shipping_templates():
-    """List all shipping templates across all units (for kit config admin)."""
+    """List all shipping templates across all units + sticker library (for kit config admin)."""
     try:
         sb = get_user_sb()
         result = sb.table("shipping_templates")\
             .select("id,template_name,template_group,version,unit_id")\
             .eq("is_deleted", False)\
             .order("template_name").execute()
-        return jsonify({"templates": result.data or []})
+        templates = result.data or []
+        for t in templates:
+            t["source"] = "unit"
+
+        # Also include sticker library templates
+        lib_result = sb.table("shipping_sticker_library")\
+            .select("id,template_name,placeholders,created_at")\
+            .eq("is_deleted", False)\
+            .order("template_name").execute()
+        for t in (lib_result.data or []):
+            templates.append({
+                "id": t["id"],
+                "template_name": t["template_name"],
+                "template_group": "Library",
+                "source": "library",
+            })
+
+        return jsonify({"templates": templates})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -5506,12 +5523,22 @@ def get_kit_config(config_id):
         # Enrich rules with template names
         rules = rules_result.data or []
         for r in rules:
-            if r.get("template_id"):
+            if r.get("library_template_id"):
+                try:
+                    tmpl = sb.table("shipping_sticker_library")\
+                        .select("template_name")\
+                        .eq("id", r["library_template_id"]).single().execute()
+                    r["template_name"] = tmpl.data.get("template_name", "")
+                    r["template_source"] = "library"
+                except Exception:
+                    r["template_name"] = ""
+            elif r.get("template_id"):
                 try:
                     tmpl = sb.table("shipping_templates")\
                         .select("template_name,template_group")\
                         .eq("id", r["template_id"]).single().execute()
                     r["template_name"] = tmpl.data.get("template_name", "")
+                    r["template_source"] = "unit"
                 except Exception:
                     r["template_name"] = ""
 
@@ -5553,6 +5580,7 @@ def create_kit_config():
                 "template_id": r.get("template_id"),
                 "template_group": r.get("template_group", ""),
                 "packing_tmpl_id": r.get("packing_tmpl_id"),
+                "library_template_id": r.get("library_template_id"),
                 "doc_label": r.get("doc_label", ""),
                 "copies_per_sn": r.get("copies_per_sn", 1),
                 "per_page": r.get("per_page", 1),
@@ -5599,6 +5627,7 @@ def update_kit_config(config_id):
                 "template_id": r.get("template_id"),
                 "template_group": r.get("template_group", ""),
                 "packing_tmpl_id": r.get("packing_tmpl_id"),
+                "library_template_id": r.get("library_template_id"),
                 "doc_label": r.get("doc_label", ""),
                 "copies_per_sn": r.get("copies_per_sn", 1),
                 "per_page": r.get("per_page", 1),
@@ -5714,16 +5743,25 @@ def bulk_generate_shipping_package():
                     doc_count += 1
 
                 elif doc_type == "sticker":
-                    # Load the DOCX template
+                    # Load the DOCX template (library or unit-based)
+                    library_tmpl_id = rule.get("library_template_id")
                     template_id = rule.get("template_id")
-                    if not template_id:
-                        continue
 
-                    tmpl_result = sb.table("shipping_templates")\
-                        .select("file_data,template_name")\
-                        .eq("id", template_id)\
-                        .single().execute()
-                    template_bytes = base64.b64decode(tmpl_result.data["file_data"])
+                    if library_tmpl_id:
+                        tmpl_result = sb.table("shipping_sticker_library")\
+                            .select("file_data,template_name")\
+                            .eq("id", library_tmpl_id)\
+                            .eq("is_deleted", False)\
+                            .single().execute()
+                        template_bytes = base64.b64decode(tmpl_result.data["file_data"])
+                    elif template_id:
+                        tmpl_result = sb.table("shipping_templates")\
+                            .select("file_data,template_name")\
+                            .eq("id", template_id)\
+                            .single().execute()
+                        template_bytes = base64.b64decode(tmpl_result.data["file_data"])
+                    else:
+                        continue
 
                     per_page = rule.get("per_page", 1)
                     copies_per_sn = rule.get("copies_per_sn", 1)
@@ -6971,6 +7009,99 @@ def portal_update_pto(pid):
         if not result.data:
             return jsonify({"error": "PTO request not found or not editable"}), 404
         return jsonify(result.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Shipping Sticker Library ─────────────────────────────────────────────
+
+@app.route("/api/shipping/sticker-library", methods=["GET"])
+@require_auth
+def list_sticker_library():
+    """List all non-deleted sticker library templates."""
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_sticker_library")\
+            .select("id,template_name,file_name,placeholders,created_at")\
+            .eq("is_deleted", False)\
+            .order("template_name").execute()
+        return jsonify({"templates": result.data or []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/sticker-library", methods=["POST"])
+@require_auth
+def upload_sticker_library_template():
+    """Upload a DOCX sticker template to the library (admin only)."""
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin role required"}), 403
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    file = request.files["file"]
+    if not file.filename or not file.filename.lower().endswith(".docx"):
+        return jsonify({"error": "Only .docx files are accepted"}), 400
+
+    template_name = request.form.get("template_name", file.filename.rsplit(".", 1)[0])
+
+    try:
+        file_bytes = file.read()
+        placeholders = _detect_placeholders(file_bytes)
+
+        sb = get_user_sb()
+        row = {
+            "template_name": template_name,
+            "file_name": file.filename,
+            "file_data": base64.b64encode(file_bytes).decode("ascii"),
+            "placeholders": json.dumps(placeholders),
+        }
+        result = sb.table("shipping_sticker_library").insert(row).execute()
+        audit_log("upload_sticker_library", "shipping_sticker_library", result.data[0]["id"],
+                  {"template_name": template_name, "placeholders": placeholders})
+        return jsonify({
+            "id": result.data[0]["id"],
+            "template_name": template_name,
+            "file_name": file.filename,
+            "placeholders": placeholders,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/sticker-library/<int:tid>/download", methods=["GET"])
+@require_auth
+def download_sticker_library_template(tid):
+    """Download original DOCX from sticker library."""
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_sticker_library")\
+            .select("file_data,file_name")\
+            .eq("id", tid)\
+            .eq("is_deleted", False)\
+            .single().execute()
+        file_bytes = base64.b64decode(result.data["file_data"])
+        buf = io.BytesIO(file_bytes)
+        buf.seek(0)
+        return send_file(buf,
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                         as_attachment=True,
+                         download_name=result.data["file_name"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/sticker-library/<int:tid>", methods=["DELETE"])
+@require_auth
+def delete_sticker_library_template(tid):
+    """Soft-delete a sticker library template (admin only)."""
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin role required"}), 403
+    try:
+        sb = get_user_sb()
+        sb.rpc("soft_delete_sticker_template", {"p_template_id": tid}).execute()
+        audit_log("delete_sticker_library", "shipping_sticker_library", tid)
+        return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

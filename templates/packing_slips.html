@@ -429,6 +429,13 @@ a { color: var(--primary); text-decoration: none; }
       <div class="module-badge badge-active">Active</div>
     </a>
 
+    <a class="module-card" onclick="showView('templates')">
+      <div class="module-icon">&#128196;</div>
+      <div class="module-title">SHIPPING TEMPLATE LIBRARY</div>
+      <div class="module-desc">Upload and manage DOCX sticker templates. These templates are used by Common Shipping Packages to generate labels and stickers.</div>
+      <div class="module-badge badge-active">Active</div>
+    </a>
+
     <a class="module-card" onclick="showView('history')">
       <div class="module-icon">&#128203;</div>
       <div class="module-title">HISTORY</div>
@@ -1093,6 +1100,30 @@ a { color: var(--primary); text-decoration: none; }
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- TEMPLATE LIBRARY TAB -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-templates" class="tab-panel">
+  <button class="view-back" onclick="showView('landing')">&larr; Back to Packing Slips</button>
+
+  <div class="card">
+    <div class="card-title">SHIPPING TEMPLATE LIBRARY</div>
+
+    <div id="sticker-lib-admin-controls" style="display:none;margin-bottom:1rem">
+      <input type="file" id="sticker-lib-file-input" accept=".docx" style="display:none"
+             onchange="uploadStickerTemplate(this)">
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('sticker-lib-file-input').click()">
+        + Upload DOCX Template
+      </button>
+    </div>
+
+    <div id="sticker-lib-grid" class="module-grid" style="gap:1rem"></div>
+    <div id="sticker-lib-empty" style="display:none;color:var(--text-muted);font-size:0.9rem;padding:1rem 0">
+      No templates uploaded yet.
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
 <!-- HISTORY TAB -->
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
 <div id="tab-history" class="tab-panel">
@@ -1265,6 +1296,7 @@ function showView(name) {
     if (name === "history") loadHistory();
     if (name === "common") loadTemplatesForCommon();
     if (name === "packages") loadKitConfigs();
+    if (name === "templates") loadStickerLibrary();
   }
   window.scrollTo(0, 0);
 }
@@ -2492,12 +2524,25 @@ async function loadAvailableTemplates() {
     }
   } catch(e) { _allPackingTemplates = []; }
 
-  // Populate template dropdowns
+  // Populate template dropdowns — unit templates then library templates
   const stSelect = document.getElementById("rule_template_id");
   stSelect.innerHTML = '<option value="">-- Select Shipping Template --</option>';
-  _allShippingTemplates.forEach(t => {
-    stSelect.innerHTML += `<option value="${t.id}">${escHtml(t.template_name)}${t.template_group ? " ["+t.template_group+"]" : ""}</option>`;
-  });
+  const unitTemplates = _allShippingTemplates.filter(t => t.source !== "library");
+  const libTemplates = _allShippingTemplates.filter(t => t.source === "library");
+  if (unitTemplates.length) {
+    stSelect.innerHTML += '<optgroup label="Unit Templates">';
+    unitTemplates.forEach(t => {
+      stSelect.innerHTML += `<option value="unit:${t.id}">${escHtml(t.template_name)}${t.template_group ? " ["+t.template_group+"]" : ""}</option>`;
+    });
+    stSelect.innerHTML += '</optgroup>';
+  }
+  if (libTemplates.length) {
+    stSelect.innerHTML += '<optgroup label="Library Templates">';
+    libTemplates.forEach(t => {
+      stSelect.innerHTML += `<option value="lib:${t.id}">${escHtml(t.template_name)} [Library]</option>`;
+    });
+    stSelect.innerHTML += '</optgroup>';
+  }
 
   const ptSelect = document.getElementById("rule_packing_tmpl_id");
   ptSelect.innerHTML = '<option value="">-- Select Packing Template --</option>';
@@ -2555,7 +2600,14 @@ function renderKitRules() {
     return;
   }
   list.innerHTML = _kitRules.map((r, i) => {
-    const tmplName = r.template_name || _allShippingTemplates.find(t => t.id === r.template_id)?.template_name || "";
+    let tmplName = r.template_name || "";
+    if (!tmplName && r.library_template_id) {
+      const lt = _allShippingTemplates.find(t => t.id === r.library_template_id && t.source === "library");
+      tmplName = lt ? lt.template_name + " [Library]" : "";
+    } else if (!tmplName && r.template_id) {
+      const ut = _allShippingTemplates.find(t => t.id === r.template_id && t.source !== "library");
+      tmplName = ut?.template_name || "";
+    }
     return `
     <div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #f0f0f0;font-size:0.85rem">
       <span style="min-width:20px;color:var(--text-muted)">${i+1}.</span>
@@ -2586,7 +2638,7 @@ function hideAddRuleRow() {
 function addRuleToConfig() {
   const docLabel = document.getElementById("rule_doc_label").value.trim();
   const docType = document.getElementById("rule_doc_type").value;
-  const templateId = parseInt(document.getElementById("rule_template_id").value) || null;
+  const rawTmplVal = document.getElementById("rule_template_id").value;
   const packingTmplId = parseInt(document.getElementById("rule_packing_tmpl_id").value) || null;
   const copiesPerSn = parseInt(document.getElementById("rule_copies_per_sn").value) || 1;
   const perPage = parseInt(document.getElementById("rule_per_page").value) || 1;
@@ -2596,14 +2648,25 @@ function addRuleToConfig() {
 
   if (!docLabel) { toast("Doc label is required", "error"); return; }
 
+  // Parse template source prefix (unit: or lib:)
+  let templateId = null, libraryTemplateId = null;
+  if (rawTmplVal.startsWith("lib:")) {
+    libraryTemplateId = parseInt(rawTmplVal.slice(4)) || null;
+  } else if (rawTmplVal.startsWith("unit:")) {
+    templateId = parseInt(rawTmplVal.slice(5)) || null;
+  } else {
+    templateId = parseInt(rawTmplVal) || null;
+  }
+
   // Get template name for display
-  const tmpl = _allShippingTemplates.find(t => t.id === templateId);
+  const tmpl = _allShippingTemplates.find(t => t.id === (libraryTemplateId || templateId) && (libraryTemplateId ? t.source === "library" : true));
   const templateGroup = tmpl?.template_group || tmpl?.template_name || "";
 
   _kitRules.push({
     doc_label: docLabel,
     doc_type: docType,
     template_id: templateId,
+    library_template_id: libraryTemplateId,
     template_group: templateGroup,
     template_name: tmpl?.template_name || "",
     packing_tmpl_id: packingTmplId,
@@ -2644,6 +2707,7 @@ async function saveKitConfig() {
       doc_label: r.doc_label,
       doc_type: r.doc_type,
       template_id: r.template_id,
+      library_template_id: r.library_template_id || null,
       template_group: r.template_group || "",
       packing_tmpl_id: r.packing_tmpl_id,
       copies_per_sn: r.copies_per_sn,
@@ -2685,6 +2749,110 @@ async function deleteKitConfig(id) {
     if (!resp.ok) { const r=await resp.json(); throw new Error(r.error); }
     toast("Kit config deleted");
     loadKitConfigs();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SHIPPING TEMPLATE LIBRARY
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function loadStickerLibrary() {
+  // Show admin controls if admin
+  const adminCtrl = document.getElementById("sticker-lib-admin-controls");
+  if (adminCtrl) adminCtrl.style.display = _isAdmin ? "" : "none";
+
+  const grid = document.getElementById("sticker-lib-grid");
+  const empty = document.getElementById("sticker-lib-empty");
+  grid.innerHTML = '<div style="color:var(--text-muted);padding:1rem">Loading...</div>';
+
+  try {
+    const resp = await fetch("/api/shipping/sticker-library", { headers: authHeadersNoBody() });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    const data = await resp.json();
+    const templates = data.templates || [];
+
+    if (templates.length === 0) {
+      grid.innerHTML = "";
+      empty.style.display = "";
+      return;
+    }
+    empty.style.display = "none";
+
+    grid.innerHTML = templates.map(t => {
+      const placeholders = (typeof t.placeholders === "string" ? JSON.parse(t.placeholders) : t.placeholders) || [];
+      const badges = placeholders.map(p => `<span style="display:inline-block;background:#e3f2fd;color:#1565c0;font-size:0.7rem;padding:2px 6px;border-radius:4px;margin:2px">${escHtml(p)}</span>`).join("");
+      const dateStr = t.created_at ? new Date(t.created_at).toLocaleDateString() : "";
+      const deleteBtn = _isAdmin
+        ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteStickerTemplate(${t.id})" style="color:#c62828;padding:2px 8px" title="Delete">&#128465;</button>`
+        : "";
+      return `
+      <div class="module-card" style="padding:1.25rem;cursor:default">
+        <div class="module-title" style="font-size:0.95rem;margin-bottom:4px">${escHtml(t.template_name)}</div>
+        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px">${escHtml(t.file_name)}</div>
+        <div style="margin-bottom:8px">${badges || '<span style="font-size:0.75rem;color:var(--text-muted)">No placeholders</span>'}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px">Uploaded: ${dateStr}</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary btn-sm" onclick="downloadStickerTemplate(${t.id},'${escHtml(t.file_name)}')">Download</button>
+          ${deleteBtn}
+        </div>
+      </div>`;
+    }).join("");
+  } catch(e) {
+    grid.innerHTML = `<div style="color:#c62828;padding:1rem">${escHtml(e.message)}</div>`;
+  }
+}
+
+async function uploadStickerTemplate(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = "";
+
+  const templateName = prompt("Template name:", file.name.replace(/\.docx$/i, ""));
+  if (!templateName) return;
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("template_name", templateName);
+
+  try {
+    const resp = await fetch("/api/shipping/sticker-library", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + _accessToken },
+      body: formData
+    });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    const result = await resp.json();
+    toast(`Template "${result.template_name}" uploaded (${(result.placeholders||[]).length} placeholders detected)`);
+    loadStickerLibrary();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+function downloadStickerTemplate(id, fileName) {
+  fetch(`/api/shipping/sticker-library/${id}/download`, { headers: authHeadersNoBody() })
+    .then(resp => {
+      if (!resp.ok) throw new Error("Download failed");
+      return resp.blob();
+    })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName || "template.docx";
+      a.click();
+      URL.revokeObjectURL(url);
+    })
+    .catch(e => toast(e.message, "error"));
+}
+
+async function deleteStickerTemplate(id) {
+  if (!confirm("Delete this sticker template? It will no longer be available for kit configurations.")) return;
+  try {
+    const resp = await fetch(`/api/shipping/sticker-library/${id}`, {
+      method: "DELETE", headers: authHeadersNoBody()
+    });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    toast("Template deleted");
+    loadStickerLibrary();
   } catch(e) { toast(e.message, "error"); }
 }
 </script>
