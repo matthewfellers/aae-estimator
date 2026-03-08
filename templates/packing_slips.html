@@ -2798,14 +2798,13 @@ async function deleteKitConfig(id) {
 
 let _stickerLibTemplates = [];
 let _stickerLibFolders = [];
-let _stickerLibEmptyFolders = [];  // user-created folders with no templates yet
+let _stickerLibEmptyFolders = [];
 
 function _getAllStickerFolders() {
   return [...new Set([..._stickerLibFolders, ..._stickerLibEmptyFolders])].sort();
 }
 
 async function loadStickerLibrary() {
-  // Show admin controls if admin
   const adminCtrl = document.getElementById("sticker-lib-admin-controls");
   if (adminCtrl) adminCtrl.style.display = _isAdmin ? "flex" : "none";
 
@@ -2819,60 +2818,69 @@ async function loadStickerLibrary() {
     const data = await resp.json();
     _stickerLibTemplates = data.templates || [];
 
-    // Group templates by folder (a template can appear in multiple folders)
-    const grouped = {};
-    const unfiled = [];
-    _stickerLibTemplates.forEach(t => {
-      const folders = t.folders || [];
-      if (folders.length === 0) {
-        unfiled.push(t);
-      } else {
-        folders.forEach(f => {
-          if (!grouped[f]) grouped[f] = [];
-          grouped[f].push(t);
-        });
-      }
-    });
-
-    // Folders with templates from DB
-    _stickerLibFolders = Object.keys(grouped).sort();
-    // Remove empty folders that now have templates
-    _stickerLibEmptyFolders = _stickerLibEmptyFolders.filter(f => !_stickerLibFolders.includes(f));
-    const allFolders = _getAllStickerFolders();
-
-    const hasContent = _stickerLibTemplates.length > 0 || allFolders.length > 0;
-    if (!hasContent) {
+    if (_stickerLibTemplates.length === 0 && _stickerLibEmptyFolders.length === 0) {
       container.innerHTML = "";
       empty.style.display = "";
       return;
     }
     empty.style.display = "none";
 
-    let html = "";
-    // Render named folders first, then unfiled templates
-    const folderOrder = [...allFolders];
-    if (unfiled.length) folderOrder.push("");
+    // Build folder groups (a template can appear in multiple)
+    const grouped = {};
+    _stickerLibTemplates.forEach(t => {
+      (t.folders || []).forEach(f => {
+        if (!grouped[f]) grouped[f] = [];
+        grouped[f].push(t);
+      });
+    });
+    _stickerLibFolders = Object.keys(grouped).sort();
+    _stickerLibEmptyFolders = _stickerLibEmptyFolders.filter(f => !_stickerLibFolders.includes(f));
+    const allFolders = _getAllStickerFolders();
 
-    folderOrder.forEach(folder => {
-      const templates = folder ? (grouped[folder] || []) : unfiled;
-      const folderId = folder ? `sticker-folder-${folder.replace(/\W/g, '_')}` : "sticker-folder-unfiled";
-      const folderLabel = folder || "Unfiled Templates";
+    let html = "";
+
+    // ── ALL TEMPLATES section (always shown) ──
+    html += `
+    <div style="margin-bottom:1.5rem">
+      <div onclick="toggleStickerSection('sticker-all-grid', this)"
+           style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;cursor:pointer;user-select:none">
+        <span class="fold-icon" style="font-size:0.7rem;width:12px">&#9660;</span>
+        <span style="font-weight:700;font-size:0.95rem;flex:1">ALL TEMPLATES</span>
+        <span style="font-size:0.75rem;color:var(--text-muted)">${_stickerLibTemplates.length} template${_stickerLibTemplates.length !== 1 ? "s" : ""}</span>
+      </div>
+      <div id="sticker-all-grid" style="padding-top:0.75rem">
+        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px;font-style:italic">${_isAdmin && allFolders.length ? "Drag a template onto a folder below to add it" : ""}</div>
+        <div class="module-grid" style="gap:1rem">
+          ${_stickerLibTemplates.map(t => renderStickerCard(t, null)).join("")}
+        </div>
+      </div>
+    </div>`;
+
+    // ── FOLDER sections ──
+    allFolders.forEach(folder => {
+      const templates = grouped[folder] || [];
+      const safeFolderId = `sticker-folder-${folder.replace(/\W/g, '_')}`;
       const count = templates.length;
-      const emptyMsg = folder && count === 0
-        ? `<div style="color:var(--text-muted);font-size:0.85rem;padding:0.75rem;font-style:italic">Empty folder &mdash; upload or add templates here</div>`
+      const emptyMsg = count === 0
+        ? `<div style="color:var(--text-muted);font-size:0.85rem;padding:0.75rem;font-style:italic">Empty &mdash; drag templates here or use the Folders button</div>`
         : "";
 
       html += `
       <div style="margin-bottom:1.25rem">
-        <div onclick="document.getElementById('${folderId}').style.display = document.getElementById('${folderId}').style.display === 'none' ? '' : 'none'; this.querySelector('.fold-icon').textContent = document.getElementById('${folderId}').style.display === 'none' ? '&#9654;' : '&#9660;'"
-             style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;cursor:pointer;user-select:none">
+        <div class="sticker-folder-drop"
+             data-folder="${escHtml(folder)}"
+             onclick="toggleStickerSection('${safeFolderId}', this)"
+             ondragover="event.preventDefault(); this.style.outline='2px solid var(--green)'; this.style.outlineOffset='-2px'"
+             ondragleave="this.style.outline=''; this.style.outlineOffset=''"
+             ondrop="handleStickerDrop(event, '${escHtml(folder)}')"
+             style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;cursor:pointer;user-select:none;transition:outline 0.15s">
           <span class="fold-icon" style="font-size:0.7rem;width:12px">&#9660;</span>
-          <span style="font-size:0.7rem">&#128193;</span>
-          <span style="font-weight:600;font-size:0.9rem;flex:1">${escHtml(folderLabel)}</span>
+          <span style="font-size:0.85rem">&#128193;</span>
+          <span style="font-weight:600;font-size:0.9rem;flex:1">${escHtml(folder)}</span>
           <span style="font-size:0.75rem;color:var(--text-muted)">${count} template${count !== 1 ? "s" : ""}</span>
-          ${_isAdmin && folder ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();renameStickerFolder('${escHtml(folder)}')" style="padding:2px 6px;font-size:0.75rem" title="Rename folder">Rename</button>` : ""}
+          ${_isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();renameStickerFolder('${escHtml(folder)}')" style="padding:2px 6px;font-size:0.75rem" title="Rename folder">Rename</button>` : ""}
         </div>
-        <div id="${folderId}" style="padding-top:0.75rem">
+        <div id="${safeFolderId}" style="padding-top:0.75rem">
           ${emptyMsg}
           <div class="module-grid" style="gap:1rem">
             ${templates.map(t => renderStickerCard(t, folder)).join("")}
@@ -2887,26 +2895,44 @@ async function loadStickerLibrary() {
   }
 }
 
+function toggleStickerSection(contentId, headerEl) {
+  const el = document.getElementById(contentId);
+  if (!el) return;
+  const icon = headerEl.querySelector('.fold-icon');
+  if (el.style.display === "none") {
+    el.style.display = "";
+    if (icon) icon.innerHTML = "&#9660;";
+  } else {
+    el.style.display = "none";
+    if (icon) icon.innerHTML = "&#9654;";
+  }
+}
+
 function renderStickerCard(t, currentFolder) {
   const placeholders = (typeof t.placeholders === "string" ? JSON.parse(t.placeholders) : t.placeholders) || [];
   const folders = t.folders || [];
   const badges = placeholders.map(p => `<span style="display:inline-block;background:#e3f2fd;color:#1565c0;font-size:0.7rem;padding:2px 6px;border-radius:4px;margin:2px">${escHtml(p)}</span>`).join("");
-  const folderBadges = folders.length > 1
-    ? `<div style="margin-bottom:6px">${folders.map(f => `<span style="display:inline-block;background:#e8f5e9;color:#2e7d32;font-size:0.65rem;padding:2px 5px;border-radius:3px;margin:1px">${escHtml(f)}</span>`).join("")}</div>`
+  // Show folder badges in the "All Templates" view
+  const folderBadges = !currentFolder && folders.length
+    ? `<div style="margin-bottom:6px">${folders.map(f => `<span style="display:inline-block;background:#e8f5e9;color:#2e7d32;font-size:0.65rem;padding:2px 5px;border-radius:3px;margin:1px">&#128193; ${escHtml(f)}</span>`).join("")}</div>`
     : "";
   const dateStr = t.created_at ? new Date(t.created_at).toLocaleDateString() : "";
   const deleteBtn = _isAdmin
     ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteStickerTemplate(${t.id})" style="color:#c62828;padding:2px 8px" title="Delete template permanently">&#128465;</button>`
     : "";
   const escapedName = escHtml(t.template_name).replace(/'/g, "\\'");
-  const manageFoldersBtn = _isAdmin
-    ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();manageStickerFolders(${t.id},'${escapedName}')" style="padding:2px 8px" title="Manage folders">Folders</button>`
+  const manageFoldersBtn = _isAdmin && !currentFolder
+    ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();manageStickerFolders(${t.id},'${escapedName}')" style="padding:2px 8px" title="Manage folder membership">Folders</button>`
     : "";
   const removeFromBtn = _isAdmin && currentFolder
     ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();removeStickerFromFolder(${t.id},'${escHtml(currentFolder)}')" style="padding:2px 8px;color:#e65100" title="Remove from this folder">Remove</button>`
     : "";
+  // Draggable in "All Templates" view only (admin)
+  const dragAttrs = _isAdmin && !currentFolder
+    ? `draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${t.id}'); event.dataTransfer.effectAllowed='copy'" style="padding:1.25rem;cursor:grab"`
+    : `style="padding:1.25rem;cursor:default"`;
   return `
-  <div class="module-card" style="padding:1.25rem;cursor:default">
+  <div class="module-card" ${dragAttrs}>
     <div class="module-title" style="font-size:0.95rem;margin-bottom:4px">${escHtml(t.template_name)}</div>
     <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px">${escHtml(t.file_name)}</div>
     ${folderBadges}
@@ -2921,6 +2947,27 @@ function renderStickerCard(t, currentFolder) {
   </div>`;
 }
 
+// ── Drag & Drop ──
+async function handleStickerDrop(event, folder) {
+  event.preventDefault();
+  event.currentTarget.style.outline = "";
+  event.currentTarget.style.outlineOffset = "";
+  const templateId = parseInt(event.dataTransfer.getData("text/plain"));
+  if (!templateId) return;
+
+  try {
+    const resp = await fetch(`/api/shipping/sticker-library/${templateId}`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ add_folder: folder })
+    });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    toast(`Added to "${folder}"`);
+    loadStickerLibrary();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ── Upload ──
 async function uploadStickerTemplate(input) {
   const file = input.files[0];
   if (!file) return;
@@ -2929,33 +2976,9 @@ async function uploadStickerTemplate(input) {
   const templateName = prompt("Template name:", file.name.replace(/\.docx$/i, ""));
   if (!templateName) return;
 
-  // Ask for folder(s) — show existing folders as options
-  const allFolders = _getAllStickerFolders();
-  let folderPrompt = "Folder (leave blank for unfiled, comma-separate for multiple)";
-  if (allFolders.length) {
-    folderPrompt += ":\n\nExisting folders:\n" + allFolders.map((f, i) => `  ${i+1}. ${f}`).join("\n") + "\n\nType folder name(s), number(s), or comma-separate for multiple";
-  }
-  let folderInput = prompt(folderPrompt, "") || "";
-
-  // Parse input: could be numbers, names, or comma-separated mix
-  const selectedFolders = [];
-  if (folderInput.trim()) {
-    folderInput.split(",").forEach(part => {
-      part = part.trim();
-      if (!part) return;
-      const num = parseInt(part);
-      if (num > 0 && num <= allFolders.length) {
-        selectedFolders.push(allFolders[num - 1]);
-      } else {
-        selectedFolders.push(part);
-      }
-    });
-  }
-
   const formData = new FormData();
   formData.append("file", file);
   formData.append("template_name", templateName);
-  formData.append("folders", [...new Set(selectedFolders)].join(","));
 
   try {
     const resp = await fetch("/api/shipping/sticker-library", {
@@ -2970,17 +2993,17 @@ async function uploadStickerTemplate(input) {
   } catch(e) { toast(e.message, "error"); }
 }
 
+// ── Folder management ──
 function createStickerFolder() {
   const name = prompt("New folder name:");
   if (!name || !name.trim()) return;
   const trimmed = name.trim();
-  const allFolders = _getAllStickerFolders();
-  if (allFolders.includes(trimmed)) {
+  if (_getAllStickerFolders().includes(trimmed)) {
     toast("Folder already exists", "error");
     return;
   }
   _stickerLibEmptyFolders.push(trimmed);
-  toast(`Folder "${trimmed}" created`);
+  toast(`Folder "${trimmed}" created — drag templates into it`);
   loadStickerLibrary();
 }
 
@@ -2989,42 +3012,31 @@ async function manageStickerFolders(id, name) {
   const currentFolders = (t && t.folders) || [];
   const allFolders = _getAllStickerFolders();
 
-  let prompt_text = `Manage folders for "${name}"\n\nCurrent: ${currentFolders.length ? currentFolders.join(", ") : "(unfiled)"}\n\n`;
-  prompt_text += `Available folders:\n`;
+  if (allFolders.length === 0) {
+    toast("Create a folder first using the + New Folder button", "error");
+    return;
+  }
+
+  let lines = [`Add/remove "${name}" from folders:\n`];
   allFolders.forEach((f, i) => {
     const inFolder = currentFolders.includes(f);
-    prompt_text += `  ${i+1}. ${inFolder ? "[X]" : "[ ]"} ${f}\n`;
+    lines.push(`  ${i+1}. ${inFolder ? "[X]" : "[ ]"} ${f}`);
   });
-  prompt_text += `\nType folder numbers/names to toggle (comma-separate for multiple).\nPrefix with + to add, - to remove.\nOr type a new folder name to create and add it:`;
+  lines.push("\nType numbers to toggle (comma-separate for multiple):");
 
-  const input = prompt(prompt_text);
+  const input = prompt(lines.join("\n"));
   if (input === null) return;
 
   let newFolders = [...currentFolders];
   input.split(",").forEach(part => {
     part = part.trim();
     if (!part) return;
-
-    const isAdd = part.startsWith("+");
-    const isRemove = part.startsWith("-");
-    if (isAdd || isRemove) part = part.substring(1).trim();
-
-    // Resolve number to folder name
     const num = parseInt(part);
-    let folderName = part;
-    if (num > 0 && num <= allFolders.length) folderName = allFolders[num - 1];
-
-    if (isRemove) {
+    let folderName = (num > 0 && num <= allFolders.length) ? allFolders[num - 1] : part;
+    if (newFolders.includes(folderName)) {
       newFolders = newFolders.filter(f => f !== folderName);
-    } else if (isAdd) {
-      if (!newFolders.includes(folderName)) newFolders.push(folderName);
     } else {
-      // Toggle
-      if (newFolders.includes(folderName)) {
-        newFolders = newFolders.filter(f => f !== folderName);
-      } else {
-        newFolders.push(folderName);
-      }
+      newFolders.push(folderName);
     }
   });
 
@@ -3035,13 +3047,12 @@ async function manageStickerFolders(id, name) {
       body: JSON.stringify({ folders: newFolders })
     });
     if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
-    toast(`Updated folders: ${newFolders.length ? newFolders.join(", ") : "unfiled"}`);
+    toast(`Updated: ${newFolders.length ? newFolders.join(", ") : "removed from all folders"}`);
     loadStickerLibrary();
   } catch(e) { toast(e.message, "error"); }
 }
 
 async function removeStickerFromFolder(id, folder) {
-  if (!confirm(`Remove this template from "${folder}"? (The template itself won't be deleted)`)) return;
   try {
     const resp = await fetch(`/api/shipping/sticker-library/${id}`, {
       method: "PATCH",
@@ -3058,11 +3069,9 @@ async function renameStickerFolder(oldName) {
   const newName = prompt(`Rename folder "${oldName}" to:`, oldName);
   if (!newName || !newName.trim() || newName.trim() === oldName) return;
 
-  // Update all templates that have this folder in their folders array
   const toUpdate = _stickerLibTemplates.filter(t => (t.folders || []).includes(oldName));
   try {
     if (toUpdate.length === 0) {
-      // Empty folder — just rename in memory
       _stickerLibEmptyFolders = _stickerLibEmptyFolders.filter(f => f !== oldName);
       _stickerLibEmptyFolders.push(newName.trim());
     } else {
