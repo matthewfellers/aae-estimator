@@ -4930,15 +4930,60 @@ def _replace_in_paragraph(paragraph, field_values):
         run.text = ''
 
 
+def _auto_scale_paragraph(paragraph, available_width_pt=540):
+    """Shrink font size if paragraph text is too wide for the page.
+    Uses a character-width heuristic: avg char width ≈ 0.55 × font_size for Arial.
+    Minimum font size is 14pt."""
+    from docx.shared import Pt as DocxPt
+    runs = paragraph.runs
+    if not runs:
+        return
+    full_text = ''.join(run.text for run in runs)
+    if not full_text.strip():
+        return
+
+    # Get the font size from the first run (all runs in a line typically match)
+    font_size = runs[0].font.size
+    if not font_size:
+        return
+    size_pt = font_size / 12700  # EMU to points
+
+    # Estimate max characters that fit at this font size
+    # Arial average char width ≈ 0.55 × font_size_pt
+    avg_char_width = 0.55 * size_pt
+    max_chars = available_width_pt / avg_char_width
+
+    if len(full_text) <= max_chars:
+        return  # Fits fine
+
+    # Scale down until it fits, minimum 14pt
+    new_size = size_pt
+    while len(full_text) > (available_width_pt / (0.55 * new_size)) and new_size > 14:
+        new_size -= 1
+
+    # Apply new size to all runs
+    for run in runs:
+        run.font.size = DocxPt(new_size)
+
+
 def generate_shipping_doc(template_bytes, field_values):
     """Generate a DOCX from template bytes by replacing {PLACEHOLDER} tags.
+    Auto-scales font sizes when replacement text is too long for the page.
     Returns BytesIO with the generated document."""
     from docx import Document as DocxDocument
     doc = DocxDocument(io.BytesIO(template_bytes))
 
+    # Calculate available width in points from page setup
+    section = doc.sections[0] if doc.sections else None
+    if section:
+        avail_width_pt = (section.page_width - section.left_margin - section.right_margin) / 12700
+    else:
+        avail_width_pt = 540  # fallback: 7.5 inches
+
     # Replace in paragraphs
     for para in doc.paragraphs:
         _replace_in_paragraph(para, field_values)
+        _auto_scale_paragraph(para, avail_width_pt)
 
     # Replace in tables
     for table in doc.tables:
@@ -4946,6 +4991,7 @@ def generate_shipping_doc(template_bytes, field_values):
             for cell in row.cells:
                 for para in cell.paragraphs:
                     _replace_in_paragraph(para, field_values)
+                    _auto_scale_paragraph(para, avail_width_pt)
 
     # Replace in headers/footers
     for section in doc.sections:
@@ -4953,6 +4999,7 @@ def generate_shipping_doc(template_bytes, field_values):
             if header_footer and header_footer.paragraphs:
                 for para in header_footer.paragraphs:
                     _replace_in_paragraph(para, field_values)
+                    _auto_scale_paragraph(para, avail_width_pt)
 
     buf = io.BytesIO()
     doc.save(buf)
