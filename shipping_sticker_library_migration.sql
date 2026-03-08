@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS public.shipping_sticker_library (
     id              bigserial PRIMARY KEY,
     org_id          uuid NOT NULL DEFAULT current_org_id()
-                        REFERENCES public.organizations(id),
+                        REFERENCES public.orgs(id),
     created_by      uuid DEFAULT auth.uid()
                         REFERENCES auth.users(id),
     template_name   text NOT NULL,
