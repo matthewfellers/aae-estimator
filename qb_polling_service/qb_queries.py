@@ -53,6 +53,7 @@ def build_sales_order_query(
     inner = (
         f"<SalesOrderQueryRq>\n"
         f"{filters}"
+        f"      <StatusFilter>Open</StatusFilter>\n"
         f"{line_items}"
         f"    </SalesOrderQueryRq>"
     )
