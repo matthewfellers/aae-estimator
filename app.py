@@ -5789,7 +5789,7 @@ def bulk_generate_shipping_package():
                     zf.writestr(f"{folder}{ps_filename}", excel_buf.getvalue())
                     doc_count += 1
 
-                elif doc_type == "sticker":
+                elif doc_type in ("sticker", "document"):
                     # Load the DOCX template (library or unit-based)
                     library_tmpl_id = rule.get("library_template_id")
                     template_id = rule.get("template_id")

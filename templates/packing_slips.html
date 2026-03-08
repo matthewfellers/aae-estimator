@@ -432,7 +432,7 @@ a { color: var(--primary); text-decoration: none; }
     <a class="module-card" onclick="showView('templates')">
       <div class="module-icon">&#128196;</div>
       <div class="module-title">SHIPPING TEMPLATE LIBRARY</div>
-      <div class="module-desc">Upload and manage DOCX sticker templates. These templates are used by Common Shipping Packages to generate labels and stickers.</div>
+      <div class="module-desc">Upload and manage DOCX templates for stickers, labels, and printable documents. Used by Common Shipping Packages to generate shipping docs.</div>
       <div class="module-badge badge-active">Active</div>
     </a>
 
@@ -1063,6 +1063,7 @@ a { color: var(--primary); text-decoration: none; }
           <label>Doc Type</label>
           <select id="rule_doc_type">
             <option value="sticker">Sticker (DOCX)</option>
+            <option value="document">Document (DOCX)</option>
             <option value="packing_slip">Packing Slip (Excel)</option>
           </select>
         </div>
@@ -2634,7 +2635,7 @@ function renderKitRules() {
     <div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #f0f0f0;font-size:0.85rem">
       <span style="min-width:20px;color:var(--text-muted)">${i+1}.</span>
       <span style="flex:1;font-weight:500">${escHtml(r.doc_label)}</span>
-      <span style="color:var(--text-muted)">${r.doc_type}</span>
+      <span style="color:var(--text-muted)">${r.doc_type === "sticker" ? "Sticker" : r.doc_type === "document" ? "Document" : "Packing Slip"}</span>
       <span style="color:var(--text-muted)">${escHtml(tmplName)}</span>
       <span class="badge" style="background:#f0f0f0;color:#666">${r.condition}</span>
       <span style="color:var(--text-muted)">${r.copies_per_sn||1}x</span>
@@ -2649,6 +2650,11 @@ function showAddRuleRow() {
   // Show/hide packing template selector based on doc type
   document.getElementById("rule_doc_type").onchange = () => {
     const isPacking = document.getElementById("rule_doc_type").value === "packing_slip";
+    // Update placeholder text based on type
+    const labelInput = document.getElementById("rule_doc_label");
+    if (document.getElementById("rule_doc_type").value === "document") labelInput.placeholder = "e.g. Panel Door Label";
+    else if (isPacking) labelInput.placeholder = "e.g. Packing Slip";
+    else labelInput.placeholder = "e.g. Cable Sticker";
     document.getElementById("rule-packing-tmpl-wrap").style.display = isPacking ? "" : "none";
   };
 }
