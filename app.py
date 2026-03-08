@@ -5521,15 +5521,16 @@ def list_all_shipping_templates():
 
         # Also include sticker library templates
         lib_result = sb.table("shipping_sticker_library")\
-            .select("id,template_name,folder,placeholders,created_at")\
+            .select("id,template_name,folders,placeholders,created_at")\
             .eq("is_deleted", False)\
             .order("template_name").execute()
         for t in (lib_result.data or []):
-            folder = t.get("folder", "")
+            folders = t.get("folders") or []
+            group_label = "Library / " + ", ".join(folders) if folders else "Library"
             templates.append({
                 "id": t["id"],
                 "template_name": t["template_name"],
-                "template_group": f"Library / {folder}" if folder else "Library",
+                "template_group": group_label,
                 "source": "library",
             })
 
@@ -7070,9 +7071,9 @@ def list_sticker_library():
     try:
         sb = get_user_sb()
         result = sb.table("shipping_sticker_library")\
-            .select("id,template_name,file_name,placeholders,folder,created_at")\
+            .select("id,template_name,file_name,placeholders,folders,created_at")\
             .eq("is_deleted", False)\
-            .order("folder").order("template_name").execute()
+            .order("template_name").execute()
         return jsonify({"templates": result.data or []})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -7092,7 +7093,8 @@ def upload_sticker_library_template():
         return jsonify({"error": "Only .docx files are accepted"}), 400
 
     template_name = request.form.get("template_name", file.filename.rsplit(".", 1)[0])
-    folder = request.form.get("folder", "").strip()
+    folders_raw = request.form.get("folders", "").strip()
+    folders = [f.strip() for f in folders_raw.split(",") if f.strip()] if folders_raw else []
 
     try:
         file_bytes = file.read()
@@ -7104,17 +7106,17 @@ def upload_sticker_library_template():
             "file_name": file.filename,
             "file_data": base64.b64encode(file_bytes).decode("ascii"),
             "placeholders": json.dumps(placeholders),
-            "folder": folder,
+            "folders": folders,
         }
         result = sb.table("shipping_sticker_library").insert(row).execute()
         audit_log("upload_sticker_library", "shipping_sticker_library", result.data[0]["id"],
-                  {"template_name": template_name, "placeholders": placeholders, "folder": folder})
+                  {"template_name": template_name, "placeholders": placeholders, "folders": folders})
         return jsonify({
             "id": result.data[0]["id"],
             "template_name": template_name,
             "file_name": file.filename,
             "placeholders": placeholders,
-            "folder": folder,
+            "folders": folders,
         }), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -7145,19 +7147,39 @@ def download_sticker_library_template(tid):
 @app.route("/api/shipping/sticker-library/<int:tid>", methods=["PATCH"])
 @require_auth
 def update_sticker_library_template(tid):
-    """Update a sticker library template's folder or name (admin only)."""
+    """Update a sticker library template's folders or name (admin only).
+    Accepts: folders (full replace), add_folder, remove_folder, template_name."""
     if g.user.get("role") != "admin":
         return jsonify({"error": "Admin role required"}), 403
     data = request.get_json() or {}
-    updates = {}
-    if "folder" in data:
-        updates["folder"] = data["folder"].strip()
-    if "template_name" in data:
-        updates["template_name"] = data["template_name"].strip()
-    if not updates:
-        return jsonify({"error": "Nothing to update"}), 400
     try:
         sb = get_user_sb()
+
+        # If adding or removing a single folder, read current first
+        if "add_folder" in data or "remove_folder" in data:
+            current = sb.table("shipping_sticker_library")\
+                .select("folders").eq("id", tid).eq("is_deleted", False)\
+                .single().execute()
+            current_folders = current.data.get("folders") or []
+            if "add_folder" in data:
+                folder = data["add_folder"].strip()
+                if folder and folder not in current_folders:
+                    current_folders.append(folder)
+            if "remove_folder" in data:
+                folder = data["remove_folder"].strip()
+                current_folders = [f for f in current_folders if f != folder]
+            updates = {"folders": current_folders}
+        else:
+            updates = {}
+
+        if "folders" in data:
+            updates["folders"] = [f.strip() for f in data["folders"] if f.strip()]
+        if "template_name" in data:
+            updates["template_name"] = data["template_name"].strip()
+
+        if not updates:
+            return jsonify({"error": "Nothing to update"}), 400
+
         sb.table("shipping_sticker_library").update(updates)\
             .eq("id", tid).eq("is_deleted", False).execute()
         audit_log("update_sticker_library", "shipping_sticker_library", tid, updates)

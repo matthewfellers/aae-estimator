@@ -2800,6 +2800,10 @@ let _stickerLibTemplates = [];
 let _stickerLibFolders = [];
 let _stickerLibEmptyFolders = [];  // user-created folders with no templates yet
 
+function _getAllStickerFolders() {
+  return [...new Set([..._stickerLibFolders, ..._stickerLibEmptyFolders])].sort();
+}
+
 async function loadStickerLibrary() {
   // Show admin controls if admin
   const adminCtrl = document.getElementById("sticker-lib-admin-controls");
@@ -2815,19 +2819,26 @@ async function loadStickerLibrary() {
     const data = await resp.json();
     _stickerLibTemplates = data.templates || [];
 
-    // Group templates by folder
+    // Group templates by folder (a template can appear in multiple folders)
     const grouped = {};
+    const unfiled = [];
     _stickerLibTemplates.forEach(t => {
-      const folder = t.folder || "";
-      if (!grouped[folder]) grouped[folder] = [];
-      grouped[folder].push(t);
+      const folders = t.folders || [];
+      if (folders.length === 0) {
+        unfiled.push(t);
+      } else {
+        folders.forEach(f => {
+          if (!grouped[f]) grouped[f] = [];
+          grouped[f].push(t);
+        });
+      }
     });
+
     // Folders with templates from DB
-    _stickerLibFolders = Object.keys(grouped).filter(f => f).sort();
+    _stickerLibFolders = Object.keys(grouped).sort();
     // Remove empty folders that now have templates
     _stickerLibEmptyFolders = _stickerLibEmptyFolders.filter(f => !_stickerLibFolders.includes(f));
-    // Merge: all known folders
-    const allFolders = [...new Set([..._stickerLibFolders, ..._stickerLibEmptyFolders])].sort();
+    const allFolders = _getAllStickerFolders();
 
     const hasContent = _stickerLibTemplates.length > 0 || allFolders.length > 0;
     if (!hasContent) {
@@ -2840,15 +2851,15 @@ async function loadStickerLibrary() {
     let html = "";
     // Render named folders first, then unfiled templates
     const folderOrder = [...allFolders];
-    if (grouped[""]) folderOrder.push("");  // unfiled at the end
+    if (unfiled.length) folderOrder.push("");
 
     folderOrder.forEach(folder => {
-      const templates = grouped[folder] || [];
+      const templates = folder ? (grouped[folder] || []) : unfiled;
       const folderId = folder ? `sticker-folder-${folder.replace(/\W/g, '_')}` : "sticker-folder-unfiled";
       const folderLabel = folder || "Unfiled Templates";
       const count = templates.length;
       const emptyMsg = folder && count === 0
-        ? `<div style="color:var(--text-muted);font-size:0.85rem;padding:0.75rem;font-style:italic">Empty folder &mdash; upload or move templates here</div>`
+        ? `<div style="color:var(--text-muted);font-size:0.85rem;padding:0.75rem;font-style:italic">Empty folder &mdash; upload or add templates here</div>`
         : "";
 
       html += `
@@ -2864,7 +2875,7 @@ async function loadStickerLibrary() {
         <div id="${folderId}" style="padding-top:0.75rem">
           ${emptyMsg}
           <div class="module-grid" style="gap:1rem">
-            ${templates.map(t => renderStickerCard(t)).join("")}
+            ${templates.map(t => renderStickerCard(t, folder)).join("")}
           </div>
         </div>
       </div>`;
@@ -2876,25 +2887,35 @@ async function loadStickerLibrary() {
   }
 }
 
-function renderStickerCard(t) {
+function renderStickerCard(t, currentFolder) {
   const placeholders = (typeof t.placeholders === "string" ? JSON.parse(t.placeholders) : t.placeholders) || [];
+  const folders = t.folders || [];
   const badges = placeholders.map(p => `<span style="display:inline-block;background:#e3f2fd;color:#1565c0;font-size:0.7rem;padding:2px 6px;border-radius:4px;margin:2px">${escHtml(p)}</span>`).join("");
+  const folderBadges = folders.length > 1
+    ? `<div style="margin-bottom:6px">${folders.map(f => `<span style="display:inline-block;background:#e8f5e9;color:#2e7d32;font-size:0.65rem;padding:2px 5px;border-radius:3px;margin:1px">${escHtml(f)}</span>`).join("")}</div>`
+    : "";
   const dateStr = t.created_at ? new Date(t.created_at).toLocaleDateString() : "";
   const deleteBtn = _isAdmin
-    ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteStickerTemplate(${t.id})" style="color:#c62828;padding:2px 8px" title="Delete">&#128465;</button>`
+    ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteStickerTemplate(${t.id})" style="color:#c62828;padding:2px 8px" title="Delete template permanently">&#128465;</button>`
     : "";
-  const moveBtn = _isAdmin
-    ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();moveStickerTemplate(${t.id},'${escHtml(t.template_name)}')" style="padding:2px 8px" title="Move to folder">Move</button>`
+  const escapedName = escHtml(t.template_name).replace(/'/g, "\\'");
+  const manageFoldersBtn = _isAdmin
+    ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();manageStickerFolders(${t.id},'${escapedName}')" style="padding:2px 8px" title="Manage folders">Folders</button>`
+    : "";
+  const removeFromBtn = _isAdmin && currentFolder
+    ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();removeStickerFromFolder(${t.id},'${escHtml(currentFolder)}')" style="padding:2px 8px;color:#e65100" title="Remove from this folder">Remove</button>`
     : "";
   return `
   <div class="module-card" style="padding:1.25rem;cursor:default">
     <div class="module-title" style="font-size:0.95rem;margin-bottom:4px">${escHtml(t.template_name)}</div>
     <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px">${escHtml(t.file_name)}</div>
+    ${folderBadges}
     <div style="margin-bottom:8px">${badges || '<span style="font-size:0.75rem;color:var(--text-muted)">No placeholders</span>'}</div>
     <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px">Uploaded: ${dateStr}</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn btn-secondary btn-sm" onclick="downloadStickerTemplate(${t.id},'${escHtml(t.file_name)}')">Download</button>
-      ${moveBtn}
+      ${manageFoldersBtn}
+      ${removeFromBtn}
       ${deleteBtn}
     </div>
   </div>`;
@@ -2908,23 +2929,33 @@ async function uploadStickerTemplate(input) {
   const templateName = prompt("Template name:", file.name.replace(/\.docx$/i, ""));
   if (!templateName) return;
 
-  // Ask for folder — show existing folders as options
-  const allFolders = [...new Set([..._stickerLibFolders, ..._stickerLibEmptyFolders])].sort();
-  let folderPrompt = "Folder (leave blank for unfiled)";
+  // Ask for folder(s) — show existing folders as options
+  const allFolders = _getAllStickerFolders();
+  let folderPrompt = "Folder (leave blank for unfiled, comma-separate for multiple)";
   if (allFolders.length) {
-    folderPrompt += ":\n\nExisting folders:\n" + allFolders.map((f, i) => `  ${i+1}. ${f}`).join("\n") + "\n\nType a folder name or number";
+    folderPrompt += ":\n\nExisting folders:\n" + allFolders.map((f, i) => `  ${i+1}. ${f}`).join("\n") + "\n\nType folder name(s), number(s), or comma-separate for multiple";
   }
   let folderInput = prompt(folderPrompt, "") || "";
-  // If they typed a number matching an existing folder, use that
-  const folderNum = parseInt(folderInput);
-  if (folderNum > 0 && folderNum <= allFolders.length) {
-    folderInput = allFolders[folderNum - 1];
+
+  // Parse input: could be numbers, names, or comma-separated mix
+  const selectedFolders = [];
+  if (folderInput.trim()) {
+    folderInput.split(",").forEach(part => {
+      part = part.trim();
+      if (!part) return;
+      const num = parseInt(part);
+      if (num > 0 && num <= allFolders.length) {
+        selectedFolders.push(allFolders[num - 1]);
+      } else {
+        selectedFolders.push(part);
+      }
+    });
   }
 
   const formData = new FormData();
   formData.append("file", file);
   formData.append("template_name", templateName);
-  formData.append("folder", folderInput.trim());
+  formData.append("folders", [...new Set(selectedFolders)].join(","));
 
   try {
     const resp = await fetch("/api/shipping/sticker-library", {
@@ -2943,7 +2974,8 @@ function createStickerFolder() {
   const name = prompt("New folder name:");
   if (!name || !name.trim()) return;
   const trimmed = name.trim();
-  if (_stickerLibFolders.includes(trimmed) || _stickerLibEmptyFolders.includes(trimmed)) {
+  const allFolders = _getAllStickerFolders();
+  if (allFolders.includes(trimmed)) {
     toast("Folder already exists", "error");
     return;
   }
@@ -2952,33 +2984,72 @@ function createStickerFolder() {
   loadStickerLibrary();
 }
 
-async function moveStickerTemplate(id, name) {
-  const allFolders = [...new Set([..._stickerLibFolders, ..._stickerLibEmptyFolders])].sort();
-  let folderPrompt = `Move "${name}" to folder:\n\n  0. Unfiled (no folder)`;
+async function manageStickerFolders(id, name) {
+  const t = _stickerLibTemplates.find(x => x.id === id);
+  const currentFolders = (t && t.folders) || [];
+  const allFolders = _getAllStickerFolders();
+
+  let prompt_text = `Manage folders for "${name}"\n\nCurrent: ${currentFolders.length ? currentFolders.join(", ") : "(unfiled)"}\n\n`;
+  prompt_text += `Available folders:\n`;
   allFolders.forEach((f, i) => {
-    folderPrompt += `\n  ${i+1}. ${f}`;
+    const inFolder = currentFolders.includes(f);
+    prompt_text += `  ${i+1}. ${inFolder ? "[X]" : "[ ]"} ${f}\n`;
   });
-  folderPrompt += "\n\nType a number or a new folder name to create one:";
+  prompt_text += `\nType folder numbers/names to toggle (comma-separate for multiple).\nPrefix with + to add, - to remove.\nOr type a new folder name to create and add it:`;
 
-  let input = prompt(folderPrompt);
+  const input = prompt(prompt_text);
   if (input === null) return;
-  input = input.trim();
 
-  let folder = input;
-  if (input === "0") folder = "";
-  else {
-    const num = parseInt(input);
-    if (num > 0 && num <= allFolders.length) folder = allFolders[num - 1];
-  }
+  let newFolders = [...currentFolders];
+  input.split(",").forEach(part => {
+    part = part.trim();
+    if (!part) return;
+
+    const isAdd = part.startsWith("+");
+    const isRemove = part.startsWith("-");
+    if (isAdd || isRemove) part = part.substring(1).trim();
+
+    // Resolve number to folder name
+    const num = parseInt(part);
+    let folderName = part;
+    if (num > 0 && num <= allFolders.length) folderName = allFolders[num - 1];
+
+    if (isRemove) {
+      newFolders = newFolders.filter(f => f !== folderName);
+    } else if (isAdd) {
+      if (!newFolders.includes(folderName)) newFolders.push(folderName);
+    } else {
+      // Toggle
+      if (newFolders.includes(folderName)) {
+        newFolders = newFolders.filter(f => f !== folderName);
+      } else {
+        newFolders.push(folderName);
+      }
+    }
+  });
 
   try {
     const resp = await fetch(`/api/shipping/sticker-library/${id}`, {
       method: "PATCH",
       headers: authHeaders(),
-      body: JSON.stringify({ folder })
+      body: JSON.stringify({ folders: newFolders })
     });
     if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
-    toast(`Moved to "${folder || "Unfiled"}"`);
+    toast(`Updated folders: ${newFolders.length ? newFolders.join(", ") : "unfiled"}`);
+    loadStickerLibrary();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function removeStickerFromFolder(id, folder) {
+  if (!confirm(`Remove this template from "${folder}"? (The template itself won't be deleted)`)) return;
+  try {
+    const resp = await fetch(`/api/shipping/sticker-library/${id}`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ remove_folder: folder })
+    });
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    toast(`Removed from "${folder}"`);
     loadStickerLibrary();
   } catch(e) { toast(e.message, "error"); }
 }
@@ -2987,19 +3058,20 @@ async function renameStickerFolder(oldName) {
   const newName = prompt(`Rename folder "${oldName}" to:`, oldName);
   if (!newName || !newName.trim() || newName.trim() === oldName) return;
 
-  // Move all templates in the old folder to the new folder name
-  const toMove = _stickerLibTemplates.filter(t => (t.folder || "") === oldName);
+  // Update all templates that have this folder in their folders array
+  const toUpdate = _stickerLibTemplates.filter(t => (t.folders || []).includes(oldName));
   try {
-    if (toMove.length === 0) {
+    if (toUpdate.length === 0) {
       // Empty folder — just rename in memory
       _stickerLibEmptyFolders = _stickerLibEmptyFolders.filter(f => f !== oldName);
       _stickerLibEmptyFolders.push(newName.trim());
     } else {
-      for (const t of toMove) {
+      for (const t of toUpdate) {
+        const updatedFolders = (t.folders || []).map(f => f === oldName ? newName.trim() : f);
         const resp = await fetch(`/api/shipping/sticker-library/${t.id}`, {
           method: "PATCH",
           headers: authHeaders(),
-          body: JSON.stringify({ folder: newName.trim() })
+          body: JSON.stringify({ folders: updatedFolders })
         });
         if (!resp.ok) throw new Error("Failed to rename folder");
       }
