@@ -42,7 +42,6 @@ class SupabasePusher:
                 "due_date": order.get("due_date"),
                 "po_number": order.get("po_number"),
                 "status": order.get("status", "open"),
-                "total_amount": order.get("total_amount"),
                 "memo": order.get("memo"),
                 "is_fully_invoiced": order.get("is_fully_invoiced", False),
             }
@@ -70,8 +69,6 @@ class SupabasePusher:
                             "description": line.get("description"),
                             "quantity": line.get("quantity"),
                             "qty_invoiced": line.get("qty_invoiced", 0),
-                            "rate": line.get("rate"),
-                            "amount": line.get("amount"),
                             "is_rack": line.get("is_rack", False),
                         }
 
@@ -107,7 +104,6 @@ class SupabasePusher:
                 "vendor_name": receipt.get("vendor_name"),
                 "txn_date": receipt.get("txn_date"),
                 "ref_number": receipt.get("ref_number"),
-                "total_amount": receipt.get("total_amount"),
                 "memo": receipt.get("memo"),
                 "linked_po": receipt.get("linked_po"),
             }
@@ -130,8 +126,6 @@ class SupabasePusher:
                             "item_ref": line.get("item_ref"),
                             "description": line.get("description"),
                             "quantity": line.get("quantity"),
-                            "cost": line.get("cost"),
-                            "amount": line.get("amount"),
                         }
 
                         self.client.table("qb_item_receipt_lines").upsert(
@@ -166,8 +160,6 @@ class SupabasePusher:
                 "description": item.get("description"),
                 "qty_on_hand": item.get("qty_on_hand"),
                 "reorder_point": item.get("reorder_point"),
-                "purchase_cost": item.get("purchase_cost"),
-                "sales_price": item.get("sales_price"),
                 "preferred_vendor": item.get("preferred_vendor"),
                 "is_active": item.get("is_active", True),
                 "manufacturer": item.get("manufacturer"),

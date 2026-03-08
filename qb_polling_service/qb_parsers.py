@@ -181,7 +181,6 @@ def parse_sales_orders(xml_response: str) -> list[dict[str, Any]]:
             "due_date": _get_date(so_ret, "DueDate"),
             "po_number": _get_text(so_ret, "PONumber"),
             "status": status,
-            "total_amount": _get_float(so_ret, "TotalAmount"),
             "memo": _get_text(so_ret, "Memo"),
             "is_fully_invoiced": is_invoiced,
             "lines": [],
@@ -210,8 +209,6 @@ def parse_sales_orders(xml_response: str) -> list[dict[str, Any]]:
                     "description": _get_text(line, "Desc"),
                     "quantity": _get_float(line, "Quantity"),
                     "qty_invoiced": _get_float(line, "Invoiced"),
-                    "rate": _get_float(line, "Rate"),
-                    "amount": _get_float(line, "Amount"),
                     "is_rack": is_rack,
                 }
                 order["lines"].append(line_data)
@@ -246,7 +243,6 @@ def parse_item_receipts(xml_response: str) -> list[dict[str, Any]]:
             "vendor_name": _get_ref_value(ir_ret, "VendorRef"),
             "txn_date": _get_date(ir_ret, "TxnDate"),
             "ref_number": _get_text(ir_ret, "RefNumber"),
-            "total_amount": _get_float(ir_ret, "TotalAmount"),
             "memo": _get_text(ir_ret, "Memo"),
             "linked_po": "",
             "lines": [],
@@ -266,8 +262,6 @@ def parse_item_receipts(xml_response: str) -> list[dict[str, Any]]:
                     "item_ref": _get_ref_value(line, "ItemRef"),
                     "description": _get_text(line, "Desc"),
                     "quantity": _get_float(line, "Quantity"),
-                    "cost": _get_float(line, "Cost"),
-                    "amount": _get_float(line, "Amount"),
                 }
                 if line_data["item_ref"]:
                     receipt["lines"].append(line_data)
@@ -325,8 +319,6 @@ def parse_items(xml_response: str, item_type: str = "Inventory") -> list[dict[st
             ),
             "qty_on_hand": _get_float(item_ret, "QuantityOnHand"),
             "reorder_point": _get_float(item_ret, "ReorderPoint"),
-            "purchase_cost": _get_float(item_ret, "PurchaseCost"),
-            "sales_price": _get_float(item_ret, "SalesPrice"),
             "preferred_vendor": _get_ref_value(item_ret, "PrefVendorRef"),
             "is_active": _get_text(item_ret, "IsActive", "true").lower() == "true",
             "manufacturer": _guess_manufacturer(name or full_name),
