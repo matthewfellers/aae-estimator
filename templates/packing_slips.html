@@ -793,9 +793,18 @@ a { color: var(--primary); text-decoration: none; }
     <!-- Serial Numbers -->
     <div class="card">
       <div class="card-title">SERIAL NUMBERS</div>
-      <div class="field">
-        <label>Enter serial numbers (one per line)</label>
-        <textarea id="pkg_serial_numbers" rows="5" placeholder="6011&#10;6033&#10;6035"></textarea>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div class="field">
+          <label>Enter serial numbers (one per line)</label>
+          <textarea id="pkg_serial_numbers" rows="5" placeholder="6011&#10;6033&#10;6035" oninput="checkSnQtyMatch()"></textarea>
+        </div>
+        <div>
+          <div class="field" style="margin-bottom:0.75rem">
+            <label>Expected Panel Quantity</label>
+            <input type="number" id="pkg_expected_qty" min="1" placeholder="e.g. 3" oninput="checkSnQtyMatch()">
+          </div>
+          <div id="pkg-qty-status" style="font-size:0.85rem;font-weight:600;padding:6px 10px;border-radius:6px;display:none"></div>
+        </div>
       </div>
     </div>
 
@@ -2272,6 +2281,30 @@ function updateDocPreview() {
 // Attach serial number change listener
 document.getElementById("pkg_serial_numbers")?.addEventListener("input", updateDocPreview);
 
+// ── Quantity check ──
+function checkSnQtyMatch() {
+  const serialText = document.getElementById("pkg_serial_numbers").value.trim();
+  const serials = serialText ? serialText.split("\n").map(s => s.trim()).filter(Boolean) : [];
+  const expectedQty = parseInt(document.getElementById("pkg_expected_qty").value) || 0;
+  const statusEl = document.getElementById("pkg-qty-status");
+
+  if (!expectedQty || serials.length === 0) {
+    statusEl.style.display = "none";
+    return;
+  }
+
+  statusEl.style.display = "";
+  if (serials.length === expectedQty) {
+    statusEl.style.background = "#E8F5E9";
+    statusEl.style.color = "#2E7D32";
+    statusEl.textContent = `Match: ${serials.length} serial numbers = ${expectedQty} panels`;
+  } else {
+    statusEl.style.background = "#FFEBEE";
+    statusEl.style.color = "#c62828";
+    statusEl.textContent = `Mismatch: ${serials.length} serial number${serials.length!==1?"s":""} entered, but expected ${expectedQty}`;
+  }
+}
+
 // ── Generate bulk package ──
 async function generateBulkPackage() {
   const serialText = document.getElementById("pkg_serial_numbers").value.trim();
@@ -2283,6 +2316,13 @@ async function generateBulkPackage() {
   }
   if (!_currentKitConfig) {
     toast("No kit config selected", "error");
+    return;
+  }
+
+  // Quantity check
+  const expectedQty = parseInt(document.getElementById("pkg_expected_qty").value) || 0;
+  if (expectedQty && serials.length !== expectedQty) {
+    toast(`Serial number count (${serials.length}) does not match expected quantity (${expectedQty})`, "error");
     return;
   }
 
@@ -2366,6 +2406,8 @@ async function generateBulkPackage() {
 
 function clearPackageForm() {
   document.getElementById("pkg_serial_numbers").value = "";
+  document.getElementById("pkg_expected_qty").value = "";
+  document.getElementById("pkg-qty-status").style.display = "none";
   document.getElementById("pkg_wbs").value = "";
   document.getElementById("pkg_facility_name").value = "";
   document.getElementById("pkg_project_name").value = "";
