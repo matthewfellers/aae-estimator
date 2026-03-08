@@ -5,7 +5,7 @@
 -- 1. Sticker library table
 CREATE TABLE IF NOT EXISTS public.shipping_sticker_library (
     id              bigserial PRIMARY KEY,
-    org_id          uuid NOT NULL DEFAULT current_org_id()
+    org_id          uuid NOT NULL DEFAULT public.current_org_id()
                         REFERENCES public.orgs(id),
     created_by      uuid DEFAULT auth.uid()
                         REFERENCES auth.users(id),
@@ -22,34 +22,34 @@ ALTER TABLE public.shipping_sticker_library ENABLE ROW LEVEL SECURITY;
 -- SELECT: all authenticated org members
 CREATE POLICY shipping_sticker_library_select ON public.shipping_sticker_library
     FOR SELECT TO authenticated
-    USING (org_id = current_org_id());
+    USING (org_id = public.current_org_id());
 
 -- INSERT: admin only
 CREATE POLICY shipping_sticker_library_insert ON public.shipping_sticker_library
     FOR INSERT TO authenticated
     WITH CHECK (
-        org_id = current_org_id()
-        AND current_user_role() = 'admin'
+        org_id = public.current_org_id()
+        AND public.is_admin()
     );
 
 -- DELETE (hard): admin only (soft-delete via RPC preferred)
 CREATE POLICY shipping_sticker_library_delete ON public.shipping_sticker_library
     FOR DELETE TO authenticated
     USING (
-        org_id = current_org_id()
-        AND current_user_role() = 'admin'
+        org_id = public.current_org_id()
+        AND public.is_admin()
     );
 
 -- UPDATE: admin only (for soft-delete flag)
 CREATE POLICY shipping_sticker_library_update ON public.shipping_sticker_library
     FOR UPDATE TO authenticated
     USING (
-        org_id = current_org_id()
-        AND current_user_role() = 'admin'
+        org_id = public.current_org_id()
+        AND public.is_admin()
     )
     WITH CHECK (
-        org_id = current_org_id()
-        AND current_user_role() = 'admin'
+        org_id = public.current_org_id()
+        AND public.is_admin()
     );
 
 -- Grants
@@ -67,7 +67,7 @@ BEGIN
     UPDATE public.shipping_sticker_library
        SET is_deleted = true
      WHERE id = p_template_id
-       AND org_id = current_org_id();
+       AND org_id = public.current_org_id();
 END;
 $$;
 
