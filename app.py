@@ -5453,6 +5453,372 @@ def delete_shipping_field_history():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# COMMON SHIPPING PACKAGES — Kit Config CRUD + Bulk Generate
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── API: List all shipping templates (for kit config admin dropdown) ──────────
+
+@app.route("/api/shipping/all-templates", methods=["GET"])
+@require_auth
+def list_all_shipping_templates():
+    """List all shipping templates across all units (for kit config admin)."""
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_templates")\
+            .select("id,template_name,template_group,version,unit_id")\
+            .eq("is_deleted", False)\
+            .order("template_name").execute()
+        return jsonify({"templates": result.data or []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Kit Config CRUD ─────────────────────────────────────────────────────
+
+@app.route("/api/shipping/kit-configs", methods=["GET"])
+@require_auth
+def list_kit_configs():
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_kit_configs")\
+            .select("id,config_name,description,options,created_at")\
+            .eq("is_deleted", False)\
+            .order("config_name").execute()
+        return jsonify({"configs": result.data or []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/kit-configs/<int:config_id>", methods=["GET"])
+@require_auth
+def get_kit_config(config_id):
+    try:
+        sb = get_user_sb()
+        config_result = sb.table("shipping_kit_configs")\
+            .select("*")\
+            .eq("id", config_id)\
+            .single().execute()
+        rules_result = sb.table("shipping_kit_doc_rules")\
+            .select("*")\
+            .eq("kit_config_id", config_id)\
+            .order("sort_order").execute()
+
+        # Enrich rules with template names
+        rules = rules_result.data or []
+        for r in rules:
+            if r.get("template_id"):
+                try:
+                    tmpl = sb.table("shipping_templates")\
+                        .select("template_name,template_group")\
+                        .eq("id", r["template_id"]).single().execute()
+                    r["template_name"] = tmpl.data.get("template_name", "")
+                except Exception:
+                    r["template_name"] = ""
+
+        return jsonify({
+            "config": config_result.data,
+            "rules": rules
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/kit-configs", methods=["POST"])
+@require_auth
+def create_kit_config():
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin role required"}), 403
+
+    data = request.get_json() or {}
+    config_name = data.get("config_name", "").strip()
+    if not config_name:
+        return jsonify({"error": "config_name is required"}), 400
+
+    try:
+        sb = get_user_sb()
+        config_row = {
+            "config_name": config_name,
+            "description": data.get("description", "").strip(),
+            "options": json.dumps(data.get("options", [])),
+        }
+        config_result = sb.table("shipping_kit_configs").insert(config_row).execute()
+        config_id = config_result.data[0]["id"]
+
+        # Insert rules
+        rules = data.get("rules", [])
+        for i, r in enumerate(rules):
+            rule_row = {
+                "kit_config_id": config_id,
+                "doc_type": r.get("doc_type", "sticker"),
+                "template_id": r.get("template_id"),
+                "template_group": r.get("template_group", ""),
+                "packing_tmpl_id": r.get("packing_tmpl_id"),
+                "doc_label": r.get("doc_label", ""),
+                "copies_per_sn": r.get("copies_per_sn", 1),
+                "per_page": r.get("per_page", 1),
+                "condition": r.get("condition", "always"),
+                "folder_path": r.get("folder_path", ""),
+                "sort_order": r.get("sort_order", i),
+            }
+            sb.table("shipping_kit_doc_rules").insert(rule_row).execute()
+
+        audit_log("create_kit_config", "shipping_kit_config", config_id,
+                  {"config_name": config_name})
+        return jsonify({"id": config_id, "success": True}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/kit-configs/<int:config_id>", methods=["PUT"])
+@require_auth
+def update_kit_config(config_id):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin role required"}), 403
+
+    data = request.get_json() or {}
+    try:
+        sb = get_user_sb()
+        update = {
+            "config_name": data.get("config_name", "").strip(),
+            "description": data.get("description", "").strip(),
+            "options": json.dumps(data.get("options", [])),
+            "updated_at": datetime.now().isoformat(),
+        }
+        sb.table("shipping_kit_configs").update(update)\
+            .eq("id", config_id).execute()
+
+        # Replace rules: delete existing, re-insert
+        sb.table("shipping_kit_doc_rules")\
+            .delete().eq("kit_config_id", config_id).execute()
+
+        rules = data.get("rules", [])
+        for i, r in enumerate(rules):
+            rule_row = {
+                "kit_config_id": config_id,
+                "doc_type": r.get("doc_type", "sticker"),
+                "template_id": r.get("template_id"),
+                "template_group": r.get("template_group", ""),
+                "packing_tmpl_id": r.get("packing_tmpl_id"),
+                "doc_label": r.get("doc_label", ""),
+                "copies_per_sn": r.get("copies_per_sn", 1),
+                "per_page": r.get("per_page", 1),
+                "condition": r.get("condition", "always"),
+                "folder_path": r.get("folder_path", ""),
+                "sort_order": r.get("sort_order", i),
+            }
+            sb.table("shipping_kit_doc_rules").insert(rule_row).execute()
+
+        audit_log("update_kit_config", "shipping_kit_config", config_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/kit-configs/<int:config_id>", methods=["DELETE"])
+@require_auth
+def delete_kit_config(config_id):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin role required"}), 403
+    try:
+        sb = get_user_sb()
+        sb.rpc("soft_delete_kit_config", {"p_config_id": config_id}).execute()
+        audit_log("delete_kit_config", "shipping_kit_config", config_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Bulk Generate (core endpoint) ───────────────────────────────────────
+
+@app.route("/api/shipping/bulk-generate", methods=["POST"])
+@require_auth
+def bulk_generate_shipping_package():
+    """Generate a ZIP file containing all packing slips and shipping stickers
+    for a kit configuration with the given serial numbers and options."""
+    import zipfile
+
+    data = request.get_json() or {}
+    config_id = data.get("config_id")
+    serial_numbers = data.get("serial_numbers", [])
+    field_values = data.get("field_values", {})
+    options = data.get("options", {})
+    packing_slip_data = data.get("packing_slip_data", {})
+    rio_packing_slip_data = data.get("rio_packing_slip_data")
+
+    if not config_id:
+        return jsonify({"error": "config_id is required"}), 400
+    if not serial_numbers:
+        return jsonify({"error": "At least one serial number is required"}), 400
+
+    try:
+        sb = get_user_sb()
+
+        # 1. Load kit config + rules
+        config_result = sb.table("shipping_kit_configs")\
+            .select("*").eq("id", config_id).single().execute()
+        config = config_result.data
+
+        rules_result = sb.table("shipping_kit_doc_rules")\
+            .select("*").eq("kit_config_id", config_id)\
+            .order("sort_order").execute()
+        rules = rules_result.data or []
+
+        # 2. Filter rules by selected options
+        active_rules = []
+        for r in rules:
+            condition = r.get("condition", "always")
+            if condition == "always":
+                active_rules.append(r)
+            elif options.get(condition):
+                active_rules.append(r)
+
+        # 3. Build ZIP
+        zip_buf = io.BytesIO()
+        doc_count = 0
+
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+
+            for rule in active_rules:
+                doc_type = rule.get("doc_type", "sticker")
+                folder = rule.get("folder_path", "").strip()
+                if folder and not folder.endswith("/"):
+                    folder += "/"
+
+                if doc_type == "packing_slip":
+                    # Generate packing slip Excel
+                    ps_data = packing_slip_data
+                    # If this is a RIO-520 packing slip, use the RIO data
+                    if rule.get("condition") != "always" and rio_packing_slip_data:
+                        ps_data = rio_packing_slip_data
+
+                    slip_data = {
+                        "sold_to": ps_data.get("sold_to", ""),
+                        "ship_to": ps_data.get("ship_to", ""),
+                        "attn": ps_data.get("attn", ""),
+                        "sales_order": ps_data.get("sales_order", ""),
+                        "customer_order": ps_data.get("customer_order", ""),
+                        "order_date": ps_data.get("order_date", ""),
+                        "ship_date": ps_data.get("ship_date", ""),
+                        "fob": ps_data.get("fob", ""),
+                        "terms": ps_data.get("terms", ""),
+                        "project_name": field_values.get("PROJECT_NAME", ""),
+                        "wbs": field_values.get("WBS", ""),
+                    }
+                    items = ps_data.get("items", [])
+
+                    excel_buf = generate_packing_slip_excel(slip_data, items)
+                    safe_facility = field_values.get("FACILITY_NAME", "Package").replace(" ", "_")[:30]
+                    safe_so = ps_data.get("sales_order", "").replace(" ", "_").replace("/", "-")[:20]
+                    ps_filename = f"{safe_facility} Packing Slip {safe_so}.xlsx"
+                    zf.writestr(f"{folder}{ps_filename}", excel_buf.getvalue())
+                    doc_count += 1
+
+                elif doc_type == "sticker":
+                    # Load the DOCX template
+                    template_id = rule.get("template_id")
+                    if not template_id:
+                        continue
+
+                    tmpl_result = sb.table("shipping_templates")\
+                        .select("file_data,template_name")\
+                        .eq("id", template_id)\
+                        .single().execute()
+                    template_bytes = base64.b64decode(tmpl_result.data["file_data"])
+
+                    per_page = rule.get("per_page", 1)
+                    copies_per_sn = rule.get("copies_per_sn", 1)
+
+                    if per_page == 2:
+                        # Half-page (2-up layout): pair serial numbers
+                        for pair_idx in range(0, len(serial_numbers), 2):
+                            sn1 = serial_numbers[pair_idx]
+                            sn2 = serial_numbers[pair_idx + 1] if pair_idx + 1 < len(serial_numbers) else ""
+
+                            # For 2-up, generate with SN1 values and add SN2 as SERIAL_NUMBER_2
+                            fv = {**field_values, "SERIAL_NUMBER": sn1, "SERIAL_NUMBER_2": sn2}
+                            doc_buf = generate_shipping_doc(template_bytes, fv)
+
+                            sn_label = f"SN-{sn1}"
+                            if sn2:
+                                sn_label += f", SN-{sn2}"
+                            safe_label = rule.get("doc_label", "Sticker").replace(" ", "_")[:30]
+                            filename = f"{rule.get('doc_label', 'Sticker')} ({sn_label}).docx"
+                            zf.writestr(f"{folder}{filename}", doc_buf.getvalue())
+                            doc_count += 1
+
+                    else:
+                        # Full page: one doc per serial number per copy
+                        for sn in serial_numbers:
+                            fv = {**field_values, "SERIAL_NUMBER": sn}
+                            doc_buf = generate_shipping_doc(template_bytes, fv)
+
+                            for copy_num in range(copies_per_sn):
+                                filename = f"{rule.get('doc_label', 'Sticker')} SN-{sn}"
+                                if copies_per_sn > 1:
+                                    filename += f" ({copy_num + 1})"
+                                filename += ".docx"
+                                zf.writestr(f"{folder}{filename}", doc_buf.getvalue())
+                                doc_count += 1
+
+        # 4. Save job to history
+        job_row = {
+            "kit_config_id": config_id,
+            "config_name": config.get("config_name", ""),
+            "serial_numbers": json.dumps(serial_numbers),
+            "field_values": json.dumps(field_values),
+            "options_selected": json.dumps(options),
+            "doc_count": doc_count,
+        }
+        sb.table("shipping_bulk_jobs").insert(job_row).execute()
+
+        audit_log("bulk_generate_shipping", "shipping_kit_config", config_id,
+                  {"serial_numbers": serial_numbers, "doc_count": doc_count})
+
+        # 5. Return ZIP
+        zip_buf.seek(0)
+        safe_config = config.get("config_name", "Package").replace(" ", "_")[:30]
+        today = datetime.now().strftime("%Y-%m-%d")
+        zip_name = f"Shipping_Docs_{safe_config}_{today}.zip"
+
+        return send_file(zip_buf,
+                         mimetype="application/zip",
+                         as_attachment=True,
+                         download_name=zip_name)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Bulk Job History ────────────────────────────────────────────────────
+
+@app.route("/api/shipping/bulk-history", methods=["GET"])
+@require_auth
+def list_bulk_history():
+    try:
+        sb = get_user_sb()
+        result = sb.table("shipping_bulk_jobs")\
+            .select("id,config_name,serial_numbers,options_selected,doc_count,generated_at,created_by")\
+            .eq("is_deleted", False)\
+            .order("generated_at", desc=True)\
+            .limit(50).execute()
+        return jsonify({"jobs": result.data or []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/shipping/bulk-history/<int:job_id>", methods=["DELETE"])
+@require_auth
+def delete_bulk_history(job_id):
+    try:
+        sb = get_user_sb()
+        sb.rpc("soft_delete_bulk_job", {"p_job_id": job_id}).execute()
+        audit_log("delete_bulk_job", "shipping_bulk_job", job_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SCHEDULING MODULE + EMPLOYEE PORTAL — Page Routes + API Endpoints
 # ══════════════════════════════════════════════════════════════════════════════
 

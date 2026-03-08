@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AAE Automation — Packing Slips</title>
+<title>AAE Automation — Packing Slips & Shipping Documents</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -388,7 +388,7 @@ a { color: var(--primary); text-decoration: none; }
     <img src="/static/aae_logo.jpg" alt="AAE" class="header-logo" onerror="this.style.display='none'">
     <div>
       <div class="header-brand">AAE <span>AUTO</span>MATION</div>
-      <div class="header-cert">PACKING SLIP MODULE</div>
+      <div class="header-cert">PACKING SLIPS & SHIPPING DOCUMENTS</div>
     </div>
   </div>
   <div class="header-right">
@@ -404,7 +404,7 @@ a { color: var(--primary); text-decoration: none; }
 <!-- LANDING — Module Cards -->
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
 <div id="view-landing" class="main">
-  <div class="page-title">PACKING SLIPS</div>
+  <div class="page-title">PACKING SLIPS & SHIPPING DOCUMENTS</div>
   <div class="page-subtitle">Select a workflow to get started.</div>
 
   <div class="module-grid">
@@ -419,6 +419,13 @@ a { color: var(--primary); text-decoration: none; }
       <div class="module-icon">&#128230;</div>
       <div class="module-title">COMMON PACKING SLIP</div>
       <div class="module-desc">Quick-ship using saved templates. Pick a template, fill in the job details, and download — fast workflow for daily use.</div>
+      <div class="module-badge badge-active">Active</div>
+    </a>
+
+    <a class="module-card" onclick="showView('packages')">
+      <div class="module-icon">&#128230;</div>
+      <div class="module-title">COMMON SHIPPING PACKAGES</div>
+      <div class="module-desc">Generate complete shipping document packages. Select a kit, enter serial numbers, and download all packing slips and stickers in one ZIP.</div>
       <div class="module-badge badge-active">Active</div>
     </a>
 
@@ -758,6 +765,325 @@ a { color: var(--primary); text-decoration: none; }
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- COMMON SHIPPING PACKAGES TAB -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-packages" class="tab-panel">
+  <button class="view-back" onclick="showView('landing')">&larr; Back to Packing Slips</button>
+
+  <!-- ── Kit Config Selector ── -->
+  <div id="pkg-select-config">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem">
+      <div>
+        <div class="page-title" style="font-size:1.3rem">COMMON SHIPPING PACKAGES</div>
+        <div class="page-subtitle" style="margin-bottom:0">Select a kit configuration to generate a shipping package.</div>
+      </div>
+      <button class="btn btn-primary btn-sm" id="btn-add-kit-config" style="display:none" onclick="showKitConfigModal()">+ New Kit Config</button>
+    </div>
+    <div id="kit-config-grid" class="module-grid" style="gap:1rem"></div>
+    <div id="no-kit-configs" style="display:none;text-align:center;padding:3rem;color:var(--text-muted)">
+      No kit configurations yet. An admin can create one.
+    </div>
+  </div>
+
+  <!-- ── Generation Form (shown after selecting a config) ── -->
+  <div id="pkg-generate-form" style="display:none">
+    <button class="view-back" onclick="backToKitSelect()">&larr; Back to Kit Configs</button>
+    <div class="page-title" style="font-size:1.3rem" id="pkg-config-title"></div>
+
+    <!-- Serial Numbers -->
+    <div class="card">
+      <div class="card-title">SERIAL NUMBERS</div>
+      <div class="field">
+        <label>Enter serial numbers (one per line)</label>
+        <textarea id="pkg_serial_numbers" rows="5" placeholder="6011&#10;6033&#10;6035"></textarea>
+      </div>
+    </div>
+
+    <!-- Options (dynamic checkboxes from config) -->
+    <div class="card" id="pkg-options-card">
+      <div class="card-title">OPTIONS</div>
+      <div id="pkg-options-area" style="display:flex;flex-wrap:wrap;gap:1rem"></div>
+    </div>
+
+    <!-- Common Fields -->
+    <div class="card">
+      <div class="card-title">COMMON FIELDS</div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div class="field">
+          <label>WBS #</label>
+          <div class="dropdown-wrap">
+            <input type="text" id="pkg_wbs" placeholder="e.g. 7837.01">
+            <button class="dropdown-btn" onclick="showFieldDropdown('pkg_wbs','pkg_wbs',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_pkg_wbs"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Facility Name</label>
+          <div class="dropdown-wrap">
+            <input type="text" id="pkg_facility_name" placeholder="e.g. Artesia">
+            <button class="dropdown-btn" onclick="showFieldDropdown('pkg_facility_name','pkg_facility_name',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_pkg_facility_name"></div>
+          </div>
+        </div>
+      </div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div class="field">
+          <label>Project Name</label>
+          <div class="dropdown-wrap">
+            <input type="text" id="pkg_project_name" placeholder="e.g. Artesia Wellhead">
+            <button class="dropdown-btn" onclick="showFieldDropdown('pkg_project_name','pkg_project_name',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_pkg_project_name"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Ownership Text</label>
+          <div class="dropdown-wrap">
+            <input type="text" id="pkg_ownership_text" placeholder="e.g. DEVON OWNED">
+            <button class="dropdown-btn" onclick="showFieldDropdown('pkg_ownership_text','pkg_ownership_text',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_pkg_ownership_text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Packing Slip Details (main) -->
+    <div class="card" id="pkg-packing-card">
+      <div class="card-title">PACKING SLIP DETAILS</div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div class="field">
+          <label>Sold To</label>
+          <div class="dropdown-wrap">
+            <textarea id="pkg_ps_sold_to" rows="3" placeholder="Company name and address"></textarea>
+            <button class="dropdown-btn" onclick="showFieldDropdown('pkg_ps_sold_to','pkg_ps_sold_to',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_pkg_ps_sold_to"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Ship To</label>
+          <div class="dropdown-wrap">
+            <textarea id="pkg_ps_ship_to" rows="3" placeholder="Destination address"></textarea>
+            <button class="dropdown-btn" onclick="showFieldDropdown('pkg_ps_ship_to','pkg_ps_ship_to',this)">&#9660;</button>
+            <div class="dropdown-menu" id="dd_pkg_ps_ship_to"></div>
+          </div>
+        </div>
+      </div>
+      <div class="form-grid-3" style="margin-bottom:1rem">
+        <div class="field">
+          <label>ATTN</label>
+          <input type="text" id="pkg_ps_attn" placeholder="Attention">
+        </div>
+        <div class="field">
+          <label>Sales Order #</label>
+          <input type="text" id="pkg_ps_sales_order" placeholder="e.g. 7837.01">
+        </div>
+        <div class="field">
+          <label>Customer Order #</label>
+          <input type="text" id="pkg_ps_customer_order" placeholder="">
+        </div>
+      </div>
+      <div class="form-grid-4">
+        <div class="field">
+          <label>Order Date</label>
+          <input type="date" id="pkg_ps_order_date">
+        </div>
+        <div class="field">
+          <label>Ship Date</label>
+          <input type="date" id="pkg_ps_ship_date">
+        </div>
+        <div class="field">
+          <label>F.O.B.</label>
+          <input type="text" id="pkg_ps_fob" placeholder="e.g. Origin">
+        </div>
+        <div class="field">
+          <label>Terms</label>
+          <input type="text" id="pkg_ps_terms" placeholder="e.g. Net 30">
+        </div>
+      </div>
+
+      <!-- Packing Slip Line Items -->
+      <div style="margin-top:1.25rem">
+        <div class="card-title" style="font-size:0.95rem">LINE ITEMS</div>
+        <div class="toolbar">
+          <button class="btn btn-secondary btn-sm" onclick="addPkgItemRow()">+ Add Item</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="items-table" id="pkg-items-table">
+            <thead>
+              <tr>
+                <th class="col-item">Item</th>
+                <th class="col-qty">Qty Ordered</th>
+                <th class="col-qty">Qty Shipped</th>
+                <th class="col-part">Part Number</th>
+                <th class="col-desc">Description</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody id="pkg-items-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIO-520 Packing Slip Details (conditional) -->
+    <div class="card" id="pkg-rio-packing-card" style="display:none">
+      <div class="card-title">RIO-520 PACKING SLIP DETAILS</div>
+      <div class="form-grid-3" style="margin-bottom:1rem">
+        <div class="field">
+          <label>Sales Order #</label>
+          <input type="text" id="pkg_rio_sales_order" placeholder="e.g. 7980.02">
+        </div>
+        <div class="field">
+          <label>Customer Order #</label>
+          <input type="text" id="pkg_rio_customer_order" placeholder="">
+        </div>
+        <div class="field">
+          <label>ATTN</label>
+          <input type="text" id="pkg_rio_attn" placeholder="">
+        </div>
+      </div>
+
+      <div style="margin-top:1rem">
+        <div class="card-title" style="font-size:0.95rem">RIO-520 LINE ITEMS</div>
+        <div class="toolbar">
+          <button class="btn btn-secondary btn-sm" onclick="addPkgRioItemRow()">+ Add Item</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="items-table" id="pkg-rio-items-table">
+            <thead>
+              <tr>
+                <th class="col-item">Item</th>
+                <th class="col-qty">Qty Ordered</th>
+                <th class="col-qty">Qty Shipped</th>
+                <th class="col-part">Part Number</th>
+                <th class="col-desc">Description</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody id="pkg-rio-items-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Document Preview -->
+    <div class="card">
+      <div class="card-title">DOCUMENT PREVIEW</div>
+      <div id="pkg-doc-preview" style="font-size:0.88rem;color:var(--text-muted)">
+        Enter serial numbers and select options to see what will be generated.
+      </div>
+    </div>
+
+    <!-- Generate Button -->
+    <div class="btn-row">
+      <button class="btn btn-success" id="btn-generate-pkg" onclick="generateBulkPackage()">Generate All & Download ZIP</button>
+      <button class="btn btn-ghost" onclick="clearPackageForm()">Clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- KIT CONFIG MODAL (Admin) -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-kit-config" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;justify-content:center;align-items:center">
+  <div class="modal" style="background:#fff;border-radius:12px;padding:28px 32px;width:640px;max-width:calc(100vw - 2rem);max-height:85vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.18)">
+    <div class="card-title" id="kit-modal-title">NEW KIT CONFIGURATION</div>
+    <input type="hidden" id="kit_editing_id" value="">
+
+    <div class="form-grid" style="margin-bottom:1rem">
+      <div class="field">
+        <label>Config Name</label>
+        <input type="text" id="kit_config_name" placeholder="e.g. DBBU-Wellhead-Kit">
+      </div>
+      <div class="field">
+        <label>Description</label>
+        <input type="text" id="kit_config_desc" placeholder="Optional description">
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div style="margin-bottom:1.25rem">
+      <div class="card-title" style="font-size:0.95rem">OPTIONS (Checkboxes)</div>
+      <div id="kit-options-list"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input type="text" id="kit_new_option_key" placeholder="key (e.g. rio_520)" style="flex:1;padding:6px 8px;border:1.5px solid var(--border);border-radius:4px;font-size:0.85rem">
+        <input type="text" id="kit_new_option_label" placeholder="label (e.g. Include RIO-520?)" style="flex:1;padding:6px 8px;border:1.5px solid var(--border);border-radius:4px;font-size:0.85rem">
+        <button class="btn btn-secondary btn-sm" onclick="addKitOption()">+ Add</button>
+      </div>
+    </div>
+
+    <!-- Doc Rules -->
+    <div style="margin-bottom:1.25rem">
+      <div class="card-title" style="font-size:0.95rem">DOCUMENT RULES</div>
+      <div id="kit-rules-list" style="max-height:300px;overflow-y:auto"></div>
+      <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="showAddRuleRow()">+ Add Rule</button>
+    </div>
+
+    <!-- Add Rule Row (hidden by default) -->
+    <div id="kit-add-rule-form" style="display:none;background:#f8f9fa;border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:1rem">
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="field">
+          <label>Doc Label</label>
+          <input type="text" id="rule_doc_label" placeholder="e.g. Cable Sticker">
+        </div>
+        <div class="field">
+          <label>Doc Type</label>
+          <select id="rule_doc_type">
+            <option value="sticker">Sticker (DOCX)</option>
+            <option value="packing_slip">Packing Slip (Excel)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-grid-3" style="margin-bottom:8px">
+        <div class="field">
+          <label>Template</label>
+          <select id="rule_template_id"><option value="">-- Select --</option></select>
+        </div>
+        <div class="field">
+          <label>Copies / SN</label>
+          <input type="number" id="rule_copies_per_sn" value="1" min="1" max="10">
+        </div>
+        <div class="field">
+          <label>Per Page</label>
+          <select id="rule_per_page">
+            <option value="1">1 (Full Page)</option>
+            <option value="2">2 (Half Page)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-grid-3" style="margin-bottom:8px">
+        <div class="field">
+          <label>Condition</label>
+          <select id="rule_condition">
+            <option value="always">Always</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Folder Path</label>
+          <input type="text" id="rule_folder_path" placeholder="e.g. Shipping Labels/">
+        </div>
+        <div class="field">
+          <label>Sort Order</label>
+          <input type="number" id="rule_sort_order" value="0" min="0">
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:8px" id="rule-packing-tmpl-wrap" style="display:none">
+        <label>Packing Template</label>
+        <select id="rule_packing_tmpl_id"><option value="">-- Select --</option></select>
+      </div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="addRuleToConfig()">Add Rule</button>
+        <button class="btn btn-ghost btn-sm" onclick="hideAddRuleRow()">Cancel</button>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="saveKitConfig()">Save Configuration</button>
+      <button class="btn btn-ghost" onclick="closeKitConfigModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
 <!-- HISTORY TAB -->
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
 <div id="tab-history" class="tab-panel">
@@ -929,6 +1255,7 @@ function showView(name) {
     document.getElementById("tab-"+name).classList.add("active");
     if (name === "history") loadHistory();
     if (name === "common") loadTemplatesForCommon();
+    if (name === "packages") loadKitConfigs();
   }
   window.scrollTo(0, 0);
 }
@@ -1697,6 +2024,625 @@ async function deleteSlip(id) {
     if (!resp.ok) { const r=await resp.json(); throw new Error(r.error); }
     toast("Packing slip deleted");
     loadHistory();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMMON SHIPPING PACKAGES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _currentKitConfig = null;
+let _kitConfigs = [];
+let _kitRules = [];       // rules being edited in modal
+let _kitOptions = [];     // options being edited in modal
+let _pkgItemNum = 0;
+let _pkgRioItemNum = 0;
+let _allShippingTemplates = [];
+let _allPackingTemplates = [];
+
+// ── Load kit configs for the selection grid ──
+async function loadKitConfigs() {
+  // Show admin button
+  if (_isAdmin) document.getElementById("btn-add-kit-config").style.display = "";
+
+  try {
+    const resp = await fetch("/api/shipping/kit-configs", { headers: authHeadersNoBody() });
+    if (!resp.ok) throw new Error("Failed to load kit configs");
+    const data = await resp.json();
+    _kitConfigs = data.configs || [];
+
+    const grid = document.getElementById("kit-config-grid");
+    const noEl = document.getElementById("no-kit-configs");
+
+    if (_kitConfigs.length === 0) {
+      grid.innerHTML = "";
+      noEl.style.display = "";
+      return;
+    }
+
+    noEl.style.display = "none";
+    grid.innerHTML = _kitConfigs.map(c => `
+      <div class="module-card" onclick="selectKitConfig(${c.id})" style="padding:1.5rem">
+        <div class="module-icon">&#128230;</div>
+        <div class="module-title" style="font-size:1.1rem">${escHtml(c.config_name)}</div>
+        <div class="module-desc">${escHtml(c.description || "")}</div>
+        ${_isAdmin ? `<div style="margin-top:8px;display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editKitConfig(${c.id})">Edit</button>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteKitConfig(${c.id})" style="color:#c62828">Delete</button>
+        </div>` : ""}
+      </div>
+    `).join("");
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ── Select a kit config and show the generation form ──
+async function selectKitConfig(configId) {
+  try {
+    const resp = await fetch(`/api/shipping/kit-configs/${configId}`, { headers: authHeadersNoBody() });
+    if (!resp.ok) throw new Error("Failed to load kit config");
+    const data = await resp.json();
+    _currentKitConfig = data.config;
+    _currentKitConfig.rules = data.rules || [];
+
+    document.getElementById("pkg-select-config").style.display = "none";
+    document.getElementById("pkg-generate-form").style.display = "";
+    document.getElementById("pkg-config-title").textContent = _currentKitConfig.config_name;
+
+    // Render dynamic option checkboxes
+    const optArea = document.getElementById("pkg-options-area");
+    const options = _currentKitConfig.options || [];
+    if (options.length === 0) {
+      document.getElementById("pkg-options-card").style.display = "none";
+    } else {
+      document.getElementById("pkg-options-card").style.display = "";
+      optArea.innerHTML = options.map(opt => `
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.9rem;cursor:pointer">
+          <input type="checkbox" class="pkg-option-chk" data-key="${escHtml(opt.key)}" onchange="onPkgOptionChange()" style="accent-color:var(--primary)">
+          ${escHtml(opt.label)}
+        </label>
+      `).join("");
+    }
+
+    // Init line items
+    document.getElementById("pkg-items-body").innerHTML = "";
+    _pkgItemNum = 0;
+    addPkgItemRow();
+
+    document.getElementById("pkg-rio-items-body").innerHTML = "";
+    _pkgRioItemNum = 0;
+
+    // Show/hide RIO packing card based on initial state
+    onPkgOptionChange();
+    updateDocPreview();
+
+  } catch(e) { toast(e.message, "error"); }
+}
+
+function backToKitSelect() {
+  document.getElementById("pkg-select-config").style.display = "";
+  document.getElementById("pkg-generate-form").style.display = "none";
+  _currentKitConfig = null;
+}
+
+// ── Option change handler ──
+function onPkgOptionChange() {
+  const selected = getSelectedOptions();
+
+  // Show/hide RIO-520 packing card
+  const rioCard = document.getElementById("pkg-rio-packing-card");
+  if (selected.rio_520) {
+    rioCard.style.display = "";
+    if (document.getElementById("pkg-rio-items-body").children.length === 0) {
+      addPkgRioItemRow();
+    }
+  } else {
+    rioCard.style.display = "none";
+  }
+
+  updateDocPreview();
+}
+
+function getSelectedOptions() {
+  const opts = {};
+  document.querySelectorAll(".pkg-option-chk").forEach(chk => {
+    opts[chk.dataset.key] = chk.checked;
+  });
+  return opts;
+}
+
+// ── Line item helpers ──
+function addPkgItemRow(data) {
+  _pkgItemNum += 10;
+  const num = data?.item_number || _pkgItemNum;
+  if (num >= _pkgItemNum) _pkgItemNum = num;
+
+  const tbody = document.getElementById("pkg-items-body");
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="text" class="pkg-item-num" value="${String(num).padStart(5,'0')}" style="text-align:center"></td>
+    <td><input type="number" class="pkg-item-qty-ord" value="${data?.qty_ordered??''}" min="0"></td>
+    <td><input type="number" class="pkg-item-qty-ship" value="${data?.qty_shipped??''}" min="0"></td>
+    <td><input type="text" class="pkg-item-part" value="${escHtml(data?.part_number||'')}"></td>
+    <td><input type="text" class="pkg-item-desc" value="${escHtml(data?.description||'')}"></td>
+    <td><button class="remove-row-btn" onclick="this.closest('tr').remove()">&times;</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function addPkgRioItemRow(data) {
+  _pkgRioItemNum += 10;
+  const num = data?.item_number || _pkgRioItemNum;
+  if (num >= _pkgRioItemNum) _pkgRioItemNum = num;
+
+  const tbody = document.getElementById("pkg-rio-items-body");
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="text" class="pkg-rio-item-num" value="${String(num).padStart(5,'0')}" style="text-align:center"></td>
+    <td><input type="number" class="pkg-rio-item-qty-ord" value="${data?.qty_ordered??''}" min="0"></td>
+    <td><input type="number" class="pkg-rio-item-qty-ship" value="${data?.qty_shipped??''}" min="0"></td>
+    <td><input type="text" class="pkg-rio-item-part" value="${escHtml(data?.part_number||'')}"></td>
+    <td><input type="text" class="pkg-rio-item-desc" value="${escHtml(data?.description||'')}"></td>
+    <td><button class="remove-row-btn" onclick="this.closest('tr').remove()">&times;</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function collectPkgItems(prefix) {
+  const rows = document.querySelectorAll(`#${prefix}-items-body tr`);
+  const items = [];
+  rows.forEach(tr => {
+    const num = tr.querySelector(`.${prefix}-item-num`)?.value || "";
+    const qtyOrd = tr.querySelector(`.${prefix}-item-qty-ord`)?.value || "";
+    const qtyShip = tr.querySelector(`.${prefix}-item-qty-ship`)?.value || "";
+    const part = tr.querySelector(`.${prefix}-item-part`)?.value || "";
+    const desc = tr.querySelector(`.${prefix}-item-desc`)?.value || "";
+    if (part || desc || qtyOrd) {
+      items.push({
+        item_number: parseInt(num) || 10,
+        qty_ordered: parseInt(qtyOrd) || 0,
+        qty_shipped: parseInt(qtyShip) || 0,
+        part_number: part,
+        description: desc
+      });
+    }
+  });
+  return items;
+}
+
+// ── Document preview ──
+function updateDocPreview() {
+  const previewEl = document.getElementById("pkg-doc-preview");
+  if (!_currentKitConfig) {
+    previewEl.innerHTML = "Select a kit configuration first.";
+    return;
+  }
+
+  const serialText = document.getElementById("pkg_serial_numbers").value.trim();
+  const serials = serialText ? serialText.split("\n").map(s => s.trim()).filter(Boolean) : [];
+  const options = getSelectedOptions();
+  const rules = _currentKitConfig.rules || [];
+
+  // Filter active rules
+  const activeRules = rules.filter(r => {
+    if (r.condition === "always") return true;
+    return options[r.condition] === true;
+  });
+
+  if (serials.length === 0) {
+    previewEl.innerHTML = "Enter serial numbers to see what will be generated.";
+    return;
+  }
+
+  let totalDocs = 0;
+  const lines = [];
+
+  // Group by folder
+  const folders = {};
+  activeRules.forEach(r => {
+    const folder = r.folder_path || "(root)";
+    if (!folders[folder]) folders[folder] = [];
+    folders[folder].push(r);
+  });
+
+  for (const [folder, folderRules] of Object.entries(folders)) {
+    lines.push(`<div style="margin-top:8px;font-weight:600">${escHtml(folder)}</div>`);
+    folderRules.forEach(r => {
+      let count;
+      if (r.doc_type === "packing_slip") {
+        count = 1;  // one packing slip total
+      } else if (r.per_page === 2) {
+        // Half-page: pairs of serial numbers
+        count = Math.ceil(serials.length / 2);
+      } else {
+        count = serials.length * (r.copies_per_sn || 1);
+      }
+      totalDocs += count;
+      lines.push(`<div style="padding-left:1rem">${escHtml(r.doc_label)} &mdash; ${count} file${count!==1?"s":""}</div>`);
+    });
+  }
+
+  previewEl.innerHTML = `
+    <div style="margin-bottom:8px;font-weight:600;color:var(--text)">
+      ${serials.length} serial number${serials.length!==1?"s":""} &times; ${activeRules.length} active rule${activeRules.length!==1?"s":""} = <span style="color:var(--green)">${totalDocs} total documents</span>
+    </div>
+    ${lines.join("")}
+  `;
+}
+
+// Attach serial number change listener
+document.getElementById("pkg_serial_numbers")?.addEventListener("input", updateDocPreview);
+
+// ── Generate bulk package ──
+async function generateBulkPackage() {
+  const serialText = document.getElementById("pkg_serial_numbers").value.trim();
+  const serials = serialText.split("\n").map(s => s.trim()).filter(Boolean);
+
+  if (serials.length === 0) {
+    toast("Enter at least one serial number", "error");
+    return;
+  }
+  if (!_currentKitConfig) {
+    toast("No kit config selected", "error");
+    return;
+  }
+
+  const options = getSelectedOptions();
+  const fieldValues = {
+    WBS: document.getElementById("pkg_wbs").value.trim(),
+    FACILITY_NAME: document.getElementById("pkg_facility_name").value.trim(),
+    PROJECT_NAME: document.getElementById("pkg_project_name").value.trim(),
+    OWNERSHIP_TEXT: document.getElementById("pkg_ownership_text").value.trim()
+  };
+
+  const packingSlipData = {
+    sold_to: document.getElementById("pkg_ps_sold_to").value.trim(),
+    ship_to: document.getElementById("pkg_ps_ship_to").value.trim(),
+    attn: document.getElementById("pkg_ps_attn").value.trim(),
+    sales_order: document.getElementById("pkg_ps_sales_order").value.trim(),
+    customer_order: document.getElementById("pkg_ps_customer_order").value.trim(),
+    order_date: document.getElementById("pkg_ps_order_date").value,
+    ship_date: document.getElementById("pkg_ps_ship_date").value,
+    fob: document.getElementById("pkg_ps_fob").value.trim(),
+    terms: document.getElementById("pkg_ps_terms").value.trim(),
+    items: collectPkgItems("pkg")
+  };
+
+  // RIO-520 packing slip data
+  let rioPackingSlipData = null;
+  if (options.rio_520) {
+    rioPackingSlipData = {
+      sold_to: document.getElementById("pkg_ps_sold_to").value.trim(),
+      ship_to: document.getElementById("pkg_ps_ship_to").value.trim(),
+      attn: document.getElementById("pkg_rio_attn").value.trim(),
+      sales_order: document.getElementById("pkg_rio_sales_order").value.trim(),
+      customer_order: document.getElementById("pkg_rio_customer_order").value.trim(),
+      order_date: document.getElementById("pkg_ps_order_date").value,
+      ship_date: document.getElementById("pkg_ps_ship_date").value,
+      fob: document.getElementById("pkg_ps_fob").value.trim(),
+      terms: document.getElementById("pkg_ps_terms").value.trim(),
+      items: collectPkgItems("pkg-rio")
+    };
+  }
+
+  const btn = document.getElementById("btn-generate-pkg");
+  btn.disabled = true;
+  btn.textContent = "Generating...";
+
+  try {
+    const resp = await fetch("/api/shipping/bulk-generate", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        config_id: _currentKitConfig.id,
+        serial_numbers: serials,
+        field_values: fieldValues,
+        options: options,
+        packing_slip_data: packingSlipData,
+        rio_packing_slip_data: rioPackingSlipData
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || "Generation failed");
+    }
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = resp.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g,"")
+                 || `Shipping_Docs_${_currentKitConfig.config_name}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("Shipping package generated successfully!");
+  } catch(e) {
+    toast(e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Generate All & Download ZIP";
+  }
+}
+
+function clearPackageForm() {
+  document.getElementById("pkg_serial_numbers").value = "";
+  document.getElementById("pkg_wbs").value = "";
+  document.getElementById("pkg_facility_name").value = "";
+  document.getElementById("pkg_project_name").value = "";
+  document.getElementById("pkg_ownership_text").value = "";
+  document.getElementById("pkg_ps_sold_to").value = "";
+  document.getElementById("pkg_ps_ship_to").value = "";
+  document.getElementById("pkg_ps_attn").value = "";
+  document.getElementById("pkg_ps_sales_order").value = "";
+  document.getElementById("pkg_ps_customer_order").value = "";
+  document.getElementById("pkg_ps_order_date").value = "";
+  document.getElementById("pkg_ps_ship_date").value = "";
+  document.getElementById("pkg_ps_fob").value = "";
+  document.getElementById("pkg_ps_terms").value = "";
+  document.getElementById("pkg-items-body").innerHTML = "";
+  _pkgItemNum = 0;
+  addPkgItemRow();
+  document.getElementById("pkg_rio_sales_order").value = "";
+  document.getElementById("pkg_rio_customer_order").value = "";
+  document.getElementById("pkg_rio_attn").value = "";
+  document.getElementById("pkg-rio-items-body").innerHTML = "";
+  _pkgRioItemNum = 0;
+  document.querySelectorAll(".pkg-option-chk").forEach(chk => chk.checked = false);
+  onPkgOptionChange();
+  updateDocPreview();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KIT CONFIG ADMIN (CRUD)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function showKitConfigModal(configId) {
+  document.getElementById("kit_editing_id").value = configId || "";
+  document.getElementById("kit_config_name").value = "";
+  document.getElementById("kit_config_desc").value = "";
+  _kitOptions = [];
+  _kitRules = [];
+
+  // Load available shipping templates + packing templates for rule dropdowns
+  await loadAvailableTemplates();
+
+  if (configId) {
+    document.getElementById("kit-modal-title").textContent = "EDIT KIT CONFIGURATION";
+    try {
+      const resp = await fetch(`/api/shipping/kit-configs/${configId}`, { headers: authHeadersNoBody() });
+      const data = await resp.json();
+      const c = data.config;
+      document.getElementById("kit_config_name").value = c.config_name || "";
+      document.getElementById("kit_config_desc").value = c.description || "";
+      _kitOptions = c.options || [];
+      _kitRules = (data.rules || []).map(r => ({...r}));
+    } catch(e) { toast(e.message, "error"); return; }
+  } else {
+    document.getElementById("kit-modal-title").textContent = "NEW KIT CONFIGURATION";
+  }
+
+  renderKitOptions();
+  renderKitRules();
+  populateConditionDropdown();
+  document.getElementById("modal-kit-config").style.display = "flex";
+}
+
+function closeKitConfigModal() {
+  document.getElementById("modal-kit-config").style.display = "none";
+}
+
+async function loadAvailableTemplates() {
+  try {
+    // Load all shipping templates (across all units)
+    const resp1 = await fetch("/api/shipping/all-templates", { headers: authHeadersNoBody() });
+    if (resp1.ok) {
+      const data = await resp1.json();
+      _allShippingTemplates = data.templates || [];
+    }
+  } catch(e) { _allShippingTemplates = []; }
+
+  try {
+    // Load packing templates
+    const resp2 = await fetch("/api/packing-templates", { headers: authHeadersNoBody() });
+    if (resp2.ok) {
+      const data = await resp2.json();
+      _allPackingTemplates = data.templates || [];
+    }
+  } catch(e) { _allPackingTemplates = []; }
+
+  // Populate template dropdowns
+  const stSelect = document.getElementById("rule_template_id");
+  stSelect.innerHTML = '<option value="">-- Select Shipping Template --</option>';
+  _allShippingTemplates.forEach(t => {
+    stSelect.innerHTML += `<option value="${t.id}">${escHtml(t.template_name)}${t.template_group ? " ["+t.template_group+"]" : ""}</option>`;
+  });
+
+  const ptSelect = document.getElementById("rule_packing_tmpl_id");
+  ptSelect.innerHTML = '<option value="">-- Select Packing Template --</option>';
+  _allPackingTemplates.forEach(t => {
+    ptSelect.innerHTML += `<option value="${t.id}">${escHtml(t.template_name)}</option>`;
+  });
+}
+
+// ── Options management ──
+function renderKitOptions() {
+  const list = document.getElementById("kit-options-list");
+  if (_kitOptions.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;padding:4px 0">No options defined.</div>';
+    return;
+  }
+  list.innerHTML = _kitOptions.map((opt, i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f0f0f0">
+      <span style="font-weight:500;font-size:0.85rem;min-width:100px">${escHtml(opt.key)}</span>
+      <span style="flex:1;font-size:0.85rem;color:var(--text-muted)">${escHtml(opt.label)}</span>
+      <button class="btn btn-ghost btn-sm" onclick="removeKitOption(${i})" style="color:#c62828;padding:2px 6px">&times;</button>
+    </div>
+  `).join("");
+}
+
+function addKitOption() {
+  const key = document.getElementById("kit_new_option_key").value.trim();
+  const label = document.getElementById("kit_new_option_label").value.trim();
+  if (!key || !label) { toast("Key and label required", "error"); return; }
+  _kitOptions.push({ key, label });
+  document.getElementById("kit_new_option_key").value = "";
+  document.getElementById("kit_new_option_label").value = "";
+  renderKitOptions();
+  populateConditionDropdown();
+}
+
+function removeKitOption(idx) {
+  _kitOptions.splice(idx, 1);
+  renderKitOptions();
+  populateConditionDropdown();
+}
+
+function populateConditionDropdown() {
+  const sel = document.getElementById("rule_condition");
+  sel.innerHTML = '<option value="always">Always</option>';
+  _kitOptions.forEach(opt => {
+    sel.innerHTML += `<option value="${escHtml(opt.key)}">${escHtml(opt.label)}</option>`;
+  });
+}
+
+// ── Rules management ──
+function renderKitRules() {
+  const list = document.getElementById("kit-rules-list");
+  if (_kitRules.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;padding:8px 0">No rules defined.</div>';
+    return;
+  }
+  list.innerHTML = _kitRules.map((r, i) => {
+    const tmplName = r.template_name || _allShippingTemplates.find(t => t.id === r.template_id)?.template_name || "";
+    return `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #f0f0f0;font-size:0.85rem">
+      <span style="min-width:20px;color:var(--text-muted)">${i+1}.</span>
+      <span style="flex:1;font-weight:500">${escHtml(r.doc_label)}</span>
+      <span style="color:var(--text-muted)">${r.doc_type}</span>
+      <span style="color:var(--text-muted)">${escHtml(tmplName)}</span>
+      <span class="badge" style="background:#f0f0f0;color:#666">${r.condition}</span>
+      <span style="color:var(--text-muted)">${r.copies_per_sn||1}x</span>
+      <span style="color:var(--text-muted)">${r.folder_path||""}</span>
+      <button class="btn btn-ghost btn-sm" onclick="removeKitRule(${i})" style="color:#c62828;padding:2px 6px">&times;</button>
+    </div>`;
+  }).join("");
+}
+
+function showAddRuleRow() {
+  document.getElementById("kit-add-rule-form").style.display = "";
+  // Show/hide packing template selector based on doc type
+  document.getElementById("rule_doc_type").onchange = () => {
+    const isPacking = document.getElementById("rule_doc_type").value === "packing_slip";
+    document.getElementById("rule-packing-tmpl-wrap").style.display = isPacking ? "" : "none";
+  };
+}
+
+function hideAddRuleRow() {
+  document.getElementById("kit-add-rule-form").style.display = "none";
+}
+
+function addRuleToConfig() {
+  const docLabel = document.getElementById("rule_doc_label").value.trim();
+  const docType = document.getElementById("rule_doc_type").value;
+  const templateId = parseInt(document.getElementById("rule_template_id").value) || null;
+  const packingTmplId = parseInt(document.getElementById("rule_packing_tmpl_id").value) || null;
+  const copiesPerSn = parseInt(document.getElementById("rule_copies_per_sn").value) || 1;
+  const perPage = parseInt(document.getElementById("rule_per_page").value) || 1;
+  const condition = document.getElementById("rule_condition").value;
+  const folderPath = document.getElementById("rule_folder_path").value.trim();
+  const sortOrder = parseInt(document.getElementById("rule_sort_order").value) || 0;
+
+  if (!docLabel) { toast("Doc label is required", "error"); return; }
+
+  // Get template name for display
+  const tmpl = _allShippingTemplates.find(t => t.id === templateId);
+  const templateGroup = tmpl?.template_group || tmpl?.template_name || "";
+
+  _kitRules.push({
+    doc_label: docLabel,
+    doc_type: docType,
+    template_id: templateId,
+    template_group: templateGroup,
+    template_name: tmpl?.template_name || "",
+    packing_tmpl_id: packingTmplId,
+    copies_per_sn: copiesPerSn,
+    per_page: perPage,
+    condition: condition,
+    folder_path: folderPath,
+    sort_order: sortOrder
+  });
+
+  renderKitRules();
+  hideAddRuleRow();
+
+  // Reset form
+  document.getElementById("rule_doc_label").value = "";
+  document.getElementById("rule_copies_per_sn").value = "1";
+  document.getElementById("rule_per_page").value = "1";
+  document.getElementById("rule_folder_path").value = "";
+  document.getElementById("rule_sort_order").value = "0";
+}
+
+function removeKitRule(idx) {
+  _kitRules.splice(idx, 1);
+  renderKitRules();
+}
+
+// ── Save kit config ──
+async function saveKitConfig() {
+  const name = document.getElementById("kit_config_name").value.trim();
+  if (!name) { toast("Config name is required", "error"); return; }
+
+  const editingId = document.getElementById("kit_editing_id").value;
+  const payload = {
+    config_name: name,
+    description: document.getElementById("kit_config_desc").value.trim(),
+    options: _kitOptions,
+    rules: _kitRules.map(r => ({
+      doc_label: r.doc_label,
+      doc_type: r.doc_type,
+      template_id: r.template_id,
+      template_group: r.template_group || "",
+      packing_tmpl_id: r.packing_tmpl_id,
+      copies_per_sn: r.copies_per_sn,
+      per_page: r.per_page,
+      condition: r.condition,
+      folder_path: r.folder_path,
+      sort_order: r.sort_order
+    }))
+  };
+
+  try {
+    let resp;
+    if (editingId) {
+      resp = await fetch(`/api/shipping/kit-configs/${editingId}`, {
+        method: "PUT", headers: authHeaders(), body: JSON.stringify(payload)
+      });
+    } else {
+      resp = await fetch("/api/shipping/kit-configs", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(payload)
+      });
+    }
+    if (!resp.ok) { const r = await resp.json(); throw new Error(r.error); }
+    toast(editingId ? "Kit config updated" : "Kit config created");
+    closeKitConfigModal();
+    loadKitConfigs();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+function editKitConfig(id) {
+  showKitConfigModal(id);
+}
+
+async function deleteKitConfig(id) {
+  if (!confirm("Delete this kit configuration?")) return;
+  try {
+    const resp = await fetch(`/api/shipping/kit-configs/${id}`, {
+      method: "DELETE", headers: authHeadersNoBody()
+    });
+    if (!resp.ok) { const r=await resp.json(); throw new Error(r.error); }
+    toast("Kit config deleted");
+    loadKitConfigs();
   } catch(e) { toast(e.message, "error"); }
 }
 </script>
